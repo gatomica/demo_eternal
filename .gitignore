@@ -1,0 +1,53 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Dependencies (reinstalled with npm install)
+node_modules
+
+# Build output (recreated with npm run build)
+dist
+dist-ssr
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local environment files, which may hold secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Editor and OS clutter
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+
+# Hosting tool folders, if you deploy with them
+.vercel
+.netlify
