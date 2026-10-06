@@ -13,7 +13,19 @@ import {
   type Step,
   type Tier,
 } from "./combat";
-import { HealthBar, Shards, StickFigure, poseForIntent, type BarValues, type PoseName } from "./render";
+import { HealthBar, Scene, StickFigure, figureBox, poseForIntent, shotCamera, type BarValues, type PoseName, type SceneFigure, type SceneShot, type ShotCamera } from "./render";
+import {
+  actionCamera,
+  behind,
+  closeIn,
+  facingToward,
+  formation,
+  pushedAway,
+  sub,
+  yawOf,
+  lerpAngle,
+  type Vec,
+} from "./scene";
 
 type Screen = "menu" | "test";
 
@@ -213,16 +225,43 @@ function defaultSelection(fight: CombatState): Selection {
   return rows[1][0] ?? rows[2][0] ?? { kind: "player" };
 }
 
-/** How long each step of a turn's playback stays on screen. */
+/** How long each step of a turn's playback stays on screen (after the impact, for attacks). */
 const STEP_MS = 800;
+/** How long an attacker takes to close in on its target before the blow lands. */
+const APPROACH_MS = 320;
+/** How long a clean hit takes to knock its target back. */
+const KNOCK_MS = 260;
+/** How long everyone takes to settle into the planning view at the end of a turn. */
+const SETTLE_MS = 700;
+/** How long the planning camera takes to ease toward a new selection. */
+const NUDGE_MS = 500;
 
-/** A turn being played back: the state before it, its steps, and which one is showing. */
+/** How close an attacker gets to its target (meters), and how far a clean hit knocks it back. */
+const STRIKE_GAP = 0.9;
+const KNOCKBACK = 0.45;
+/** A Maneuver toward an enemy ends this far short of it; falling back covers this much ground. */
+const ENGAGE_GAP = 1.4;
+const FALL_BACK = 2.2;
+/** Planning view: how much the camera turns toward your selection (share of the angle to it). */
+const CAMERA_FOLLOW = 0.18;
+
+/**
+ * A turn being played back: the state before it, its steps, and which one is showing.
+ * Attack steps play in two phases: the attacker closes in ("approach"), then the blow lands
+ * ("impact"). Other steps just play ("impact").
+ */
 interface Playback {
   from: CombatState;
   steps: Step[];
   index: number;
+  phase: "approach" | "impact";
   playerPose: PoseName;
+  /** What you did this turn (null for a forced turn). */
+  action: PlayerAction | null;
 }
+
+const isAttackStep = (st: Step | undefined) => !!st?.events.some(ev => ev.kind === "attack");
+const phaseFor = (st: Step | undefined): Playback["phase"] => (isAttackStep(st) ? "approach" : "impact");
 
 /** The fight as it stood after a given step: the turn's starting state with that step's bars and positions. */
 function viewAt(from: CombatState, after: Step["after"]): CombatState {
@@ -244,8 +283,12 @@ interface Fx {
   classes: string[];
 }
 
-/** Turns a step's events into per-fighter animations. The health bars carry the numbers. */
-function effectsOf(step: Step | undefined): Map<string, Fx> {
+/**
+ * Turns a step's events into per-fighter animations. The health bars carry the numbers.
+ * Walking steps play for whoever actually moves: an enemy changing lines on its own, or you when
+ * you Maneuvered. When your attack pulled someone in, nobody walks: the camera re-frames you.
+ */
+function effectsOf(step: Step | undefined, youManeuvered: boolean): Map<string, Fx> {
   const fx = new Map<string, Fx>();
   const add = (id: string, cls: string) => {
     if (!fx.has(id)) fx.set(id, { classes: [] });
@@ -262,6 +305,10 @@ function effectsOf(step: Step | undefined): Map<string, Fx> {
         break;
       case "fall":
         add(ev.who, "fx-fall");
+        break;
+      case "move":
+        if (ev.cause !== "player") add(ev.who, "fx-step");
+        else if (youManeuvered && !fx.get("player")?.classes.includes("fx-step")) add("player", "fx-step");
         break;
       default:
         break;
@@ -301,12 +348,14 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
   const playing = fight.status === "playing";
 
   // What's on screen: mid-turn during playback, otherwise the fight as it stands.
+  // While an attacker is still closing in, the fight shows as it was before the blow.
   const step = playback?.steps[playback.index];
-  const view = playback && step ? viewAt(playback.from, step.after) : fight;
-  const fx = effectsOf(step);
+  const impact = playback?.phase === "impact";
   // The fight just before this step, so a bar that appears mid-turn still animates from it.
   const prevView = playback ? (playback.index > 0 ? viewAt(playback.from, playback.steps[playback.index - 1].after) : playback.from) : undefined;
-  const stepKey = playback ? `${playback.from.turn}-${playback.index}` : "rest";
+  const view = playback && step ? (impact ? viewAt(playback.from, step.after) : prevView!) : fight;
+  const fx = effectsOf(impact ? step : undefined, playback?.action?.type === "maneuver");
+  const stepKey = playback ? `${playback.from.turn}-${playback.index}-${playback.phase}` : "rest";
   const p = view.player;
 
   // Keep the selection valid: a fallen enemy hands the cursor to the next one.
@@ -339,24 +388,116 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
   const chosen = wheelOpen && highlight ? wheel[highlight] : null;
   const wheelCenter = sel.kind === "player" ? "You" : selectedEnemy?.name ?? "";
 
-  // Where the selected figure sits on screen, so the wheel can open around it.
   const hudRef = useRef<HTMLDivElement>(null);
-  const [anchor, setAnchor] = useState<Anchor | null>(null);
   const selId = sel.kind === "player" ? "player" : sel.id;
-  useLayoutEffect(() => {
-    if (!wheelOpen) return;
+  const [viewport, setViewport] = useState({ w: 0, h: 0 });
+  useEffect(() => {
     const measure = () => {
       const hud = hudRef.current;
-      const fig = hud?.querySelector<HTMLElement>(`[data-fig="${selId}"]`);
-      if (!hud || !fig) return setAnchor(null);
-      const h = hud.getBoundingClientRect();
-      const f = fig.getBoundingClientRect();
-      setAnchor({ x: f.left - h.left, y: f.top - h.top, w: f.width, h: f.height, hudW: h.width, hudH: h.height });
+      if (hud) setViewport({ w: hud.clientWidth, h: hud.clientHeight });
     };
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [wheelOpen, selId, fight]);
+  }, []);
+
+  /* ---------- the battlefield floor plan ----------
+   * Everyone has a spot on the floor (meters). The planning view is always shot from behind your
+   * shoulder, so you are the anchor: the camera and the enemy lines are placed relative to you.
+   *
+   * During a turn, attackers close in on their targets and the camera moves in on the action.
+   * Everyone stays wherever the action leaves them (closed in, knocked back) until the turn's
+   * final step. Then the camera re-frames you where you ended up, turning and moving around you,
+   * and the enemies walk from wherever they are to their lines. If you Maneuvered, you walk to
+   * where you were going and the camera follows you there. */
+  const world = useRef({ anchor: { x: 0, z: 0 } as Vec, yaw: 0, pos: {} as Record<string, Vec> });
+
+  const linesOf = (st: CombatState) => ({
+    front: st.enemies.filter(e => e.alive && e.line === "front").map(e => e.id),
+    back: st.enemies.filter(e => e.alive && e.line === "back").map(e => e.id),
+  });
+
+  /** The planning camera: riding behind your shoulder, turned a little toward the selected enemy. */
+  const planningShot = (anchor: Vec, yaw: number, pos: Record<string, Vec>, st: CombatState): ShotCamera => {
+    const alive = st.enemies.filter(e => e.alive && pos[e.id]);
+    const target = selId !== "player" ? pos[selId] : undefined;
+    if (!target || !alive.length) return { follow: "player", yaw };
+    const c = alive.reduce((acc, e) => ({ x: acc.x + pos[e.id].x / alive.length, z: acc.z + pos[e.id].z / alive.length }), { x: 0, z: 0 });
+    const toward = lerpAngle(yawOf(sub(c, anchor)), yawOf(sub(target, anchor)), 1) - yawOf(sub(c, anchor));
+    return { follow: "player", yaw: yaw + toward * CAMERA_FOLLOW };
+  };
+
+  /** Puts everyone in formation around the player standing at `anchor`, and frames them. */
+  const settle = (st: CombatState, anchor: Vec) => {
+    const w = world.current;
+    const { front, back } = linesOf(st);
+    // Turn so the enemies, from wherever they are now, end up roughly ahead in their lines.
+    const enemiesNow = [...front, ...back].map(id => w.pos[id]).filter(Boolean);
+    const yaw = facingToward(anchor, enemiesNow, front.length, back.length, w.yaw);
+    const pos = { ...w.pos, ...Object.fromEntries(formation(anchor, yaw, front, back)), player: anchor };
+    world.current = { anchor, yaw, pos };
+    return { pos, camera: planningShot(anchor, yaw, pos, st) };
+  };
+
+  const [shot, setShot] = useState<SceneShot>(() => {
+    const { front, back } = linesOf(initial);
+    const pos = { ...Object.fromEntries(formation({ x: 0, z: 0 }, 0, front, back)), player: { x: 0, z: 0 } };
+    world.current.pos = pos;
+    return { positions: pos, camera: { follow: "player", yaw: 0 }, ms: 0, version: 0 };
+  });
+  const shoot = (positions: Record<string, Vec>, camera: ShotCamera, ms: number) => {
+    world.current.pos = positions;
+    setShot(s => ({ positions, camera, ms, version: s.version + 1 }));
+  };
+
+  useLayoutEffect(() => {
+    const w = world.current;
+    if (!playback) {
+      // Planning: you stand where you are; the camera eases toward your selection.
+      const { pos, camera } = settle(fight, w.pos.player ?? w.anchor);
+      shoot(pos, camera, NUDGE_MS);
+      return;
+    }
+    const attack = step?.events.find(ev => ev.kind === "attack");
+    if (!attack || attack.kind !== "attack") {
+      if (playback.index !== playback.steps.length - 1) return; // stay put until the final step
+      // The final step: re-frame you where you ended up, or follow you if you Maneuvered.
+      const act = playback.action;
+      const moved = step?.events.some(ev => ev.kind === "move" && ev.cause === "player");
+      let anchor = w.pos.player;
+      if (act?.type === "maneuver" && moved) {
+        anchor = act.target === "self"
+          ? behind(w.pos.player, w.yaw, FALL_BACK)
+          : closeIn(w.pos.player, w.pos[act.target!] ?? w.pos.player, ENGAGE_GAP);
+      }
+      const { pos, camera } = settle(viewAt(playback.from, step!.after), anchor);
+      shoot(pos, camera, SETTLE_MS);
+      return;
+    }
+    const a = w.pos[attack.attacker];
+    const t = w.pos[attack.target];
+    if (!a || !t) return;
+    if (playback.phase === "approach") {
+      // The attacker closes in, and the camera moves in on the two of them.
+      const at = closeIn(a, t, STRIKE_GAP);
+      shoot({ ...w.pos, [attack.attacker]: at }, actionCamera(shotCamera(shot), at, t), APPROACH_MS);
+    } else if (attack.result === "hit") {
+      // A clean hit knocks the target back, and it stays there. Blocks only rock it (CSS).
+      shoot({ ...w.pos, [attack.target]: pushedAway(a, t, KNOCKBACK) }, shot.camera, KNOCK_MS);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playback?.index, playback?.phase, !!playback, selId, fight]);
+
+  /** Where the selected figure will be on screen once the camera settles, for the wheel. */
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
+  useLayoutEffect(() => {
+    if (!wheelOpen) return;
+    const p = shot.positions[selId];
+    const { w, h } = viewport;
+    if (!p || !w) return setAnchor(null);
+    const b = figureBox(shotCamera(shot), p, w, h);
+    setAnchor({ x: b.x, y: b.y, w: b.w, h: b.h, hudW: w, hudH: h });
+  }, [wheelOpen, selId, shot, viewport]);
 
   /* ---------- moving the cursor ----------
    * W/S move between depths. A/D walk the whole lineup as it appears on screen, left to right:
@@ -392,9 +533,13 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
   /** Resolve the turn, then play it back step by step. */
   const play = (action: PlayerAction) => {
     const next = resolveTurn(fight, action);
-    const pose: PoseName = forced === "revive" ? "idle" : forced === "rest" ? "rest" : action.type;
+    const pose: PoseName = forced === "revive" ? "idle" : forced === "rest" ? "kneel" : action.type;
     setFight(next);
-    setPlayback(next.lastTurn.length ? { from: fight, steps: next.lastTurn, index: 0, playerPose: pose } : null);
+    setPlayback(
+      next.lastTurn.length
+        ? { from: fight, steps: next.lastTurn, index: 0, phase: phaseFor(next.lastTurn[0]), playerPose: pose, action: forced ? null : action }
+        : null,
+    );
     closeWheel();
   };
   const commit = (option: WheelOption | null) => {
@@ -405,8 +550,14 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
   useEffect(() => {
     if (!playback || paused) return;
     const timer = window.setTimeout(
-      () => setPlayback(pb => (pb && pb.index + 1 < pb.steps.length ? { ...pb, index: pb.index + 1 } : null)),
-      STEP_MS,
+      () =>
+        setPlayback(pb => {
+          if (!pb) return null;
+          if (pb.phase === "approach") return { ...pb, phase: "impact" };
+          const index = pb.index + 1;
+          return index < pb.steps.length ? { ...pb, index, phase: phaseFor(pb.steps[index]) } : null;
+        }),
+      playback.phase === "approach" ? APPROACH_MS : STEP_MS,
     );
     return () => window.clearTimeout(timer);
   }, [playback, paused]);
@@ -460,45 +611,67 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
   });
 
   /* ---------- what the screen shows ---------- */
+  /**
+   * During playback: a fighter shows its telegraph until its own attack, the strike frame on the
+   * step its attack lands, and a neutral stance after. Anyone broken goes down (player kneels,
+   * enemies fall to the ground).
+   */
+  const strikeStep = (id: string) =>
+    playback ? playback.steps.findIndex(st => st.events.some(ev => ev.kind === "attack" && ev.attacker === id)) : -1;
+  const playbackPose = (id: string, telegraph: PoseName, broken: boolean, down: PoseName): PoseName => {
+    if (!playback) return telegraph;
+    const struck = strikeStep(id);
+    if (struck === playback.index) return impact ? "strike" : "attack"; // wind up while closing in, then strike
+    if (broken) return down;
+    if (struck >= 0 && struck < playback.index) return "idle";
+    return telegraph;
+  };
   const playerPose: PoseName = playback
-    ? playback.playerPose
-    : forced === "rest" ? "rest" : forced === "revive" ? "idle" : (chosen?.action.type as PoseName | undefined) ?? "idle";
+    ? playbackPose("player", playback.playerPose, p.broken, "kneel")
+    : forced === "rest" ? "kneel" : forced === "revive" ? "idle" : (chosen?.action.type as PoseName | undefined) ?? "idle";
+  const enemyPose = (e: Enemy): PoseName => playbackPose(e.id, poseForIntent(e), e.broken, "fallen");
 
-  // Enemies still standing, plus any falling during this step.
-  const shown = (line: "front" | "back") =>
-    view.enemies.filter(e => e.line === line && (e.alive || fx.get(e.id)?.classes.includes("fx-fall")));
-  const enemyFigure = (e: Enemy) => (
-    <EnemyFigure
-      key={e.id}
-      enemy={e}
-      selected={!busy && sel.kind === "enemy" && sel.id === e.id}
-      fx={fx.get(e.id)}
-      stepKey={stepKey}
-      disabled={busy || !playing || forced !== null}
-      onPick={() => openWheel({ kind: "enemy", id: e.id })}
-    />
-  );
-  const playerFx = fx.get(p.id);
+  // Everyone on the field: you, enemies still standing, and any falling during this step.
+  const figures: SceneFigure[] = [
+    {
+      id: "player",
+      view: "back",
+      pose: playerPose,
+      weapon: p.weapon,
+      armor: p.armor,
+      classes: fx.get("player")?.classes ?? [],
+      stepKey,
+      selected: !busy && sel.kind === "player",
+      disabled: busy || !playing || forced !== null,
+      label: "Select yourself",
+      onPick: () => openWheel({ kind: "player" }),
+    },
+    ...view.enemies
+      .filter(e => e.alive || fx.get(e.id)?.classes.includes("fx-fall"))
+      .map((e): SceneFigure => ({
+        id: e.id,
+        view: "front",
+        pose: enemyPose(e),
+        weapon: e.weapon,
+        armor: e.armor,
+        classes: fx.get(e.id)?.classes ?? [],
+        stepKey,
+        selected: !busy && sel.kind === "enemy" && sel.id === e.id,
+        disabled: busy || !playing || forced !== null,
+        label: `Select ${e.name}`,
+        onPick: () => openWheel({ kind: "enemy", id: e.id }),
+      })),
+  ];
 
   return (
-    <div className="hud" ref={hudRef}>
+    <div className={`hud ${busy ? "is-cinematic" : ""}`} ref={hudRef}>
       <section className="stage" aria-label="Battlefield">
-        <div className="stage-floor" aria-hidden="true" />
-        <div className="stage-row stage-back" aria-label="Back line">{shown("back").map(enemyFigure)}</div>
-        <div className="stage-row stage-front" aria-label="Front line">{shown("front").map(enemyFigure)}</div>
-        <button
-          className={`stage-player ${!busy && sel.kind === "player" ? "is-target" : ""}`}
-          data-fig="player"
-          aria-label="Select yourself"
-          onClick={() => openWheel({ kind: "player" })}
-          disabled={busy || !playing || forced !== null}
-        >
-          <div key={stepKey} className={`fig-wrap ${playerFx?.classes.join(" ") ?? ""}`}>
-            <StickFigure view="back" pose={playerPose} weapon={p.weapon} armor={p.armor} />
-            {playerFx?.classes.includes("fx-break") && <Shards />}
-          </div>
-        </button>
+        <Scene figures={figures} shot={shot} />
       </section>
+
+      {/* Cutscene mode: black strips slide in while a turn plays out. When they leave, it's your move. */}
+      <div className="letterbox letterbox-top" aria-hidden="true" />
+      <div className="letterbox letterbox-bottom" aria-hidden="true" />
 
       {/* The two health bars sit in fixed slots, so nothing else on screen can push them around. */}
       <div className="bar-slot bar-slot-player">
@@ -633,36 +806,6 @@ function TargetPanel({ enemy, before }: { enemy: Enemy; before?: BarValues }) {
 }
 
 /** Clicking an enemy selects it and opens the wheel. */
-function EnemyFigure({ enemy, selected, fx, stepKey, disabled, onPick }: {
-  enemy: Enemy;
-  selected: boolean;
-  fx?: Fx;
-  stepKey: string;
-  disabled: boolean;
-  onPick: () => void;
-}) {
-  return (
-    <button
-      className={`stage-slot ${selected ? "is-target" : ""}`}
-      aria-pressed={selected}
-      data-fig={enemy.id}
-      aria-label={`Select ${enemy.name}`}
-      disabled={disabled}
-      onClick={onPick}
-    >
-      <div key={stepKey} className={`fig-wrap ${fx?.classes.join(" ") ?? ""}`}>
-        <StickFigure
-          view="front"
-          pose={poseForIntent({ ...enemy, alive: true })}
-          weapon={enemy.weapon}
-          armor={enemy.armor}
-        />
-        {fx?.classes.includes("fx-break") && <Shards />}
-      </div>
-    </button>
-  );
-}
-
 function Picker<T extends string>({ label, value, options, labels, focused, onChange }: {
   label: string;
   value: T;

@@ -10,8 +10,9 @@
  *  - An enemy's weapon arm is the near arm, so it's drawn in front, and the figure is mirrored.
  * Gear attaches to joints: the weapon to the weapon hand, armor to the torso, shoulders and head.
  */
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { ArmorTier, Enemy, Fighter, Tier } from "./combat";
+import { HORIZON, NEAR, FIGURE_HEIGHT, ease, lerpAngle, lerpCam, lerpVec, planningCamera, project, screenOf, toCamera, type Cam, type Vec } from "./scene";
 
 /* ============================================================
  * Skeleton and poses
@@ -34,7 +35,13 @@ export interface Skeleton {
   weapon: { at: Pt; angle: number };
 }
 
-export type PoseName = "idle" | "attack" | "block" | "maneuver" | "rest";
+/**
+ * idle, attack, block, maneuver, rest: what a fighter is about to do (the telegraphs).
+ * strike: the impact frame, shown during playback the moment an attack lands.
+ * fallen: an enemy's guard break, down on the ground and struggling to rise.
+ * kneel: the player's guard break, down on one knee and struggling to stand.
+ */
+export type PoseName = "idle" | "attack" | "block" | "maneuver" | "rest" | "strike" | "fallen" | "kneel";
 
 /** Drawn facing right in a 100 × 120 box, feet on y = 114. */
 export const POSES: Record<PoseName, Skeleton> = {
@@ -82,10 +89,37 @@ export const POSES: Record<PoseName, Skeleton> = {
     rearLeg: { knee: [46, 91], foot: [44, 114] },
     weapon: { at: [58, 112], angle: -3 },
   },
+  // Follow-through: lunging forward, the weapon swept down and out past the body.
+  strike: {
+    head: [60, 30], neck: [57, 41], hip: [47, 70],
+    weaponArm: { elbow: [70, 50], hand: [81, 60] },
+    freeArm: { elbow: [43, 52], hand: [33, 60] },
+    leadLeg: { knee: [67, 92], foot: [79, 114] },
+    rearLeg: { knee: [36, 94], foot: [22, 114] },
+    weapon: { at: [81, 60], angle: 28 },
+  },
+  // Down on the ground, propped on one arm, head lifted, trying to rise. The weapon has fallen away.
+  fallen: {
+    head: [70, 86], neck: [62, 94], hip: [38, 106],
+    weaponArm: { elbow: [66, 104], hand: [68, 113] },
+    freeArm: { elbow: [74, 100], hand: [82, 108] },
+    leadLeg: { knee: [26, 102], foot: [14, 112] },
+    rearLeg: { knee: [28, 111], foot: [12, 114] },
+    weapon: { at: [86, 113], angle: 6 },
+  },
+  // One knee on the ground, leaning on the planted weapon, head bowed, struggling to stand.
+  kneel: {
+    head: [57, 45], neck: [54, 56], hip: [48, 84],
+    weaponArm: { elbow: [62, 72], hand: [68, 80] },
+    freeArm: { elbow: [56, 76], hand: [62, 90] },
+    leadLeg: { knee: [64, 92], foot: [64, 114] },
+    rearLeg: { knee: [42, 112], foot: [26, 114] },
+    weapon: { at: [68, 80], angle: 84 },
+  },
 };
 
-/** Which pose an enemy shows for what it's about to do. */
-export const poseForIntent = (e: Enemy): PoseName => (e.alive ? e.intent.type : "rest");
+/** Which pose an enemy shows for what it's about to do. A broken enemy is down on the ground. */
+export const poseForIntent = (e: Enemy): PoseName => (e.broken || e.intent.forced ? "fallen" : e.intent.type);
 
 /* ============================================================
  * Gear
@@ -141,6 +175,34 @@ function Helmet({ s }: { s: Skeleton }) {
   return <path d={`M${x - 8.5} ${y + 2} A8.5 8.5 0 0 1 ${x + 8.5} ${y + 2} L${x + 8.5} ${y + 5} L${x - 8.5} ${y + 5} Z`} className="fig-armor-fill" />;
 }
 
+/** How far each weapon reaches from the grip, so the strike trail ends at its tip. */
+const WEAPON_REACH: Record<Tier, number> = { light: 15, normal: 34, heavy: 41 };
+
+/**
+ * The swing trail on a strike: a tapered crescent around the shoulder, sweeping from where the
+ * weapon was raised (up and behind) to its tip, fading out as it plays.
+ */
+function StrikeTrail({ s, tier }: { s: Skeleton; tier: Tier }) {
+  const reach = WEAPON_REACH[tier];
+  const rad = (s.weapon.angle * Math.PI) / 180;
+  const tip: Pt = [s.weapon.at[0] + Math.cos(rad) * reach, s.weapon.at[1] + Math.sin(rad) * reach];
+  const pivot = s.neck;
+  const r = Math.hypot(tip[0] - pivot[0], tip[1] - pivot[1]);
+  const end = Math.atan2(tip[1] - pivot[1], tip[0] - pivot[0]);
+  const start = end - (140 * Math.PI) / 180; // the swing covers 140 degrees
+  const at = (radius: number, angle: number): Pt => [pivot[0] + Math.cos(angle) * radius, pivot[1] + Math.sin(angle) * radius];
+  const from = at(r, start);
+  const innerEnd = at(r * 0.8, end);
+  const d = [
+    `M${from[0]} ${from[1]}`,
+    `A${r} ${r} 0 0 1 ${tip[0]} ${tip[1]}`,      // outer edge, following the tip
+    `L${innerEnd[0]} ${innerEnd[1]}`,
+    `A${r * 0.9} ${r * 0.9} 0 0 0 ${from[0]} ${from[1]}`, // inner edge, tapering back to a point
+    "Z",
+  ].join(" ");
+  return <path d={d} className="fig-trail" />;
+}
+
 /* ============================================================
  * The figure
  * ============================================================ */
@@ -189,6 +251,7 @@ export function StickFigure({ view, pose, weapon, armor, dim, className, title }
       <ellipse cx={50} cy={115} rx={26} ry={3} className="fig-shadow" />
       {/* Enemies face left: mirror the whole drawing. */}
       <g transform={front ? "translate(100 0) scale(-1 1)" : undefined}>
+        {pose === "strike" && <StrikeTrail s={s} tier={weapon} />}
         {!front && weaponEl}
         {!front && weaponArm}
         {front && freeArm}
@@ -313,5 +376,205 @@ export function Shards({ count = 14, small }: { count?: number; small?: boolean 
         return <i key={i} style={style} />;
       })}
     </span>
+  );
+}
+
+/* ============================================================
+ * The scene: everyone on the floor, seen through the camera
+ * ============================================================ */
+
+/** The figure's drawing (100 × 120 box) spans this many units from head to feet. */
+const FIGURE_UNITS = 102;
+const FEET_Y = 114;
+
+/** Where a figure standing at `p` appears on screen: its 100 × 120 drawing box, and its depth. */
+export function figureBox(cam: Cam, p: Vec, w: number, h: number) {
+  const { sx, sy, ppm, depth } = project(cam, p, w, h);
+  const unit = (ppm * FIGURE_HEIGHT) / FIGURE_UNITS;
+  return { x: sx - 50 * unit, y: sy - FEET_Y * unit, w: 100 * unit, h: 120 * unit, depth };
+}
+
+export interface SceneFigure {
+  id: string;
+  view: "front" | "back";
+  pose: PoseName;
+  weapon: Tier;
+  armor: ArmorTier;
+  /** Playback animations (fx-hit, fx-step...). */
+  classes: string[];
+  /** Changes on every playback beat, so animations replay. */
+  stepKey: string;
+  selected: boolean;
+  disabled: boolean;
+  label: string;
+  onPick: () => void;
+}
+
+/**
+ * How the camera is placed: a fixed spot, or riding along behind someone's shoulder (the planning
+ * shot), facing `yaw`. A riding camera stays locked to its figure while it moves, so the figure
+ * holds still on screen and the world turns around it.
+ */
+export type ShotCamera = Cam | { follow: string; yaw: number };
+
+/** Where everyone should be and where the camera should look, and how long to take getting there. */
+export interface SceneShot {
+  positions: Record<string, Vec>;
+  camera: ShotCamera;
+  ms: number;
+  /** Bumped on every new shot, so the scene knows to start moving. */
+  version: number;
+}
+
+interface Tween<T> { from: T; to: T }
+
+/** The camera a shot ends on. */
+export function shotCamera(shot: SceneShot): Cam {
+  const c = shot.camera;
+  return "follow" in c ? planningCamera(shot.positions[c.follow], c.yaw) : c;
+}
+
+/**
+ * Draws the floor and every figure through the camera. When a new shot arrives, everyone (and
+ * the camera) moves from wherever they are right now to the new spots, over the shot's duration.
+ */
+export function Scene({ figures, shot }: { figures: SceneFigure[]; shot: SceneShot }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const measure = () => setSize({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Tween state lives in refs; a frame counter re-renders while anything is moving.
+  // The camera moves from where it was (`from`) to the shot's camera. A riding camera that was
+  // already riding just turns (`fromYaw` to the new yaw) while it follows its figure.
+  const cam = useRef<{ from: Cam; to: ShotCamera; fromYaw: number | null }>({
+    from: shotCamera(shot),
+    to: shot.camera,
+    fromYaw: "follow" in shot.camera ? shot.camera.yaw : null,
+  });
+  const pos = useRef(new Map<string, Tween<Vec>>());
+  const timing = useRef({ start: 0, ms: 0 });
+  const [, setFrame] = useState(0);
+  const progress = () => {
+    const { start, ms } = timing.current;
+    return ms <= 0 ? 1 : Math.min(1, (performance.now() - start) / ms);
+  };
+  const posNow = (id: string, k = ease(progress())) => {
+    const t = pos.current.get(id);
+    return t ? lerpVec(t.from, t.to, k) : undefined;
+  };
+  const camNow = (k = ease(progress())): Cam => {
+    const { from, to, fromYaw } = cam.current;
+    if (!("follow" in to)) return lerpCam(from, to, k);
+    const at = posNow(to.follow, k);
+    if (!at) return from;
+    const riding = planningCamera(at, lerpAngle(fromYaw ?? from.yaw, to.yaw, k));
+    // Already riding: stay locked on. Coming from a fixed shot: ease into the ride.
+    return fromYaw !== null ? riding : lerpCam(from, riding, k);
+  };
+
+  useLayoutEffect(() => {
+    // Start every move from where things are on screen right now.
+    const k = ease(progress());
+    const prev = cam.current.to;
+    const nowCam = camNow(k);
+    // Keep riding (and turning from the current angle) if the camera was riding the same figure.
+    const stillRiding = "follow" in prev && "follow" in shot.camera && prev.follow === shot.camera.follow;
+    const fromYaw = stillRiding && "follow" in prev ? lerpAngle(cam.current.fromYaw ?? prev.yaw, prev.yaw, k) : null;
+    for (const [id, to] of Object.entries(shot.positions)) {
+      const t = pos.current.get(id);
+      pos.current.set(id, { from: t ? lerpVec(t.from, t.to, k) : to, to });
+    }
+    cam.current = { from: nowCam, to: shot.camera, fromYaw };
+    timing.current = { start: performance.now(), ms: shot.ms };
+    let raf = 0;
+    const tick = () => {
+      setFrame(f => f + 1);
+      if (progress() < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shot.version]);
+
+  const { w, h } = size;
+  const c = camNow();
+  const placed = figures
+    .map(f => {
+      const p = posNow(f.id);
+      return p && w ? { f, box: figureBox(c, p, w, h) } : null;
+    })
+    .filter((x): x is { f: SceneFigure; box: ReturnType<typeof figureBox> } => !!x && x.box.depth > NEAR)
+    .sort((a, b) => b.box.depth - a.box.depth); // far first, so nearer figures draw on top
+
+  return (
+    <div className="scene" ref={boxRef}>
+      <div className="scene-floor" style={{ top: `${HORIZON * 100}%` }} />
+      {w > 0 && <FloorGrid cam={c} w={w} h={h} />}
+      {placed.map(({ f, box }) => (
+        <button
+          key={f.id}
+          className={`figure-slot ${f.selected ? "is-target" : ""}`}
+          data-fig={f.id}
+          aria-label={f.label}
+          aria-pressed={f.selected}
+          disabled={f.disabled}
+          onClick={f.onPick}
+          style={{
+            left: box.x,
+            top: box.y,
+            width: box.w,
+            height: box.h,
+            zIndex: 1000 - Math.round(box.depth * 10),
+            // Distance haze: the further away, the dimmer.
+            filter: `brightness(${Math.max(0.68, Math.min(1, 1.12 - box.depth * 0.06))})`,
+          }}
+        >
+          <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
+            <StickFigure view={f.view} pose={f.pose} weapon={f.weapon} armor={f.armor} />
+            {f.classes.includes("fx-break") && <Shards />}
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Faint lines on the floor, drawn in perspective, so the ground visibly moves when the camera does. */
+function FloorGrid({ cam, w, h }: { cam: Cam; w: number; h: number }) {
+  const SPACING = 2;
+  const RANGE = 40;
+  // Snap the grid to whole cells around the camera, so lines stay put in the world as it moves.
+  const ox = Math.round(cam.x / SPACING) * SPACING;
+  const oz = Math.round(cam.z / SPACING) * SPACING;
+  const segment = (a: Vec, b: Vec) => {
+    let A = toCamera(cam, a);
+    let B = toCamera(cam, b);
+    if (A.v < NEAR && B.v < NEAR) return null;
+    // Clip the part behind the camera.
+    if (A.v < NEAR) A = { u: A.u + ((B.u - A.u) * (NEAR - A.v)) / (B.v - A.v), v: NEAR };
+    if (B.v < NEAR) B = { u: B.u + ((A.u - B.u) * (NEAR - B.v)) / (A.v - B.v), v: NEAR };
+    const p = screenOf(A.u, A.v, w, h);
+    const q = screenOf(B.u, B.v, w, h);
+    return `M${p.sx} ${p.sy}L${q.sx} ${q.sy}`;
+  };
+  const paths: string[] = [];
+  for (let i = -RANGE; i <= RANGE; i += SPACING) {
+    const s1 = segment({ x: ox + i, z: oz - RANGE }, { x: ox + i, z: oz + RANGE });
+    const s2 = segment({ x: ox - RANGE, z: oz + i }, { x: ox + RANGE, z: oz + i });
+    if (s1) paths.push(s1);
+    if (s2) paths.push(s2);
+  }
+  return (
+    <svg className="scene-grid" width={w} height={h} aria-hidden="true">
+      <path d={paths.join("")} />
+    </svg>
   );
 }

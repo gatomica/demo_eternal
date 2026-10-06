@@ -22,6 +22,8 @@
   --bar-inset-x: 7vw;              /* how far the bars sit from the side edges */
   --bar-inset-top: max(64px, 8vh); /* your bar, below the menu row */
   --bar-inset-bottom: 8vh;         /* your target's bar */
+  --strip-h: 11vh;                 /* letterbox strips during playback */
+  --floor-mark: rgb(255 255 255 / 0.06);
   --floor-far: #1b1a24;
   --floor-near: #262433;
 
@@ -74,7 +76,15 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* ---------- Health bar slots ----------
  * Fixed positions, inset toward the middle of the screen: yours top left, your target's bottom right.
  * Each bar grows from its anchored end toward the center as max health rises. */
-.bar-slot { position: absolute; z-index: 10; display: grid; gap: 6px; width: var(--bar-track); }
+.bar-slot { position: absolute; z-index: 10; display: grid; gap: 6px; width: var(--bar-track); transition: top 0.45s ease, bottom 0.45s ease, left 0.45s ease, right 0.45s ease; }
+/* Cutscene mode: the bars settle into the letterbox strips, right by the screen edges. */
+.is-cinematic .bar-slot-player { top: calc((var(--strip-h) - var(--bar-h)) / 2); left: 3vw; }
+.is-cinematic .bar-slot-target { bottom: calc((var(--strip-h) - var(--bar-h)) / 2); right: 3vw; }
+
+.letterbox { position: absolute; left: 0; right: 0; height: var(--strip-h); z-index: 9; background: #000; transition: transform 0.45s ease; pointer-events: none; }
+.letterbox-top { top: 0; transform: translateY(-100%); }
+.letterbox-bottom { bottom: 0; transform: translateY(100%); }
+.is-cinematic .letterbox { transform: none; }
 .bar-slot-player { top: var(--bar-inset-top); left: var(--bar-inset-x); justify-items: start; }
 .bar-slot-target { bottom: var(--bar-inset-bottom); right: var(--bar-inset-x); justify-items: end; text-align: right; }
 .hud-target { display: grid; gap: 6px; justify-items: end; width: 100%; }
@@ -83,41 +93,34 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .hud-label { color: var(--muted); }
 .hud-button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 
-.stage { position: absolute; inset: 0; background: var(--bg); }
-/* The ground starts at a horizon and lightens toward the camera. */
-.stage-floor {
+/* z-index 0 keeps the figures' depth ordering inside the stage, below the HUD (strips, bars, wheel). */
+.stage { position: absolute; inset: 0; z-index: 0; }
+
+/* ---------- The battlefield, seen through the camera ----------
+ * Positions and sizes are computed from the floor plan in scene.ts; these are just the materials. */
+.scene { position: absolute; inset: 0; overflow: hidden; background: var(--bg); }
+.scene-floor {
   position: absolute;
-  inset: 38% 0 0 0;
-  background: linear-gradient(to bottom, var(--floor-far), var(--floor-near));
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(to bottom, var(--floor-far), var(--floor-near) 60%);
   border-top: 1px solid var(--line);
 }
-.stage-row { position: absolute; display: flex; justify-content: space-evenly; align-items: flex-end; }
-.stage-slot { position: relative; height: 100%; aspect-ratio: 100 / 120; padding: 0; border: 0; background: none; }
-/* The targeted enemy gets a marker over its head. */
-.stage-slot.is-target::before {
+/* Faint lines on the ground, in perspective. A stand-in for real ground art; they show the camera moving. */
+.scene-grid { position: absolute; inset: 0; pointer-events: none; }
+.scene-grid path { fill: none; stroke: var(--floor-mark); stroke-width: 1; }
+.figure-slot { position: absolute; padding: 0; border: 0; background: none; }
+.figure-slot:disabled { cursor: default; }
+/* The selected figure gets a marker over its head. */
+.figure-slot.is-target::before {
   content: "";
   position: absolute;
-  top: -6%;
+  top: -2%;
   left: 50%;
   transform: translateX(-50%);
   border: 7px solid transparent;
   border-top: 9px solid var(--accent);
-}
-/* Far: right side, higher up, smaller and hazier. */
-.stage-back { left: 56%; right: 2%; bottom: 34%; height: 30%; z-index: 1; filter: brightness(0.72); }
-/* Near: between the player and the back line, lower and larger. */
-.stage-front { left: 36%; right: 14%; bottom: 17%; height: 46%; z-index: 2; }
-/* Closest: the player, full body, bottom left. */
-.stage-player { position: absolute; left: 3%; bottom: 3%; height: 66%; aspect-ratio: 100 / 120; z-index: 3; padding: 0; border: 0; background: none; }
-.stage-player:disabled { cursor: default; }
-.stage-player.is-target::before {
-  content: "";
-  position: absolute;
-  top: -4%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 8px solid transparent;
-  border-top: 10px solid var(--accent);
 }
 
 .picker { display: grid; gap: 4px; }
@@ -127,17 +130,20 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 
 /* ---------- Turn playback: one step at a time ---------- */
-.stage-slot:disabled, .stage-player:disabled { cursor: default; }
 .fig-wrap { position: relative; width: 100%; height: 100%; }
 /* Enemies lunge left toward you; you lunge right toward them. */
-.stage-slot .fx-attack { animation: lunge-left 0.5s ease-out; }
-.stage-player .fx-attack { animation: lunge-right 0.5s ease-out; }
+.figure-slot .fx-attack { animation: lunge-left 0.5s ease-out; }
+[data-fig="player"] .fx-attack { animation: lunge-right 0.5s ease-out; }
 .fx-hit { animation: hit-shake 0.4s ease-out 0.15s; }
-.fx-block { animation: block-flash 0.4s ease-out 0.15s; }
-.stage-slot .fx-dodge { animation: dodge-right 0.5s ease-out; }
-.stage-player .fx-dodge { animation: dodge-left 0.5s ease-out; }
+/* A blocked hit rocks the blocker back, but it stands its ground. */
+.figure-slot .fx-block { animation: block-flash 0.4s ease-out 0.15s, block-push-right 0.45s ease-out 0.1s; }
+[data-fig="player"] .fx-block { animation: block-flash 0.4s ease-out 0.15s, block-push-left 0.45s ease-out 0.1s; }
+.figure-slot .fx-dodge { animation: dodge-right 0.5s ease-out; }
+[data-fig="player"] .fx-dodge { animation: dodge-left 0.5s ease-out; }
 .fx-break { animation: hit-shake 0.4s ease-out, break-fade 0.8s ease-out forwards; }
 .fx-fall { animation: fall 0.7s ease-in 0.2s forwards; }
+/* Walking to a new spot: quick steps in place while the scene moves the figure. */
+.fx-step { animation: step-bob 0.35s ease-in-out 2; }
 
 @keyframes lunge-left { 40% { transform: translateX(-14%); } }
 @keyframes lunge-right { 40% { transform: translateX(14%); } }
@@ -145,12 +151,16 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @keyframes dodge-left { 40% { transform: translateX(-10%); opacity: 0.6; } }
 @keyframes hit-shake { 20% { transform: translateX(-3%); } 40% { transform: translateX(3%); } 60% { transform: translateX(-2%); } 80% { transform: translateX(1%); } }
 @keyframes block-flash { 30% { filter: brightness(1.8); } }
+@keyframes block-push-right { 30% { transform: translateX(7%); } }
+@keyframes block-push-left { 30% { transform: translateX(-7%); } }
 @keyframes break-fade { to { filter: grayscale(1) brightness(0.8); } }
 @keyframes fall { to { transform: translateY(8%); opacity: 0; } }
+@keyframes step-bob { 25%, 75% { transform: translateY(-2.5%); } 50% { transform: translateY(0); } }
 
 
 @media (prefers-reduced-motion: reduce) {
   .fig-wrap { animation: none !important; }
+  .letterbox, .bar-slot { transition: none !important; }
 }
 
 /* ---------- Keys, hints, tags ---------- */
@@ -263,5 +273,8 @@ kbd {
 .fig-armor-fill { fill: var(--armor); }
 .fig-eyes { fill: var(--eyes); }
 .fig-far { opacity: 0.6; }
+.fig-trail { fill: var(--sleep); opacity: 0; animation: trail 0.45s ease-out; }
+@keyframes trail { 0% { opacity: 0.7; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .fig-trail { animation: none; opacity: 0.3; } }
 .fig-shadow { fill: #000; opacity: 0.35; }
 .figure.is-dim { opacity: 0.35; }
