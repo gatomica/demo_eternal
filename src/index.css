@@ -22,7 +22,6 @@
   --bar-inset-x: 7vw;              /* how far the bars sit from the side edges */
   --bar-inset-top: max(64px, 8vh); /* your bar, below the menu row */
   --bar-inset-bottom: 8vh;         /* your target's bar */
-  --bar-slot-h: calc(var(--bar-h) + 1.4em + 6px);
   --floor-far: #1b1a24;
   --floor-near: #262433;
 
@@ -81,16 +80,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .hud-target { display: grid; gap: 6px; justify-items: end; width: 100%; }
 .bar-slot .hud-name { font-size: 0.95rem; min-height: 1.4em; }
 
-/* The threat line and wheel prompts, stacked above the target's bar. Anchored at the bottom, so it grows upward. */
-.hud-actions-panel {
-  position: absolute;
-  z-index: 10;
-  right: var(--bar-inset-x);
-  bottom: calc(var(--bar-inset-bottom) + var(--bar-slot-h) + 14px);
-  display: grid;
-  gap: 8px;
-  justify-items: end;
-}
 .hud-label { color: var(--muted); }
 .hud-button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 
@@ -130,18 +119,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   border: 8px solid transparent;
   border-top: 10px solid var(--accent);
 }
-/* A Maneuver telegraph shows which way the enemy will move: left is toward you. */
-.stage-slot[data-moving]::after {
-  position: absolute;
-  bottom: -2%;
-  left: 50%;
-  transform: translateX(-50%);
-  color: var(--muted);
-  font-size: 0.8rem;
-  white-space: nowrap;
-}
-.stage-slot[data-moving="advance"]::after { content: "◂ advancing"; }
-.stage-slot[data-moving="retreat"]::after { content: "retreating ▸"; }
 
 .picker { display: grid; gap: 4px; }
 .picker-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
@@ -171,16 +148,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @keyframes break-fade { to { filter: grayscale(1) brightness(0.8); } }
 @keyframes fall { to { transform: translateY(8%); opacity: 0; } }
 
-.floats { position: absolute; top: 4%; left: 50%; transform: translateX(-50%); display: grid; justify-items: center; gap: 2px; pointer-events: none; }
-.float { font-weight: 700; font-size: clamp(0.8rem, 1.6vw, 1.05rem); white-space: nowrap; text-shadow: 0 1px 3px #000; animation: float-up 0.8s ease-out forwards; }
-.float-damage { color: var(--danger); }
-.float-fatigue { color: var(--sleep); }
-.float-good { color: var(--ok); }
-.float-info { color: var(--muted); }
-@keyframes float-up { from { transform: translateY(6px); opacity: 0; } 20% { opacity: 1; } to { transform: translateY(-14px); opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .fig-wrap, .float { animation: none !important; }
+  .fig-wrap { animation: none !important; }
 }
 
 /* ---------- Keys, hints, tags ---------- */
@@ -199,8 +169,6 @@ kbd {
 .hint { margin: 0; color: var(--muted); font-size: 0.85rem; }
 .tag { margin-left: 6px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; }
 .tag-sleep { color: var(--bg); background: var(--sleep); border-color: var(--sleep); }
-.threat { margin: 0; font-size: 0.9rem; color: var(--muted); }
-.threat.is-danger { color: var(--danger); }
 
 .commit { padding: 8px 18px; border: 0; border-radius: 6px; background: var(--accent); color: #1a1710; font-weight: 600; }
 .commit:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -214,12 +182,13 @@ kbd {
   position: absolute;
   width: 9rem;
   display: grid;
-  justify-items: center;
-  gap: 1px;
-  padding: 6px 8px;
+  place-items: center;
+  min-height: 2.75rem;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgb(30 29 39 / 0.88);
+  font-size: 1rem;
   text-align: center;
   pointer-events: auto;
 }
@@ -227,35 +196,8 @@ kbd {
 .is-player .wheel-down { bottom: 6%; left: 50%; transform: translateX(-50%); }
 .is-player .wheel-left { left: -6%; top: 42%; }
 .is-player .wheel-right { right: -16%; top: 42%; }
-.wheel-option small { color: var(--muted); font-size: 0.72rem; }
 .wheel-option.is-highlighted { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; background: rgb(30 29 39 / 0.96); }
 .wheel-option:disabled { opacity: 0.35; cursor: default; }
-.wheel-empty { font-style: italic; }
-/* In the bottom-right panel: who the wheel is for, and how to confirm or close. */
-.wheel-info { margin: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 10px; font-size: 0.9rem; }
-.wheel-info b { font-weight: 600; }
-.wheel-close { padding: 2px 6px; border: 0; background: none; color: var(--muted); font-size: 0.85rem; }
-
-/* A lost turn: announced in the middle of the screen, then played out automatically. */
-.forced-banner {
-  position: absolute;
-  z-index: 15;
-  top: 18%;
-  left: 50%;
-  transform: translateX(-50%);
-  display: grid;
-  gap: 4px;
-  padding: 12px 24px;
-  border-top: 2px solid var(--sleep);
-  border-bottom: 2px solid var(--sleep);
-  background: rgb(0 0 0 / 0.6);
-  text-align: center;
-  animation: banner-in 0.25s ease-out;
-}
-.forced-banner h2 { margin: 0; color: var(--sleep); letter-spacing: 0.06em; text-transform: uppercase; font-size: 1.3rem; }
-.forced-banner p { margin: 0; color: var(--muted); }
-@keyframes banner-in { from { opacity: 0; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .forced-banner { animation: none; } }
 
 /* ---------- Setup and result screens ---------- */
 .setup { height: 100%; display: grid; align-content: center; justify-items: center; gap: 16px; padding: 16px; }
@@ -269,6 +211,7 @@ kbd {
 .result { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: rgb(0 0 0 / 0.55); }
 .result-card { display: grid; gap: 12px; padding: 24px 28px; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel); text-align: center; }
 .result-card h2, .result-card p { margin: 0; }
+.pause-menu { display: grid; gap: 10px; width: min(280px, 80vw); }
 
 /* ---------- Health bar: waking room, white Fatigue, black Death ----------
  * Two stacked layers: the current values cut instantly on top, and a lighter trail

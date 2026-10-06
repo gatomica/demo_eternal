@@ -3,15 +3,9 @@ import {
   ARMOR,
   ENCOUNTERS,
   WEAPONS,
-  attackCost,
-  attackDamage,
   createCombat,
   forcedAction,
-  maneuverCost,
-  previewThreat,
-  resistance,
   resolveTurn,
-  restAmount,
   type ArmorTier,
   type CombatState,
   type Enemy,
@@ -41,7 +35,7 @@ export default function App() {
  * ============================================================ */
 
 type Dir = "up" | "left" | "down" | "right";
-type Key = Dir | "select" | "back";
+type Key = Dir | "select" | "back" | "pause";
 
 function readKey(e: KeyboardEvent): Key | null {
   switch (e.key.toLowerCase()) {
@@ -50,7 +44,8 @@ function readKey(e: KeyboardEvent): Key | null {
     case "s": case "arrowdown": return "down";
     case "d": case "arrowright": return "right";
     case "e": case "enter": case " ": return "select";
-    case "q": case "escape": return "back";
+    case "q": return "back";
+    case "escape": return "pause";
     default: return null;
   }
 }
@@ -71,7 +66,6 @@ function useKeys(handler: (key: Key) => void) {
   }, []);
 }
 
-const KEY_LABEL: Record<Dir, string> = { up: "W", left: "A", down: "S", right: "D" };
 
 /* ============================================================
  * Main menu
@@ -154,7 +148,7 @@ function SetupScreen({ setup, onChange, onStart, onExit }: {
       const next = list[(i + (key === "right" ? 1 : list.length - 1)) % list.length];
       onChange({ ...setup, [field]: next });
     } else if (key === "select") onStart();
-    else if (key === "back") onExit();
+    else if (key === "back" || key === "pause") onExit();
   });
 
   return (
@@ -196,14 +190,12 @@ type Selection = { kind: "player" } | { kind: "enemy"; id: string };
 interface WheelOption {
   label: string;
   action: PlayerAction;
-  hint: string;
 }
 type Wheel = Record<Dir, WheelOption | null>;
 
-const r1 = (n: number) => Math.round(n * 10) / 10;
 
-/** How long a lost turn (guard break or revive) stays on screen before it plays out. */
-const FORCED_TURN_MS = 1600;
+/** How long a lost turn (guard break or revive) waits before it plays out on its own. */
+const FORCED_TURN_MS = 900;
 
 /** Rows by depth, closest first: you, the front line, the back line. Empty lines are skipped. */
 function rowsOf(fight: CombatState): Selection[][] {
@@ -248,64 +240,30 @@ function viewAt(from: CombatState, after: Step["after"]): CombatState {
   return v;
 }
 
-type Tone = "damage" | "fatigue" | "good" | "info";
 interface Fx {
   classes: string[];
-  floats: { text: string; tone: Tone }[];
 }
 
-/** Turns a step's events into per-fighter animations and words. Numbers live in the health bars. */
+/** Turns a step's events into per-fighter animations. The health bars carry the numbers. */
 function effectsOf(step: Step | undefined): Map<string, Fx> {
   const fx = new Map<string, Fx>();
-  const get = (id: string) => {
-    if (!fx.has(id)) fx.set(id, { classes: [], floats: [] });
-    return fx.get(id)!;
-  };
-  const say = (id: string, text: string, tone: Tone) => {
-    const f = get(id);
-    if (!f.floats.some(x => x.text === text)) f.floats.push({ text, tone });
+  const add = (id: string, cls: string) => {
+    if (!fx.has(id)) fx.set(id, { classes: [] });
+    fx.get(id)!.classes.push(cls);
   };
   for (const ev of step?.events ?? []) {
     switch (ev.kind) {
-      case "attack": {
-        get(ev.attacker).classes.push("fx-attack");
-        if (ev.grit) say(ev.attacker, "Grits through", "fatigue");
-        const t = get(ev.target);
-        if (ev.result === "dodged") {
-          t.classes.push("fx-dodge");
-          say(ev.target, "Dodged", "info");
-        } else if (ev.result === "blocked") {
-          t.classes.push("fx-block");
-          say(ev.target, "Blocked", "info");
-        } else {
-          t.classes.push("fx-hit");
-        }
-        break;
-      }
-      case "canceled":
-        if (ev.reason === "broken") say(ev.who, "Too slow", "info");
+      case "attack":
+        add(ev.attacker, "fx-attack");
+        add(ev.target, ev.result === "dodged" ? "fx-dodge" : ev.result === "blocked" ? "fx-block" : "fx-hit");
         break;
       case "break":
-        get(ev.who).classes.push("fx-break");
-        say(ev.who, "Broken", "fatigue");
+        add(ev.who, "fx-break");
         break;
       case "fall":
-        get(ev.who).classes.push("fx-fall");
+        add(ev.who, "fx-fall");
         break;
-      case "rest":
-        if (ev.result === "rested") say(ev.who, "Rested", "good");
-        else if (ev.result === "recovered") say(ev.who, "Recovers", "good");
-        else say(ev.who, "Rest interrupted", "damage");
-        break;
-      case "revive":
-        say(ev.who, "Revived", "good");
-        break;
-      case "move":
-        // Moves read from whoever caused them: your attack or Maneuver means you engage or disengage.
-        if (ev.cause === "player") say("player", ev.to === "front" ? "Engages" : "Disengages", "info");
-        else say(ev.who, ev.to === "front" ? "Advances" : "Retreats", "info");
-        break;
-      case "defeat":
+      default:
         break;
     }
   }
@@ -336,6 +294,8 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
   const [wheelOpen, setWheelOpen] = useState(false);
   const [highlight, setHighlight] = useState<Dir | null>(null);
 
+  const [paused, setPaused] = useState(false);
+  const [pauseIndex, setPauseIndex] = useState(0);
   const busy = playback !== null;
   const forced = forcedAction(fight);
   const playing = fight.status === "playing";
@@ -360,21 +320,20 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
 
   /* ---------- the wheel for the current selection ---------- */
   const wheel: Wheel = (() => {
-    const me = fight.player;
-    const opt = (label: string, action: PlayerAction, hint: string): WheelOption => ({ label, action, hint });
+    const opt = (label: string, action: PlayerAction): WheelOption => ({ label, action });
     if (sel.kind === "player") {
       return {
         up: null,
-        left: opt("Fall back", { type: "maneuver", target: "self" }, `+${r1(maneuverCost(me))} Fatigue`),
-        down: opt("Rest", { type: "rest" }, `−${r1(restAmount(me))} Fatigue`),
+        left: opt("Fall back", { type: "maneuver", target: "self" }),
+        down: opt("Rest", { type: "rest" }),
         right: null,
       };
     }
     return {
-      up: opt("Attack", { type: "attack", target: sel.id }, `+${r1(attackCost(me))} Fatigue · ${r1(attackDamage(me))} dmg`),
-      left: opt("Maneuver", { type: "maneuver", target: sel.id }, `+${r1(maneuverCost(me))} Fatigue`),
+      up: opt("Attack", { type: "attack", target: sel.id }),
+      left: opt("Maneuver", { type: "maneuver", target: sel.id }),
       down: null,
-      right: opt("Block", { type: "block", target: sel.id }, `${Math.round(resistance(me, true) * 16)}/16 sent back`),
+      right: opt("Block", { type: "block", target: sel.id }),
     };
   })();
   const chosen = wheelOpen && highlight ? wheel[highlight] : null;
@@ -444,26 +403,46 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
 
   // Advance the playback one step at a time.
   useEffect(() => {
-    if (!playback) return;
+    if (!playback || paused) return;
     const timer = window.setTimeout(
       () => setPlayback(pb => (pb && pb.index + 1 < pb.steps.length ? { ...pb, index: pb.index + 1 } : null)),
       STEP_MS,
     );
     return () => window.clearTimeout(timer);
-  }, [playback]);
+  }, [playback, paused]);
 
   // A guard break or a revive costs you the turn: show it, then play it out on its own.
   useEffect(() => {
-    if (!playing || !forced || busy) return;
+    if (!playing || !forced || busy || paused) return;
     const timer = window.setTimeout(() => play({ type: "rest" }), FORCED_TURN_MS);
     return () => window.clearTimeout(timer);
   });
 
+  const pauseOptions: { label: string; run: () => void }[] = [
+    { label: "Resume", run: () => setPaused(false) },
+    { label: "Restart fight", run: onRetry },
+    { label: "Change loadout", run: onChangeLoadout },
+    { label: "Main menu", run: onExit },
+  ];
+
   useKeys(key => {
+    // Escape pauses at any time; the pause menu takes all input until it closes.
+    if (paused) {
+      if (key === "pause" || key === "back") setPaused(false);
+      else if (key === "up") setPauseIndex(i => (i + pauseOptions.length - 1) % pauseOptions.length);
+      else if (key === "down") setPauseIndex(i => (i + 1) % pauseOptions.length);
+      else if (key === "select") pauseOptions[pauseIndex].run();
+      return;
+    }
+    if (key === "pause" && playing) {
+      setPaused(true);
+      setPauseIndex(0);
+      return;
+    }
     if (busy) return; // input waits for the turn to finish playing
     if (!playing) {
       if (key === "select") onRetry();
-      else if (key === "back") onExit();
+      else if (key === "back" || key === "pause") onExit();
       return;
     }
     if (forced) return; // the turn plays itself
@@ -477,17 +456,13 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
     }
     if (key === "back") closeWheel();
     else if (key === "select") commit(chosen);
-    else if (wheel[key]) setHighlight(key);
+    else if (key !== "pause" && wheel[key]) setHighlight(key);
   });
 
   /* ---------- what the screen shows ---------- */
   const playerPose: PoseName = playback
     ? playback.playerPose
     : forced === "rest" ? "rest" : forced === "revive" ? "idle" : (chosen?.action.type as PoseName | undefined) ?? "idle";
-  const threat = previewThreat(fight, chosen?.action);
-  const threatText = !threat.attackers.length
-    ? "No one is attacking. A safe window."
-    : `${threat.attackers.length} attacking${chosen ? ` · ${threat.unanswered.length ? `${threat.unanswered.length} will reach you` : "all answered"}` : ""}`;
 
   // Enemies still standing, plus any falling during this step.
   const shown = (line: "front" | "back") =>
@@ -519,29 +494,14 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
           disabled={busy || !playing || forced !== null}
         >
           <div key={stepKey} className={`fig-wrap ${playerFx?.classes.join(" ") ?? ""}`}>
-            <StickFigure view="back" pose={playerPose} weapon={p.weapon} armor={p.armor} title="You" />
+            <StickFigure view="back" pose={playerPose} weapon={p.weapon} armor={p.armor} />
             {playerFx?.classes.includes("fx-break") && <Shards />}
-            <Floats fx={playerFx} />
           </div>
         </button>
       </section>
 
-      {/* Top left corner: menu and turn. */}
-      <header className="hud-corner hud-top-left">
-        <div className="hud-row">
-          <button className="hud-button" onClick={onExit}>Menu</button>
-          <span className="hud-label">Turn {view.turn}</span>
-        </div>
-      </header>
-
       {/* The two health bars sit in fixed slots, so nothing else on screen can push them around. */}
       <div className="bar-slot bar-slot-player">
-        <span className="hud-name">
-          {p.name}
-          <span className="hud-line"> · Revives {p.charges}</span>
-          {p.broken && <span className="tag tag-sleep">Broken</span>}
-          {p.reviving && <span className="tag">Reviving</span>}
-        </span>
         <HealthBar fighter={p} />
       </div>
 
@@ -550,13 +510,6 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
           {shownEnemy && (shownEnemy.alive || busy) && (
             <TargetPanel key={shownEnemy.id} enemy={shownEnemy} before={shownBefore && barValues(shownBefore)} />
           )}
-        </div>
-      )}
-
-      {playing && forced && !busy && (
-        <div className="forced-banner" role="status">
-          <h2>{forced === "revive" ? "You revive" : "Guard broken"}</h2>
-          <p>{forced === "revive" ? "The world refuses to let you go. Nothing can touch you this turn." : "Sleep's pull takes you. You lose this turn."}</p>
         </div>
       )}
 
@@ -573,17 +526,20 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
         />
       )}
 
-      {/* Above the target's bar: threat and the wheel's prompts. It grows upward, so the bar stays put. */}
-      {playing && !forced && !busy && (
-        <div className="hud-actions-panel">
-          <p className={`threat ${chosen && threat.unanswered.length ? "is-danger" : ""}`}>{threatText}</p>
-          {wheelOpen ? (
-            <WheelInfo wheel={wheel} highlight={highlight} center={wheelCenter} onClose={closeWheel} />
-          ) : (
-            <p className="hint">
-              <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> select · <kbd>E</kbd> actions
-            </p>
-          )}
+      {paused && (
+        <div className="result" role="dialog" aria-label="Paused">
+          <nav className="pause-menu">
+            {pauseOptions.map((o, i) => (
+              <button
+                key={o.label}
+                className={`menu-button ${i === pauseIndex ? "is-focused" : ""}`}
+                onMouseEnter={() => setPauseIndex(i)}
+                onClick={o.run}
+              >
+                {o.label}
+              </button>
+            ))}
+          </nav>
         </div>
       )}
 
@@ -591,15 +547,10 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
         <div className="result" role="dialog" aria-label="Fight over">
           <div className="result-card">
             <h2>{fight.status === "won" ? "The sleepwalkers are still" : "You fade"}</h2>
-            <p>
-              {fight.status === "won"
-                ? `Won in ${fight.turn - 1} turns with ${r1(fight.player.hp)} health left.`
-                : `Fell on turn ${fight.turn - 1}.`}
-            </p>
             <div className="setup-buttons">
-              <button className="hud-button" onClick={onExit}>Menu <kbd>Q</kbd></button>
+              <button className="hud-button" onClick={onExit}>Menu</button>
               <button className="hud-button" onClick={onChangeLoadout}>Change loadout</button>
-              <button className="commit" onClick={onRetry}>Retry <kbd>E</kbd></button>
+              <button className="commit" onClick={onRetry}>Retry</button>
             </div>
           </div>
         </div>
@@ -608,24 +559,12 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
   );
 }
 
-/** Numbers and words that rise off a fighter during playback. */
-function Floats({ fx }: { fx?: Fx }) {
-  if (!fx?.floats.length) return null;
-  return (
-    <span className="floats" aria-live="polite">
-      {fx.floats.map((f, i) => (
-        <span key={i} className={`float float-${f.tone}`}>{f.text}</span>
-      ))}
-    </span>
-  );
-}
-
 /** A figure's box on screen, relative to the HUD, plus the HUD's size for keeping options on-screen. */
 interface Anchor { x: number; y: number; w: number; h: number; hudW: number; hudH: number }
 
 /** Rough size of a wheel option, used to place and clamp the options around an enemy. */
 const OPTION_W = 144;
-const OPTION_H = 62;
+const OPTION_H = 44;
 const OPTION_GAP = 8;
 
 /** Where each option goes around an enemy: above the head, beside the body, below the feet. Kept on-screen. */
@@ -676,8 +615,7 @@ function ActionWheel({ wheel, highlight, center, anchor, aroundPlayer, onHighlig
             onMouseEnter={() => o && onHighlight(dir)}
             onClick={() => o && onCommit(o)}
           >
-            <kbd>{KEY_LABEL[dir]}</kbd>
-            {o ? <><b>{o.label}</b><small>{o.hint}</small></> : <small className="wheel-empty">Empty</small>}
+            {o && <b>{o.label}</b>}
           </button>
         );
       })}
@@ -685,37 +623,16 @@ function ActionWheel({ wheel, highlight, center, anchor, aroundPlayer, onHighlig
   );
 }
 
-/** Who the open wheel acts on, and how to confirm or close it. Shown above the target's bar. */
-function WheelInfo({ wheel, highlight, center, onClose }: {
-  wheel: Wheel;
-  highlight: Dir | null;
-  center: string;
-  onClose: () => void;
-}) {
-  const option = highlight ? wheel[highlight] : null;
-  return (
-    <p className="wheel-info">
-      <b>{center}</b>
-      <span>{option ? <><kbd>E</kbd> {option.label}</> : "Pick an action"}</span>
-      <button className="wheel-close" onClick={onClose}><kbd>Q</kbd> Close</button>
-    </p>
-  );
-}
-
 /** One health bar for whoever you're targeting (or, mid-turn, whoever the action involves). Always in the same spot. */
 function TargetPanel({ enemy, before }: { enemy: Enemy; before?: BarValues }) {
   return (
     <div className="hud-target">
-      <span className="hud-name">
-        {enemy.broken && <span className="tag tag-sleep">Broken</span>}
-        {enemy.name} <span className="hud-line">· {enemy.line === "front" ? "Front line" : "Back line"}</span>
-      </span>
       <HealthBar fighter={enemy} before={before} mirrored />
     </div>
   );
 }
 
-/** Clicking an enemy selects it and opens the wheel. A Maneuver telegraph also shows which way it will move. */
+/** Clicking an enemy selects it and opens the wheel. */
 function EnemyFigure({ enemy, selected, fx, stepKey, disabled, onPick }: {
   enemy: Enemy;
   selected: boolean;
@@ -724,11 +641,9 @@ function EnemyFigure({ enemy, selected, fx, stepKey, disabled, onPick }: {
   disabled: boolean;
   onPick: () => void;
 }) {
-  const moving = enemy.alive && enemy.intent.type === "maneuver" ? enemy.intent.dir : undefined;
   return (
     <button
       className={`stage-slot ${selected ? "is-target" : ""}`}
-      data-moving={moving}
       aria-pressed={selected}
       data-fig={enemy.id}
       aria-label={`Select ${enemy.name}`}
@@ -741,10 +656,8 @@ function EnemyFigure({ enemy, selected, fx, stepKey, disabled, onPick }: {
           pose={poseForIntent({ ...enemy, alive: true })}
           weapon={enemy.weapon}
           armor={enemy.armor}
-          title={`${enemy.name}: ${enemy.intent.forced ? "broken, must rest" : moving ? `${moving}s` : enemy.intent.type}`}
         />
         {fx?.classes.includes("fx-break") && <Shards />}
-        <Floats fx={fx} />
       </div>
     </button>
   );
