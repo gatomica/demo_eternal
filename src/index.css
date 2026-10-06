@@ -17,7 +17,12 @@
   --flesh: #a2505a;     /* health left to fill */
   --sleep: #f3f1f8;     /* Fatigue, white */
   --void: #040406;      /* Death, black */
-  --bar-track: min(40vw, 560px);  /* full length of a health bar at BAR_FULL_HP */
+  --bar-track: min(38vw, 540px);  /* full length of a health bar at BAR_FULL_HP */
+  --bar-h: 20px;                   /* bar thickness */
+  --bar-inset-x: 7vw;              /* how far the bars sit from the side edges */
+  --bar-inset-top: max(64px, 8vh); /* your bar, below the menu row */
+  --bar-inset-bottom: 8vh;         /* your target's bar */
+  --bar-slot-h: calc(var(--bar-h) + 1.4em + 6px);
   --floor-far: #1b1a24;
   --floor-near: #262433;
 
@@ -63,15 +68,29 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .hud { position: relative; height: 100%; overflow: hidden; }
 
 .hud-corner { position: absolute; z-index: 10; display: flex; gap: 10px 16px; padding: 12px 16px; }
-.hud-top-left { top: 0; left: 0; flex-direction: column; width: 46%; }
+.hud-top-left { top: 0; left: 0; }
 .hud-row { display: flex; align-items: center; gap: 12px; }
-.hud-stat { display: grid; gap: 4px; }
 .hud-name { font-size: 0.85rem; color: var(--muted); }
 .hud-line { opacity: 0.75; }
-.hud-bottom-right { bottom: 0; right: 0; width: 60%; flex-direction: column; align-items: flex-end; }
-.hud-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px 16px; }
-/* The target's bar sits right-aligned so it grows leftward, away from the edge. */
-.hud-target { width: 100%; justify-items: end; text-align: right; }
+/* ---------- Health bar slots ----------
+ * Fixed positions, inset toward the middle of the screen: yours top left, your target's bottom right.
+ * Each bar grows from its anchored end toward the center as max health rises. */
+.bar-slot { position: absolute; z-index: 10; display: grid; gap: 6px; width: var(--bar-track); }
+.bar-slot-player { top: var(--bar-inset-top); left: var(--bar-inset-x); justify-items: start; }
+.bar-slot-target { bottom: var(--bar-inset-bottom); right: var(--bar-inset-x); justify-items: end; text-align: right; }
+.hud-target { display: grid; gap: 6px; justify-items: end; width: 100%; }
+.bar-slot .hud-name { font-size: 0.95rem; min-height: 1.4em; }
+
+/* The threat line and wheel prompts, stacked above the target's bar. Anchored at the bottom, so it grows upward. */
+.hud-actions-panel {
+  position: absolute;
+  z-index: 10;
+  right: var(--bar-inset-x);
+  bottom: calc(var(--bar-inset-bottom) + var(--bar-slot-h) + 14px);
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
 .hud-label { color: var(--muted); }
 .hud-button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 
@@ -186,34 +205,36 @@ kbd {
 .commit { padding: 8px 18px; border: 0; border-radius: 6px; background: var(--accent); color: #1a1710; font-weight: 600; }
 .commit:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* ---------- Action wheel: W up, A left, S down, D right ---------- */
-.wheel {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 9.5rem));
-  grid-template-areas: ". up ." "left center right" ". down ." "confirm confirm confirm";
-  gap: 6px;
-}
-.wheel-up { grid-area: up; }
-.wheel-left { grid-area: left; }
-.wheel-right { grid-area: right; }
-.wheel-down { grid-area: down; }
+/* ---------- Action wheel: options around whoever you selected ----------
+ * Around you, the options sit over your figure's box (W above the head, A behind, S at the feet,
+ * D toward the enemies) and your figure previews the highlighted action. Around an enemy, the
+ * script places them just outside its body and keeps them on-screen. */
+.wheel-overlay { position: absolute; z-index: 11; pointer-events: none; }
 .wheel-option {
+  position: absolute;
+  width: 9rem;
   display: grid;
   justify-items: center;
   gap: 1px;
   padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--panel);
+  background: rgb(30 29 39 / 0.88);
   text-align: center;
+  pointer-events: auto;
 }
+.is-player .wheel-up { top: -2%; left: 50%; transform: translateX(-50%); }
+.is-player .wheel-down { bottom: 6%; left: 50%; transform: translateX(-50%); }
+.is-player .wheel-left { left: -6%; top: 42%; }
+.is-player .wheel-right { right: -16%; top: 42%; }
 .wheel-option small { color: var(--muted); font-size: 0.72rem; }
-.wheel-option.is-highlighted { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.wheel-option.is-highlighted { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; background: rgb(30 29 39 / 0.96); }
 .wheel-option:disabled { opacity: 0.35; cursor: default; }
 .wheel-empty { font-style: italic; }
-.wheel-center { grid-area: center; display: grid; place-items: center; gap: 4px; font-size: 0.85rem; text-align: center; }
-.wheel-close { padding: 2px 6px; border: 0; background: none; color: var(--muted); font-size: 0.75rem; }
-.wheel-confirm { grid-area: confirm; margin: 0; text-align: center; color: var(--muted); font-size: 0.85rem; }
+/* In the bottom-right panel: who the wheel is for, and how to confirm or close. */
+.wheel-info { margin: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 10px; font-size: 0.9rem; }
+.wheel-info b { font-weight: 600; }
+.wheel-close { padding: 2px 6px; border: 0; background: none; color: var(--muted); font-size: 0.85rem; }
 
 /* A lost turn: announced in the middle of the screen, then played out automatically. */
 .forced-banner {
@@ -252,7 +273,7 @@ kbd {
 /* ---------- Health bar: waking room, white Fatigue, black Death ----------
  * Two stacked layers: the current values cut instantly on top, and a lighter trail
  * underneath that waits a beat, then slides to the new values. */
-.bar { position: relative; height: 10px; border: 1px solid var(--line); border-radius: 3px; overflow: visible; background: var(--bg); }
+.bar { position: relative; height: var(--bar-h); border: 1px solid var(--line); border-radius: 3px; overflow: visible; background: var(--bg); }
 .bar-layer { position: absolute; inset: 0; display: flex; overflow: hidden; border-radius: 2px; }
 .bar.is-mirrored .bar-layer { flex-direction: row-reverse; }
 .bar-layer > i { display: block; height: 100%; flex: none; }

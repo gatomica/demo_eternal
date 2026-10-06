@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ARMOR,
   ENCOUNTERS,
@@ -378,6 +378,26 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
     };
   })();
   const chosen = wheelOpen && highlight ? wheel[highlight] : null;
+  const wheelCenter = sel.kind === "player" ? "You" : selectedEnemy?.name ?? "";
+
+  // Where the selected figure sits on screen, so the wheel can open around it.
+  const hudRef = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
+  const selId = sel.kind === "player" ? "player" : sel.id;
+  useLayoutEffect(() => {
+    if (!wheelOpen) return;
+    const measure = () => {
+      const hud = hudRef.current;
+      const fig = hud?.querySelector<HTMLElement>(`[data-fig="${selId}"]`);
+      if (!hud || !fig) return setAnchor(null);
+      const h = hud.getBoundingClientRect();
+      const f = fig.getBoundingClientRect();
+      setAnchor({ x: f.left - h.left, y: f.top - h.top, w: f.width, h: f.height, hudW: h.width, hudH: h.height });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [wheelOpen, selId, fight]);
 
   /* ---------- moving the cursor ----------
    * W/S move between depths. A/D walk the whole lineup as it appears on screen, left to right:
@@ -486,13 +506,14 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
   const playerFx = fx.get(p.id);
 
   return (
-    <div className="hud">
+    <div className="hud" ref={hudRef}>
       <section className="stage" aria-label="Battlefield">
         <div className="stage-floor" aria-hidden="true" />
         <div className="stage-row stage-back" aria-label="Back line">{shown("back").map(enemyFigure)}</div>
         <div className="stage-row stage-front" aria-label="Front line">{shown("front").map(enemyFigure)}</div>
         <button
           className={`stage-player ${!busy && sel.kind === "player" ? "is-target" : ""}`}
+          data-fig="player"
           aria-label="Select yourself"
           onClick={() => openWheel({ kind: "player" })}
           disabled={busy || !playing || forced !== null}
@@ -505,22 +526,32 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
         </button>
       </section>
 
-      {/* Top left, above you: your own bar. */}
+      {/* Top left corner: menu and turn. */}
       <header className="hud-corner hud-top-left">
         <div className="hud-row">
           <button className="hud-button" onClick={onExit}>Menu</button>
           <span className="hud-label">Turn {view.turn}</span>
         </div>
-        <div className="hud-stat">
-          <span className="hud-name">
-            {p.name}
-            <span className="hud-line"> · Revives {p.charges}</span>
-            {p.broken && <span className="tag tag-sleep">Broken</span>}
-            {p.reviving && <span className="tag">Reviving</span>}
-          </span>
-          <HealthBar fighter={p} />
-        </div>
       </header>
+
+      {/* The two health bars sit in fixed slots, so nothing else on screen can push them around. */}
+      <div className="bar-slot bar-slot-player">
+        <span className="hud-name">
+          {p.name}
+          <span className="hud-line"> · Revives {p.charges}</span>
+          {p.broken && <span className="tag tag-sleep">Broken</span>}
+          {p.reviving && <span className="tag">Reviving</span>}
+        </span>
+        <HealthBar fighter={p} />
+      </div>
+
+      {(busy || playing) && (
+        <div className="bar-slot bar-slot-target">
+          {shownEnemy && (shownEnemy.alive || busy) && (
+            <TargetPanel key={shownEnemy.id} enemy={shownEnemy} before={shownBefore && barValues(shownBefore)} />
+          )}
+        </div>
+      )}
 
       {playing && forced && !busy && (
         <div className="forced-banner" role="status">
@@ -529,28 +560,31 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
         </div>
       )}
 
-      {/* Bottom right, below the enemies: threat, your target's bar, then the wheel. */}
-      {(busy || (playing && !forced)) && (
-        <footer className="hud-corner hud-bottom-right">
-          {!busy && <p className={`threat ${chosen && threat.unanswered.length ? "is-danger" : ""}`}>{threatText}</p>}
-          {shownEnemy && (shownEnemy.alive || busy) && (
-            <TargetPanel key={shownEnemy.id} enemy={shownEnemy} before={shownBefore && barValues(shownBefore)} />
-          )}
-          {busy ? null : wheelOpen ? (
-            <ActionWheel
-              wheel={wheel}
-              highlight={highlight}
-              center={sel.kind === "player" ? "You" : selectedEnemy?.name ?? ""}
-              onHighlight={setHighlight}
-              onCommit={commit}
-              onClose={closeWheel}
-            />
+      {/* The wheel's options surround your character. */}
+      {playing && !forced && !busy && wheelOpen && (
+        <ActionWheel
+          wheel={wheel}
+          highlight={highlight}
+          center={wheelCenter}
+          anchor={anchor}
+          aroundPlayer={sel.kind === "player"}
+          onHighlight={setHighlight}
+          onCommit={commit}
+        />
+      )}
+
+      {/* Above the target's bar: threat and the wheel's prompts. It grows upward, so the bar stays put. */}
+      {playing && !forced && !busy && (
+        <div className="hud-actions-panel">
+          <p className={`threat ${chosen && threat.unanswered.length ? "is-danger" : ""}`}>{threatText}</p>
+          {wheelOpen ? (
+            <WheelInfo wheel={wheel} highlight={highlight} center={wheelCenter} onClose={closeWheel} />
           ) : (
             <p className="hint">
               <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> select · <kbd>E</kbd> actions
             </p>
           )}
-        </footer>
+        </div>
       )}
 
       {!playing && !busy && (
@@ -586,20 +620,50 @@ function Floats({ fx }: { fx?: Fx }) {
   );
 }
 
+/** A figure's box on screen, relative to the HUD, plus the HUD's size for keeping options on-screen. */
+interface Anchor { x: number; y: number; w: number; h: number; hudW: number; hudH: number }
+
+/** Rough size of a wheel option, used to place and clamp the options around an enemy. */
+const OPTION_W = 144;
+const OPTION_H = 62;
+const OPTION_GAP = 8;
+
+/** Where each option goes around an enemy: above the head, beside the body, below the feet. Kept on-screen. */
+function optionPositions(a: Anchor): Record<Dir, { left: number; top: number }> {
+  const cx = a.x + a.w / 2;
+  const mid = a.y + a.h * 0.45;
+  const raw: Record<Dir, { left: number; top: number }> = {
+    up: { left: cx - OPTION_W / 2, top: a.y + a.h * 0.06 - OPTION_H - OPTION_GAP },
+    down: { left: cx - OPTION_W / 2, top: a.y + a.h + OPTION_GAP },
+    left: { left: a.x - OPTION_W - OPTION_GAP, top: mid - OPTION_H / 2 },
+    right: { left: a.x + a.w + OPTION_GAP, top: mid - OPTION_H / 2 },
+  };
+  const clamp = (v: number, max: number) => Math.max(8, Math.min(max - 8, v));
+  for (const d of Object.keys(raw) as Dir[]) {
+    raw[d] = { left: clamp(raw[d].left, a.hudW - OPTION_W), top: clamp(raw[d].top, a.hudH - OPTION_H) };
+  }
+  return raw;
+}
+
 /**
- * Four options around the selection's name. WASD highlights, E commits, Q closes.
- * With a mouse, clicking an option commits it straight away.
+ * The four options, opened around whoever you selected: W above, A to the left, S below, D to the right.
+ * Around you, they sit over your own figure's box; around an enemy, just outside its body.
+ * WASD highlights, E commits, Q closes. With a mouse, clicking an option commits it straight away.
  */
-function ActionWheel({ wheel, highlight, center, onHighlight, onCommit, onClose }: {
+function ActionWheel({ wheel, highlight, center, anchor, aroundPlayer, onHighlight, onCommit }: {
   wheel: Wheel;
   highlight: Dir | null;
   center: string;
+  anchor: Anchor | null;
+  aroundPlayer: boolean;
   onHighlight: (d: Dir) => void;
   onCommit: (o: WheelOption) => void;
-  onClose: () => void;
 }) {
+  if (!anchor) return null;
+  const positions = aroundPlayer ? null : optionPositions(anchor);
+  const box = aroundPlayer ? { left: anchor.x, top: anchor.y, width: anchor.w, height: anchor.h } : { inset: 0 };
   return (
-    <div className="wheel" role="menu" aria-label={`Actions for ${center}`}>
+    <div className={`wheel-overlay ${aroundPlayer ? "is-player" : "is-enemy"}`} style={box} role="menu" aria-label={`Actions for ${center}`}>
       {(Object.keys(wheel) as Dir[]).map(dir => {
         const o = wheel[dir];
         return (
@@ -607,6 +671,7 @@ function ActionWheel({ wheel, highlight, center, onHighlight, onCommit, onClose 
             key={dir}
             role="menuitem"
             className={`wheel-option wheel-${dir} ${highlight === dir ? "is-highlighted" : ""}`}
+            style={positions ? { left: positions[dir].left, top: positions[dir].top, width: OPTION_W } : undefined}
             disabled={!o}
             onMouseEnter={() => o && onHighlight(dir)}
             onClick={() => o && onCommit(o)}
@@ -616,19 +681,31 @@ function ActionWheel({ wheel, highlight, center, onHighlight, onCommit, onClose 
           </button>
         );
       })}
-      <div className="wheel-center">
-        <span>{center}</span>
-        <button className="wheel-close" onClick={onClose}><kbd>Q</kbd> Close</button>
-      </div>
-      <p className="wheel-confirm">{highlight && wheel[highlight] ? <><kbd>E</kbd> {wheel[highlight]!.label}</> : "Pick an action"}</p>
     </div>
+  );
+}
+
+/** Who the open wheel acts on, and how to confirm or close it. Shown above the target's bar. */
+function WheelInfo({ wheel, highlight, center, onClose }: {
+  wheel: Wheel;
+  highlight: Dir | null;
+  center: string;
+  onClose: () => void;
+}) {
+  const option = highlight ? wheel[highlight] : null;
+  return (
+    <p className="wheel-info">
+      <b>{center}</b>
+      <span>{option ? <><kbd>E</kbd> {option.label}</> : "Pick an action"}</span>
+      <button className="wheel-close" onClick={onClose}><kbd>Q</kbd> Close</button>
+    </p>
   );
 }
 
 /** One health bar for whoever you're targeting (or, mid-turn, whoever the action involves). Always in the same spot. */
 function TargetPanel({ enemy, before }: { enemy: Enemy; before?: BarValues }) {
   return (
-    <div className="hud-stat hud-target">
+    <div className="hud-target">
       <span className="hud-name">
         {enemy.broken && <span className="tag tag-sleep">Broken</span>}
         {enemy.name} <span className="hud-line">· {enemy.line === "front" ? "Front line" : "Back line"}</span>
@@ -653,6 +730,7 @@ function EnemyFigure({ enemy, selected, fx, stepKey, disabled, onPick }: {
       className={`stage-slot ${selected ? "is-target" : ""}`}
       data-moving={moving}
       aria-pressed={selected}
+      data-fig={enemy.id}
       aria-label={`Select ${enemy.name}`}
       disabled={disabled}
       onClick={onPick}
