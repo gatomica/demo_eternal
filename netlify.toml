@@ -1,0 +1,8 @@
+# Netlify build settings for the Vite + React demo.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Vite needs Node 20.19 or newer.
+  NODE_VERSION = "22"
