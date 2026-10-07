@@ -26,8 +26,9 @@ import {
   lerpAngle,
   type Vec,
 } from "./scene";
+import { Exploration } from "./explore";
 
-type Screen = "menu" | "test";
+type Screen = "menu" | "test" | "explore";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("menu");
@@ -35,6 +36,7 @@ export default function App() {
     <div className="game">
       {screen === "menu" && <MainMenu onStart={setScreen} />}
       {screen === "test" && <TestCombat onExit={() => setScreen("menu")} />}
+      {screen === "explore" && <Exploration onExit={() => setScreen("menu")} />}
     </div>
   );
 }
@@ -83,15 +85,31 @@ function useKeys(handler: (key: Key) => void) {
  * Main menu
  * ============================================================ */
 
+const MENU_OPTIONS: { label: string; screen: Screen }[] = [
+  { label: "Test combat", screen: "test" },
+  { label: "Exploration", screen: "explore" },
+];
+
 function MainMenu({ onStart }: { onStart: (screen: Screen) => void }) {
-  useKeys(key => { if (key === "select") onStart("test"); });
+  const [focus, setFocus] = useState(0);
+  useKeys(key => {
+    if (key === "up" || key === "down") setFocus(i => (i + (key === "up" ? -1 : 1) + MENU_OPTIONS.length) % MENU_OPTIONS.length);
+    if (key === "select") onStart(MENU_OPTIONS[focus].screen);
+  });
   return (
     <main className="menu">
-      <h1 className="menu-title">Combat Demo</h1>
+      <h1 className="menu-title">Demo</h1>
       <nav className="menu-options" aria-label="Main menu">
-        <button className="menu-button is-focused" onClick={() => onStart("test")}>
-          Test combat <kbd>E</kbd>
-        </button>
+        {MENU_OPTIONS.map((o, i) => (
+          <button
+            key={o.screen}
+            className={`menu-button ${i === focus ? "is-focused" : ""}`}
+            onMouseEnter={() => setFocus(i)}
+            onClick={() => onStart(o.screen)}
+          >
+            {o.label}
+          </button>
+        ))}
       </nav>
     </main>
   );
@@ -327,6 +345,19 @@ function involvedEnemy(step: Step | undefined): string | undefined {
   return undefined;
 }
 
+/** 1 → I, 4 → IV, 9 → IX... */
+function roman(n: number): string {
+  const table: [number, string][] = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
+  let out = "";
+  for (const [value, numeral] of table) {
+    while (n >= value) {
+      out += numeral;
+      n -= value;
+    }
+  }
+  return out;
+}
+
 const barValues = (f: { hp: number; fatigue: number; death: number }): BarValues => ({ hp: f.hp, fatigue: f.fatigue, death: f.death });
 
 function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
@@ -533,7 +564,7 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
   /** Resolve the turn, then play it back step by step. */
   const play = (action: PlayerAction) => {
     const next = resolveTurn(fight, action);
-    const pose: PoseName = forced === "revive" ? "idle" : forced === "rest" ? "kneel" : action.type;
+    const pose: PoseName = forced ? "kneel" : action.type; // broken or reviving: down on one knee
     setFight(next);
     setPlayback(
       next.lastTurn.length
@@ -628,7 +659,7 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
   };
   const playerPose: PoseName = playback
     ? playbackPose("player", playback.playerPose, p.broken, "kneel")
-    : forced === "rest" ? "kneel" : forced === "revive" ? "idle" : (chosen?.action.type as PoseName | undefined) ?? "idle";
+    : forced ? "kneel" : (chosen?.action.type as PoseName | undefined) ?? "idle";
   const enemyPose = (e: Enemy): PoseName => playbackPose(e.id, poseForIntent(e), e.broken, "fallen");
 
   // Everyone on the field: you, enemies still standing, and any falling during this step.
@@ -675,6 +706,10 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
 
       {/* The two health bars sit in fixed slots, so nothing else on screen can push them around. */}
       <div className="bar-slot bar-slot-player">
+        {/* Revives left, as a red Roman numeral beside your bar. Nothing shows once they're gone. */}
+        {p.charges > 0 && (
+          <span className="revive-count" aria-label={`${p.charges} revives left`}>{roman(p.charges)}</span>
+        )}
         <HealthBar fighter={p} />
       </div>
 

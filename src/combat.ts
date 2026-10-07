@@ -50,7 +50,8 @@ export interface Fighter {
 export interface Player extends Fighter {
   /** Healing item charges, spent automatically to revive. */
   charges: number;
-  /** True during the protected turn after a revive. */
+  /** True during the protected turn after falling with a charge left. Health stays at 0 until the
+   *  turn ends, then comes back to half (along with rests). */
   reviving: boolean;
 }
 
@@ -476,6 +477,7 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
     // After the group lands: falls and breaks take effect before the next, slower group.
     for (const f of fighters) {
       if (out.has(f.id)) continue;
+      if (f === p && reviving) continue; // untouchable, and still at 0 until the revive lands
       if (f.hp <= 0) {
         out.add(f.id);
         fallen.add(f.id);
@@ -494,6 +496,11 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
 
   /* ---------- 2. Rests and revives settle ---------- */
   if (reviving) {
+    // The revive lands at the end of the protected turn: back to half health, fresh.
+    p.hp = p.maxHP / 2;
+    p.fatigue = 0;
+    p.death = 0;
+    p.broken = false;
     events.push({ kind: "revive", who: p.id });
     say("You revive. Nothing could touch you this turn.");
   }
@@ -567,13 +574,14 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
   p.reviving = false;
   if (p.hp <= 0) {
     if (p.charges > 0) {
+      // A charge is spent now, but the health only comes back at the end of next turn.
       p.charges -= 1;
       p.reviving = true;
-      p.hp = p.maxHP / 2;
+      p.hp = 0;
       p.fatigue = 0;
       p.death = 0;
       p.broken = false;
-      say("The world refuses to let you go. You will revive next turn.", "death");
+      say("The world refuses to let you go. You will revive at the end of next turn.", "death");
     } else {
       p.hp = 0;
       s.status = "lost";

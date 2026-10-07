@@ -15,6 +15,7 @@
   --armor: #6f7489;
   --eyes: #15141b;
   --flesh: #a2505a;     /* health left to fill */
+  --flesh-lost: #e7a3aa; /* health just lost, fading away */
   --sleep: #f3f1f8;     /* Fatigue, white */
   --void: #040406;      /* Death, black */
   --bar-track: min(38vw, 540px);  /* full length of a health bar at BAR_FULL_HP */
@@ -64,6 +65,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .menu-button:hover { border-color: var(--accent); }
 
+/* ---------- Exploration: one canvas, black beyond the walls ---------- */
+.explore { position: absolute; inset: 0; background: #000; }
+.explore-canvas { display: block; width: 100%; height: 100%; }
+
 /* ---------- Combat HUD ---------- */
 /* The stage fills the screen; HUD panels float in the two corners the 3/4 view leaves open. */
 .hud { position: relative; height: 100%; overflow: hidden; }
@@ -89,6 +94,18 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .bar-slot-target { bottom: var(--bar-inset-bottom); right: var(--bar-inset-x); justify-items: end; text-align: right; }
 .hud-target { display: grid; gap: 6px; justify-items: end; width: 100%; }
 .bar-slot .hud-name { font-size: 0.95rem; min-height: 1.4em; }
+/* Revives left: a red Roman numeral just left of your bar, vertically centered on it. */
+.revive-count {
+  position: absolute;
+  right: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--danger);
+  font: 700 calc(var(--bar-h) * 1.25) / 1 "Cinzel", "Trajan Pro", Georgia, "Times New Roman", serif;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  text-shadow: 0 1px 3px #000;
+}
 
 .hud-label { color: var(--muted); }
 .hud-button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
@@ -230,8 +247,8 @@ kbd {
 .bar-layer { position: absolute; inset: 0; display: flex; overflow: hidden; border-radius: 2px; }
 .bar.is-mirrored .bar-layer { flex-direction: row-reverse; }
 .bar-layer > i { display: block; height: 100%; flex: none; }
-.bar-trail > i { transition: width 0.6s ease-in 0.25s; filter: brightness(1.7) saturate(0.6); opacity: 0.75; }
-.bar-trail > .bar-death { filter: none; background: #2a2833; }
+.bar-trail > i { transition: width 0.6s ease-in 0.25s; }
+.bar-lost { background: var(--flesh-lost); }
 .bar-room { background: var(--flesh); }
 .bar-fatigue { background: var(--sleep); }
 .bar-death { background: var(--void); }

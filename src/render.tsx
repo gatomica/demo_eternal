@@ -294,13 +294,17 @@ export interface BarValues {
   death: number;
 }
 
+const barPct = (x: number, maxHP: number) => `${(Math.max(0, x) / maxHP) * 100}%`;
+
 function Segments({ v, maxHP }: { v: BarValues; maxHP: number }) {
-  const pct = (x: number) => `${(Math.max(0, x) / maxHP) * 100}%`;
+  const hp = Math.max(0, v.hp);
+  // Fatigue fills current health and can't spill past it, even for a moment mid-turn.
+  const fatigue = Math.min(Math.max(0, v.fatigue), hp);
   return (
     <>
-      <i className="bar-room" style={{ width: pct(v.hp - v.fatigue) }} />
-      <i className="bar-fatigue" style={{ width: pct(v.fatigue) }} />
-      <i className="bar-death" style={{ width: pct(v.death) }} />
+      <i className="bar-room" style={{ width: barPct(hp - fatigue, maxHP) }} />
+      <i className="bar-fatigue" style={{ width: barPct(fatigue, maxHP) }} />
+      <i className="bar-death" style={{ width: barPct(v.death, maxHP) }} />
     </>
   );
 }
@@ -353,7 +357,8 @@ export function HealthBar({ fighter, before, className, mirrored }: {
       aria-label={`${fighter.name}: health ${Math.round(now.hp)} of ${maxHP}, Fatigue ${Math.round(now.fatigue)}${fighter.broken ? ", guard broken" : ""}`}
       style={{ width: `calc(var(--bar-track) * ${Math.min(maxHP, BAR_FULL_HP) / BAR_FULL_HP})` }}
     >
-      <span className="bar-layer bar-trail"><Segments v={trail} maxHP={maxHP} /></span>
+      {/* The trail only shows health that was just lost, in a light red, sliding away. */}
+      <span className="bar-layer bar-trail"><i className="bar-lost" style={{ width: barPct(trail.hp, maxHP) }} /></span>
       <span className="bar-layer bar-now"><Segments v={now} maxHP={maxHP} /></span>
       {flash > 0 && <span key={flash} className="bar-flash" />}
       {shatter > 0 && <Shards key={shatter} count={8} small />}
