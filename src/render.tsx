@@ -37,11 +37,15 @@ export interface Skeleton {
 
 /**
  * idle, attack, block, maneuver, rest: what a fighter is about to do (the telegraphs).
+ * ready, intimidating, cautious: a sleepwalker's stances, hinting at a few actions at once.
  * strike: the impact frame, shown during playback the moment an attack lands.
  * fallen: an enemy's guard break, down on the ground and struggling to rise.
  * kneel: the player's guard break, down on one knee and struggling to stand.
  */
-export type PoseName = "idle" | "attack" | "block" | "maneuver" | "rest" | "strike" | "fallen" | "kneel";
+export type PoseName =
+  | "idle" | "attack" | "block" | "maneuver" | "rest"
+  | "ready" | "intimidating" | "cautious"
+  | "strike" | "fallen" | "kneel";
 
 /** Drawn facing right in a 100 × 120 box, feet on y = 114. */
 export const POSES: Record<PoseName, Skeleton> = {
@@ -89,6 +93,34 @@ export const POSES: Record<PoseName, Skeleton> = {
     rearLeg: { knee: [46, 91], foot: [44, 114] },
     weapon: { at: [58, 112], angle: -3 },
   },
+  // Ready: en garde. Knees bent, weight forward, the blade levelled at you, free arm back for balance.
+  ready: {
+    head: [53, 30], neck: [52, 41], hip: [47, 72],
+    weaponArm: { elbow: [59, 54], hand: [67, 47] },
+    freeArm: { elbow: [41, 50], hand: [35, 57] },
+    leadLeg: { knee: [63, 89], foot: [67, 114] },
+    rearLeg: { knee: [35, 92], foot: [29, 114] },
+    weapon: { at: [67, 47], angle: -22 },
+  },
+  // Intimidating: standing tall and open, chest out, arms flung wide, the weapon held low and out.
+  intimidating: {
+    head: [48, 17], neck: [48, 28], hip: [50, 64],
+    weaponArm: { elbow: [35, 38], hand: [23, 46] },
+    freeArm: { elbow: [62, 34], hand: [75, 27] },
+    leadLeg: { knee: [61, 89], foot: [70, 114] },
+    rearLeg: { knee: [40, 89], foot: [31, 114] },
+    weapon: { at: [23, 46], angle: 140 },
+  },
+  // Cautious: low and leaning back, the blade held crosswise in front of the face like a bar,
+  // the free hand bracing it.
+  cautious: {
+    head: [42, 46], neck: [43, 56], hip: [40, 82],
+    weaponArm: { elbow: [56, 66], hand: [62, 52] },
+    freeArm: { elbow: [52, 64], hand: [50, 50] },
+    leadLeg: { knee: [58, 96], foot: [64, 114] },
+    rearLeg: { knee: [28, 97], foot: [21, 114] },
+    weapon: { at: [62, 52], angle: -168 },
+  },
   // Follow-through: lunging forward, the weapon swept down and out past the body.
   strike: {
     head: [60, 30], neck: [57, 41], hip: [47, 70],
@@ -118,8 +150,15 @@ export const POSES: Record<PoseName, Skeleton> = {
   },
 };
 
-/** Which pose an enemy shows for what it's about to do. A broken enemy is down on the ground. */
-export const poseForIntent = (e: Enemy): PoseName => (e.broken || e.intent.forced ? "fallen" : e.intent.type);
+/**
+ * Which pose an enemy shows while you plan: its stance if it has one (a sleepwalker hides its
+ * action), otherwise the action itself. A broken enemy is down on the ground.
+ */
+export const poseForIntent = (e: Enemy): PoseName =>
+  e.broken || e.intent.forced ? "fallen" : e.intent.stance ?? e.intent.type;
+
+/** The pose for what an enemy is actually doing, revealed once the turn plays. */
+export const actionPose = (e: Enemy): PoseName => (e.broken || e.intent.forced ? "fallen" : e.intent.type);
 
 /* ============================================================
  * Gear
@@ -219,9 +258,24 @@ export interface StickFigureProps {
   dim?: boolean;
   className?: string;
   title?: string;
+  /** "waxed": unarmed, legs and a shoulder sealed in wax. */
+  variant?: "waxed";
 }
 
-export function StickFigure({ view, pose, weapon, armor, dim, className, title }: StickFigureProps) {
+/** Sickly yellow wax sealing the legs stiff, crusted up the belly and over one shoulder. */
+function Wax({ s, near }: { s: Skeleton; near: Pt }) {
+  const belly: Pt = [(s.hip[0] * 2 + s.neck[0]) / 3, (s.hip[1] * 2 + s.neck[1]) / 3];
+  return (
+    <g className="fig-wax">
+      <polyline points={limb(s.hip, s.rearLeg.knee, s.rearLeg.foot)} />
+      <polyline points={limb(s.hip, s.leadLeg.knee, s.leadLeg.foot)} />
+      <polyline points={limb(s.hip, belly)} />
+      <circle cx={near[0]} cy={near[1] + 1} r={6} />
+    </g>
+  );
+}
+
+export function StickFigure({ view, pose, weapon, armor, dim, className, title, variant }: StickFigureProps) {
   const s = POSES[pose];
   const front = view === "front";
   const [hx, hy] = s.head;
@@ -239,7 +293,8 @@ export function StickFigure({ view, pose, weapon, armor, dim, className, title }
   const freeArm = (
     <polyline points={limb(freeShoulder, s.freeArm.elbow, s.freeArm.hand)} className={`fig-limb ${front ? "fig-far" : ""}`} />
   );
-  const weaponEl = (
+  const waxed = variant === "waxed";
+  const weaponEl = waxed ? null : (
     <g transform={`translate(${s.weapon.at[0]} ${s.weapon.at[1]}) rotate(${s.weapon.angle})`}>
       <Weapon tier={weapon} />
     </g>
@@ -251,7 +306,7 @@ export function StickFigure({ view, pose, weapon, armor, dim, className, title }
       <ellipse cx={50} cy={115} rx={26} ry={3} className="fig-shadow" />
       {/* Enemies face left: mirror the whole drawing. */}
       <g transform={front ? "translate(100 0) scale(-1 1)" : undefined}>
-        {pose === "strike" && <StrikeTrail s={s} tier={weapon} />}
+        {pose === "strike" && !waxed && <StrikeTrail s={s} tier={weapon} />}
         {!front && weaponEl}
         {!front && weaponArm}
         {front && freeArm}
@@ -269,6 +324,7 @@ export function StickFigure({ view, pose, weapon, armor, dim, className, title }
           </g>
         )}
         <polyline points={limb(s.hip, s.leadLeg.knee, s.leadLeg.foot)} className="fig-limb" />
+        {waxed && <Wax s={s} near={nearShoulder} />}
         {!front && freeArm}
         {front && weaponEl}
         {front && weaponArm}
@@ -405,6 +461,7 @@ export interface SceneFigure {
   pose: PoseName;
   weapon: Tier;
   armor: ArmorTier;
+  variant?: "waxed";
   /** Playback animations (fx-hit, fx-step...). */
   classes: string[];
   /** Changes on every playback beat, so animations replay. */
@@ -543,7 +600,7 @@ export function Scene({ figures, shot }: { figures: SceneFigure[]; shot: SceneSh
           }}
         >
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            <StickFigure view={f.view} pose={f.pose} weapon={f.weapon} armor={f.armor} />
+            <StickFigure view={f.view} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} />
             {f.classes.includes("fx-break") && <Shards />}
           </div>
         </button>

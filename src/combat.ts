@@ -16,6 +16,13 @@ export type Tier = "light" | "normal" | "heavy";
 export type ArmorTier = "none" | Tier;
 export type Line = "front" | "back";
 export type ActionType = "attack" | "block" | "maneuver" | "rest";
+/**
+ * How a sleepwalker stands while it decides, which is all you get to see of its plan:
+ * - ready: knees bent, weapon raised. Attack, Block or Maneuver: never Rest.
+ * - intimidating: an open pose. Attack or Rest.
+ * - cautious: guard up, low. Rest, Block or Maneuver: never Attack.
+ */
+export type Stance = "ready" | "intimidating" | "cautious";
 export type Status = "playing" | "won" | "lost";
 
 /** What a player can submit. `target` is an enemy id, or "self" for a Maneuver that falls back. */
@@ -31,6 +38,8 @@ export interface Intent {
   dir: "advance" | "retreat";
   /** True when the enemy is guard broken and has no choice. */
   forced: boolean;
+  /** When set, only this stance is shown, not the action itself (revealed as the turn plays). */
+  stance?: Stance;
 }
 
 export interface Fighter {
@@ -193,24 +202,84 @@ export interface EnemyKind {
   maxHP: number;
   weapon: Tier;
   armor: ArmorTier;
-  /** Pick the next action. Only called when the enemy isn't broken and has no script step. */
-  choose: (self: Enemy, state: CombatState, rng: Rng) => ActionType;
+  /**
+   * Pick the next action, and optionally the stance shown instead of it.
+   * Only called when the enemy isn't broken and has no script step.
+   */
+  choose: (self: Enemy, state: CombatState, rng: Rng) => ActionType | { type: ActionType; stance: Stance };
 }
 
-const pick = <T>(items: T[], rng: Rng): T => items[Math.floor(rng() * items.length)];
+/** Picks a key from `weights` at random, in proportion to its weight. Zero-weight keys never come up. */
+function weighted<K extends string>(weights: Partial<Record<K, number>>, rng: Rng): K {
+  const entries = Object.entries(weights) as [K, number][];
+  const total = entries.reduce((sum, [, w]) => sum + Math.max(0, w), 0);
+  let roll = rng() * total;
+  for (const [k, w] of entries) {
+    roll -= Math.max(0, w);
+    if (roll < 0) return k;
+  }
+  return entries[entries.length - 1][0];
+}
+
+/**
+ * Which actions each stance can lead to, and how likely each is, by how tired the sleepwalker
+ * is (`t`: its Fatigue as a share of its health, 0 fresh to 1 about to break). Fresh ones lean
+ * on Attack; tired ones on Rest, Maneuver and Block.
+ */
+const STANCE_ACTIONS: Record<Stance, (t: number) => Partial<Record<ActionType, number>>> = {
+  ready: t => ({ attack: 0.6 - 0.4 * t, block: 0.3, maneuver: 0.1 + 0.4 * t }),
+  intimidating: t => ({ attack: 0.75 - 0.45 * t, rest: 0.25 + 0.45 * t }),
+  cautious: t => ({ rest: 0.25 + 0.4 * t, block: 0.4, maneuver: 0.35 - 0.2 * t }),
+};
+
+/** How likely each stance is, by tiredness: fresh sleepwalkers posture, tired ones turtle up. */
+const stanceWeights = (t: number): Record<Stance, number> => ({
+  ready: 0.4 - 0.1 * t,
+  intimidating: 0.45 - 0.35 * t,
+  cautious: 0.15 + 0.45 * t,
+});
 
 export const ENEMY_KINDS: Record<string, EnemyKind> = {
-  /** Tutorial enemy: one pose per action, no patterns, random among what it can afford. */
+  /**
+   * The standard enemy. It shows a stance, never its action: Ready, Intimidating or Cautious,
+   * each covering a few actions (see Stance). Its own Fatigue tips the odds: read the pose for
+   * what it might do, and its health bar for what it's likely to do.
+   */
   sleepwalker: {
     name: "Depraved Sleepwalker",
     maxHP: 20,
     weapon: "normal",
     armor: "light",
     choose: (self, _state, rng) => {
-      const options: ActionType[] = ["block", "rest"];
-      if (canAfford(self, attackCost(self))) options.push("attack");
-      if (canAfford(self, maneuverCost(self))) options.push("maneuver");
-      return pick(options, rng);
+      const t = self.hp > 0 ? Math.min(1, self.fatigue / self.hp) : 1;
+      const can: Record<ActionType, boolean> = {
+        attack: canAfford(self, attackCost(self)),
+        maneuver: canAfford(self, maneuverCost(self)),
+        block: true,
+        rest: true,
+      };
+      const stance = weighted(stanceWeights(t), rng);
+      const options = STANCE_ACTIONS[stance](t);
+      for (const a of Object.keys(options) as ActionType[]) if (!can[a]) delete options[a];
+      return { type: weighted(options, rng), stance };
+    },
+  },
+  /**
+   * The weakest enemy: a sleepwalker the wardens tried to soothe back to sleep, half sealed in
+   * sickly wax. Unarmed and clumsy, its legs waxed stiff so it never Maneuvers, and it repeats
+   * the same three actions in order: lunge (Attack), hunch (Block), slump (Rest). Waxed fighting
+   * together start at different points of the cycle.
+   */
+  waxed: {
+    name: "Waxed",
+    maxHP: 12,
+    weapon: "light",
+    armor: "none",
+    choose: (self, state) => {
+      const cycle: ActionType[] = ["attack", "block", "rest"];
+      const offset = Number(self.id.slice(1)) || 0;
+      const next = cycle[(state.turn - 1 + offset) % cycle.length];
+      return next === "attack" && !canAfford(self, attackCost(self)) ? "rest" : next;
     },
   },
 };
@@ -218,9 +287,13 @@ export const ENEMY_KINDS: Record<string, EnemyKind> = {
 function chooseIntent(e: Enemy, state: CombatState, rng: Rng): Intent {
   const dir = e.line === "back" ? "advance" : "retreat";
   if (e.broken) return { type: "rest", dir, forced: true };
+  // Scripted turns show the action itself (the tutorial uses this to show every pose once).
   const step = e.script[state.turn - 1];
-  const type = step ?? ENEMY_KINDS[e.kind].choose(e, state, rng);
-  return { type, dir, forced: false };
+  if (step) return { type: step, dir, forced: false };
+  const choice = ENEMY_KINDS[e.kind].choose(e, state, rng);
+  return typeof choice === "string"
+    ? { type: choice, dir, forced: false }
+    : { type: choice.type, dir, forced: false, stance: choice.stance };
 }
 
 /* ============================================================
@@ -625,16 +698,18 @@ export interface Encounter {
 }
 
 export const ENCOUNTERS: Encounter[] = [
-  {
-    id: "one",
-    label: "One sleepwalker",
-    // Script the opening so the player sees every pose once.
-    enemies: [{ kind: "sleepwalker", script: ["attack", "block", "maneuver", "rest"] }],
-  },
+  { id: "one", label: "One sleepwalker", enemies: [{ kind: "sleepwalker" }] },
   { id: "two", label: "Two sleepwalkers", enemies: [{ kind: "sleepwalker" }, { kind: "sleepwalker" }] },
   {
     id: "three",
     label: "Three sleepwalkers",
     enemies: [{ kind: "sleepwalker" }, { kind: "sleepwalker" }, { kind: "sleepwalker" }],
+  },
+  { id: "waxed", label: "One waxed", enemies: [{ kind: "waxed" }] },
+  { id: "waxed-pair", label: "Two waxed", enemies: [{ kind: "waxed" }, { kind: "waxed" }] },
+  {
+    id: "mixed",
+    label: "Sleepwalker and waxed",
+    enemies: [{ kind: "sleepwalker", line: "front" }, { kind: "waxed" }],
   },
 ];

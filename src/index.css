@@ -13,6 +13,7 @@
   --metal: #b9bccb;      /* blades and plates */
   --grip: #8a6b4a;       /* hafts and handles */
   --armor: #6f7489;
+  --wax: #b9a14e;        /* the waxed: sickly yellow */
   --eyes: #15141b;
   --flesh: #a2505a;     /* health left to fill */
   --flesh-lost: #e7a3aa; /* health just lost, fading away */
@@ -68,6 +69,13 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* ---------- Exploration: one canvas, black beyond the walls ---------- */
 .explore { position: absolute; inset: 0; background: #000; }
 .explore-canvas { display: block; width: 100%; height: 100%; }
+.explore-fade { position: absolute; inset: 0; background: #000; pointer-events: none; animation: explore-fade 0.65s ease-in forwards; }
+@keyframes explore-fade {
+  0% { opacity: 0; }
+  12% { opacity: 0.55; background: #3a2f12; } /* a flicker of wax-yellow as it reaches you */
+  25% { opacity: 0.3; background: #000; }
+  100% { opacity: 1; }
+}
 
 /* ---------- Combat HUD ---------- */
 /* The stage fills the screen; HUD panels float in the two corners the 3/4 view leaves open. */
@@ -281,6 +289,8 @@ kbd {
 .figure { width: 100%; height: 100%; display: block; overflow: visible; }
 .fig-limb { fill: none; stroke: var(--ink); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
 .fig-head { fill: var(--ink); }
+.fig-wax polyline { fill: none; stroke: var(--wax); stroke-width: 9; stroke-linecap: round; stroke-linejoin: round; opacity: 0.94; }
+.fig-wax circle { fill: var(--wax); opacity: 0.94; }
 .fig-ground { stroke: var(--line); stroke-width: 1.5; }
 .fig-blade { fill: var(--metal); }
 .fig-metal { stroke: var(--metal); stroke-linecap: round; }

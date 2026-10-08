@@ -8,12 +8,13 @@ import {
   resolveTurn,
   type ArmorTier,
   type CombatState,
+  type EnemySetup,
   type Enemy,
   type PlayerAction,
   type Step,
   type Tier,
 } from "./combat";
-import { HealthBar, Scene, StickFigure, figureBox, poseForIntent, shotCamera, type BarValues, type PoseName, type SceneFigure, type SceneShot, type ShotCamera } from "./render";
+import { HealthBar, Scene, StickFigure, actionPose, figureBox, poseForIntent, shotCamera, type BarValues, type PoseName, type SceneFigure, type SceneShot, type ShotCamera } from "./render";
 import {
   actionCamera,
   behind,
@@ -26,7 +27,7 @@ import {
   lerpAngle,
   type Vec,
 } from "./scene";
-import { Exploration } from "./explore";
+import { Exploration, type Journey, type MapFoe } from "./explore";
 
 type Screen = "menu" | "test" | "explore";
 
@@ -36,7 +37,7 @@ export default function App() {
     <div className="game">
       {screen === "menu" && <MainMenu onStart={setScreen} />}
       {screen === "test" && <TestCombat onExit={() => setScreen("menu")} />}
-      {screen === "explore" && <Exploration onExit={() => setScreen("menu")} />}
+      {screen === "explore" && <Journeying onExit={() => setScreen("menu")} />}
     </div>
   );
 }
@@ -144,6 +145,58 @@ function TestCombat({ onExit }: { onExit: () => void }) {
 
   if (!run) return <SetupScreen setup={setup} onChange={setSetup} onStart={start} onExit={onExit} />;
   return <CombatScreen key={run.id} initial={run.state} onRetry={start} onChangeLoadout={() => setRun(null)} onExit={onExit} />;
+}
+
+/* ============================================================
+ * Exploration, with fights: walk the map, and touching an enemy opens its fight. Win and
+ * you're back where you stood with it gone; fall and you wake again at the start.
+ * ============================================================ */
+
+/** What you carry on the map. */
+const MAP_LOADOUT = { weapon: "normal" as Tier, armor: "light" as ArmorTier };
+
+function mapFight(enemies: EnemySetup[]): CombatState {
+  return createCombat(
+    { maxHP: PLAYER_MAX_HP, weapon: MAP_LOADOUT.weapon, armor: MAP_LOADOUT.armor, charges: REVIVE_CHARGES },
+    enemies,
+  );
+}
+
+function Journeying({ onExit }: { onExit: () => void }) {
+  const [journey, setJourney] = useState<Journey>({ defeated: [] });
+  // `id` gives every fight (and every return to the map) a fresh screen.
+  // `foes`: the enemy that reached you plus everyone chasing you who piled in.
+  const [fight, setFight] = useState<{ id: number; foes: MapFoe[]; state: CombatState; backTo: Journey } | null>(null);
+  const enemiesOf = (foes: MapFoe[]) => foes.flatMap(f => f.fight);
+  const [visit, setVisit] = useState(0);
+
+  if (fight) {
+    return (
+      <CombatScreen
+        key={fight.id}
+        initial={fight.state}
+        onRetry={() => setFight(f => f && { ...f, id: f.id + 1, state: mapFight(enemiesOf(f.foes)) })}
+        onChangeLoadout={() => {}}
+        onExit={onExit}
+        onDone={won => {
+          // Won: back where you stood, the enemy gone. Lost: wake at the start; your progress stays.
+          setJourney(won
+            ? { ...fight.backTo, defeated: [...fight.backTo.defeated, ...fight.foes.map(f => f.id)] }
+            : { defeated: fight.backTo.defeated });
+          setFight(null);
+          setVisit(v => v + 1);
+        }}
+      />
+    );
+  }
+  return (
+    <Exploration
+      key={visit}
+      journey={journey}
+      onEncounter={(foes, backTo) => setFight(f => ({ id: (f?.id ?? 0) + 1, foes, state: mapFight(enemiesOf(foes)), backTo }))}
+      onExit={onExit}
+    />
+  );
 }
 
 const TIER_KEYS = Object.keys(WEAPONS) as Tier[];
@@ -360,11 +413,13 @@ function roman(n: number): string {
 
 const barValues = (f: { hp: number; fatigue: number; death: number }): BarValues => ({ hp: f.hp, fatigue: f.fatigue, death: f.death });
 
-function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
+function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
   initial: CombatState;
   onRetry: () => void;
   onChangeLoadout: () => void;
   onExit: () => void;
+  /** Set for fights from the map: when it's over, carry on (won or not) instead of retrying. */
+  onDone?: (won: boolean) => void;
 }) {
   const [fight, setFight] = useState(initial);
   const [playback, setPlayback] = useState<Playback | null>(null);
@@ -603,9 +658,10 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
   const pauseOptions: { label: string; run: () => void }[] = [
     { label: "Resume", run: () => setPaused(false) },
     { label: "Restart fight", run: onRetry },
-    { label: "Change loadout", run: onChangeLoadout },
+    ...(onDone ? [] : [{ label: "Change loadout", run: onChangeLoadout }]),
     { label: "Main menu", run: onExit },
   ];
+  const finish = () => onDone?.(fight.status === "won");
 
   useKeys(key => {
     // Escape pauses at any time; the pause menu takes all input until it closes.
@@ -623,7 +679,8 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
     }
     if (busy) return; // input waits for the turn to finish playing
     if (!playing) {
-      if (key === "select") onRetry();
+      if (onDone) { if (key === "select" || key === "back" || key === "pause") finish(); }
+      else if (key === "select") onRetry();
       else if (key === "back" || key === "pause") onExit();
       return;
     }
@@ -660,7 +717,9 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
   const playerPose: PoseName = playback
     ? playbackPose("player", playback.playerPose, p.broken, "kneel")
     : forced ? "kneel" : (chosen?.action.type as PoseName | undefined) ?? "idle";
-  const enemyPose = (e: Enemy): PoseName => playbackPose(e.id, poseForIntent(e), e.broken, "fallen");
+  // While you plan, a sleepwalker only shows its stance; as the turn plays, its action shows.
+  const enemyPose = (e: Enemy): PoseName =>
+    playbackPose(e.id, playback ? actionPose(e) : poseForIntent(e), e.broken, "fallen");
 
   // Everyone on the field: you, enemies still standing, and any falling during this step.
   const figures: SceneFigure[] = [
@@ -685,6 +744,7 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
         pose: enemyPose(e),
         weapon: e.weapon,
         armor: e.armor,
+        variant: e.kind === "waxed" ? "waxed" : undefined,
         classes: fx.get(e.id)?.classes ?? [],
         stepKey,
         selected: !busy && sel.kind === "enemy" && sel.id === e.id,
@@ -754,12 +814,22 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit }: {
       {!playing && !busy && (
         <div className="result" role="dialog" aria-label="Fight over">
           <div className="result-card">
-            <h2>{fight.status === "won" ? "The sleepwalkers are still" : "You fade"}</h2>
-            <div className="setup-buttons">
-              <button className="hud-button" onClick={onExit}>Menu</button>
-              <button className="hud-button" onClick={onChangeLoadout}>Change loadout</button>
-              <button className="commit" onClick={onRetry}>Retry</button>
-            </div>
+            <h2>
+              {fight.status !== "won" ? "You fade"
+                : onDone ? (fight.enemies.length > 1 ? "They lie still" : "It lies still")
+                : "The sleepwalkers are still"}
+            </h2>
+            {onDone ? (
+              <div className="setup-buttons">
+                <button className="commit" onClick={finish}>{fight.status === "won" ? "Continue" : "Wake again"}</button>
+              </div>
+            ) : (
+              <div className="setup-buttons">
+                <button className="hud-button" onClick={onExit}>Menu</button>
+                <button className="hud-button" onClick={onChangeLoadout}>Change loadout</button>
+                <button className="commit" onClick={onRetry}>Retry</button>
+              </div>
+            )}
           </div>
         </div>
       )}
