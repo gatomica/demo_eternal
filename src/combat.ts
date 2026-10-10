@@ -197,6 +197,10 @@ export const canAfford = (f: Fighter, cost: number) => f.fatigue + cost < f.hp;
  * Enemy kinds
  * ============================================================ */
 
+/**
+ * Enemies may pick any action, even one that will break their own guard (an attack or Maneuver
+ * they can't afford). Only a kind written with an explicit restriction avoids that.
+ */
 export interface EnemyKind {
   name: string;
   maxHP: number;
@@ -209,78 +213,62 @@ export interface EnemyKind {
   choose: (self: Enemy, state: CombatState, rng: Rng) => ActionType | { type: ActionType; stance: Stance };
 }
 
-/** Picks a key from `weights` at random, in proportion to its weight. Zero-weight keys never come up. */
-function weighted<K extends string>(weights: Partial<Record<K, number>>, rng: Rng): K {
-  const entries = Object.entries(weights) as [K, number][];
-  const total = entries.reduce((sum, [, w]) => sum + Math.max(0, w), 0);
-  let roll = rng() * total;
-  for (const [k, w] of entries) {
-    roll -= Math.max(0, w);
-    if (roll < 0) return k;
-  }
-  return entries[entries.length - 1][0];
-}
+/**
+ * The global rule for enemy choices: from a set of options, each is equally likely.
+ * (Stances, kinds of action, and actions within a kind are all picked this way.)
+ */
+export const pickOne = <T>(options: readonly T[], rng: Rng): T => options[Math.floor(rng() * options.length)];
+
+/** The three kinds of action: Attack, Defense (Block and Maneuver) and Rest. */
+export type ActionKind = "attack" | "defense" | "rest";
+export const KIND_OF: Record<ActionType, ActionKind> = { attack: "attack", block: "defense", maneuver: "defense", rest: "rest" };
 
 /**
- * Which actions each stance can lead to, and how likely each is, by how tired the sleepwalker
- * is (`t`: its Fatigue as a share of its health, 0 fresh to 1 about to break). Fresh ones lean
- * on Attack; tired ones on Rest, Maneuver and Block.
+ * Picks among `actions` the way every enemy does: first a kind (Attack, Defense or Rest),
+ * evenly among the kinds on offer, then an action of that kind, evenly again. So with Attack,
+ * Block and Maneuver on offer: Attack 1/2, Block 1/4, Maneuver 1/4.
  */
-const STANCE_ACTIONS: Record<Stance, (t: number) => Partial<Record<ActionType, number>>> = {
-  ready: t => ({ attack: 0.6 - 0.4 * t, block: 0.3, maneuver: 0.1 + 0.4 * t }),
-  intimidating: t => ({ attack: 0.75 - 0.45 * t, rest: 0.25 + 0.45 * t }),
-  cautious: t => ({ rest: 0.25 + 0.4 * t, block: 0.4, maneuver: 0.35 - 0.2 * t }),
-};
+export function pickAction(actions: ActionType[], rng: Rng): ActionType {
+  const kind = pickOne([...new Set(actions.map(a => KIND_OF[a]))], rng);
+  return pickOne(actions.filter(a => KIND_OF[a] === kind), rng);
+}
 
-/** How likely each stance is, by tiredness: fresh sleepwalkers posture, tired ones turtle up. */
-const stanceWeights = (t: number): Record<Stance, number> => ({
-  ready: 0.4 - 0.1 * t,
-  intimidating: 0.45 - 0.35 * t,
-  cautious: 0.15 + 0.45 * t,
-});
+/** Which actions each stance can lead to. Within a stance, see pickAction for the odds. */
+const STANCE_ACTIONS: Record<Stance, ActionType[]> = {
+  ready: ["attack", "block", "maneuver"],
+  intimidating: ["attack", "rest"],
+  cautious: ["rest", "block", "maneuver"],
+};
+const STANCES = Object.keys(STANCE_ACTIONS) as Stance[];
 
 export const ENEMY_KINDS: Record<string, EnemyKind> = {
   /**
    * The standard enemy. It shows a stance, never its action: Ready, Intimidating or Cautious,
-   * each covering a few actions (see Stance). Its own Fatigue tips the odds: read the pose for
-   * what it might do, and its health bar for what it's likely to do.
+   * each covering a few actions (see Stance). Each turn it takes one of the three stances at
+   * random, a third each, then an action from that stance (see pickAction).
    */
   sleepwalker: {
     name: "Depraved Sleepwalker",
     maxHP: 20,
     weapon: "normal",
     armor: "light",
-    choose: (self, _state, rng) => {
-      const t = self.hp > 0 ? Math.min(1, self.fatigue / self.hp) : 1;
-      const can: Record<ActionType, boolean> = {
-        attack: canAfford(self, attackCost(self)),
-        maneuver: canAfford(self, maneuverCost(self)),
-        block: true,
-        rest: true,
-      };
-      const stance = weighted(stanceWeights(t), rng);
-      const options = STANCE_ACTIONS[stance](t);
-      for (const a of Object.keys(options) as ActionType[]) if (!can[a]) delete options[a];
-      return { type: weighted(options, rng), stance };
+    choose: (_self, _state, rng) => {
+      const stance = pickOne(STANCES, rng);
+      return { type: pickAction(STANCE_ACTIONS[stance], rng), stance };
     },
   },
   /**
    * The weakest enemy: a sleepwalker the wardens tried to soothe back to sleep, half sealed in
-   * sickly wax. Unarmed and clumsy, its legs waxed stiff so it never Maneuvers, and it repeats
-   * the same three actions in order: lunge (Attack), hunch (Block), slump (Rest). Waxed fighting
-   * together start at different points of the cycle.
+   * sickly wax. Unarmed and clumsy, and fully telegraphed: it has four stances, one per action
+   * (lunge = Attack, hunch = Block, crouch = Maneuver, slump = Rest), each leading to its action
+   * every time. Which stance it takes each turn is random, a quarter each.
    */
   waxed: {
     name: "Waxed",
     maxHP: 12,
     weapon: "light",
     armor: "none",
-    choose: (self, state) => {
-      const cycle: ActionType[] = ["attack", "block", "rest"];
-      const offset = Number(self.id.slice(1)) || 0;
-      const next = cycle[(state.turn - 1 + offset) % cycle.length];
-      return next === "attack" && !canAfford(self, attackCost(self)) ? "rest" : next;
-    },
+    choose: (_self, _state, rng) => pickOne(["attack", "block", "maneuver", "rest"] as ActionType[], rng),
   },
 };
 
