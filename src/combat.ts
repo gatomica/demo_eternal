@@ -36,10 +36,25 @@ export interface Intent {
   type: ActionType;
   /** For Maneuver: where it will end up. Decided from its line when the intent is chosen. */
   dir: "advance" | "retreat";
-  /** True when the enemy is guard broken and has no choice. */
+  /** True when the enemy is staggered and has no choice. */
   forced: boolean;
   /** When set, only this stance is shown, not the action itself (revealed as the turn plays). */
   stance?: Stance;
+  /** The weight of this Attack or Block, when the action has its own. Otherwise the fighter's weapon. */
+  weight?: Tier;
+  /** A ranged attack: the attacker stays put, a Block sends nothing back, and it can always be dodged. */
+  ranged?: boolean;
+}
+
+/** How an enemy's last action went, for choosing what it can do next. */
+export interface LastAction {
+  type: ActionType;
+  /**
+   * done: it happened. undone: it didn't (a Rest cut short by a hit, a Block with nothing to
+   * block, an action cancelled before it happened). recover: it was the forced Rest after
+   * being staggered.
+   */
+  outcome: "done" | "undone" | "recover";
 }
 
 export interface Fighter {
@@ -51,9 +66,9 @@ export interface Fighter {
   death: number;
   weapon: Tier;
   armor: ArmorTier;
-  /** Guard broken: Fatigue is pinned at full (it can't grow further) and the next turn is a forced Rest,
+  /** Guard staggered: Fatigue is pinned at full (it can't grow further) and the next turn is a forced Rest,
    *  which always ends with Fatigue at 0. */
-  broken: boolean;
+  staggered: boolean;
 }
 
 export interface Player extends Fighter {
@@ -71,9 +86,11 @@ export interface Enemy extends Fighter {
   intent: Intent;
   /** Optional scripted actions for the first turns, e.g. to show every pose in the tutorial. */
   script: ActionType[];
+  /** How its action last turn went (null before its first turn). */
+  last: LastAction | null;
 }
 
-export type LogKind = "info" | "hit" | "break" | "death";
+export type LogKind = "info" | "hit" | "stagger" | "death";
 export interface LogEntry {
   text: string;
   kind: LogKind;
@@ -97,17 +114,22 @@ export type CombatEvent =
       kind: "attack";
       attacker: string;
       target: string;
-      /** hit: landed; blocked: landed into a Block; dodged: avoided by a Maneuver from the back line. */
+      /** hit: landed; blocked: landed into a Block; dodged: avoided by a Maneuver. */
       result: "hit" | "blocked" | "dodged";
       /** Health lost by the target. */
       damage: number;
-      /** Fatigue added: to the target on a hit, to the attacker on a Block. */
+      /**
+       * Fatigue added: to the target on a hit or a dodge, to the attacker on a Block (none for a
+       * ranged attack).
+       */
       fatigue: number;
-      /** The attacker was already dropped or broken by a tied attack, and grits through to finish its own. */
+      /** A ranged attack: the attacker didn't close in. */
+      ranged: boolean;
+      /** The attacker was already dropped or staggered by a tied attack, and grits through to finish its own. */
       grit: boolean;
     }
-  | { kind: "canceled"; who: string; action: ActionType; reason: "broken" | "fallen" | "no target" }
-  | { kind: "break"; who: string }
+  | { kind: "canceled"; who: string; action: ActionType; reason: "staggered" | "fallen" | "no target" }
+  | { kind: "stagger"; who: string }
   | { kind: "fall"; who: string }
   | { kind: "rest"; who: string; result: "rested" | "interrupted" | "recovered"; forced: boolean }
   /** `cause` is who moved them: the enemy itself, or the player (by Maneuvering or pulling it in with an attack). */
@@ -120,7 +142,7 @@ export interface FighterView {
   hp: number;
   fatigue: number;
   death: number;
-  broken: boolean;
+  staggered: boolean;
   alive: boolean;
   line?: Line;
 }
@@ -160,12 +182,16 @@ export const WEAPONS: Record<Tier, { cost: number; damage: number; block: number
   heavy:  { cost: 8, damage: 4, block: 4, speed: 3, label: "Heavy" },
 };
 
-/** "none" uses the base Resistance of 1/16. Its Maneuver cost is still an open question; 1 for now. */
-export const ARMOR: Record<ArmorTier, { resist: number; move: number; label: string }> = {
-  none:   { resist: 1, move: 1, label: "None" },
-  light:  { resist: 2, move: 1, label: "Light" },
-  normal: { resist: 3, move: 3, label: "Normal" },
-  heavy:  { resist: 4, move: 8, label: "Heavy" },
+/**
+ * resist: Resistance, in sixteenths ("none" is the base 1/16).
+ * dodge: a Maneuver costs nothing, but each attack it dodges turns into this many sixteenths of
+ * its damage as Fatigue. The heavier the armor, the clumsier the dodge.
+ */
+export const ARMOR: Record<ArmorTier, { resist: number; dodge: number; label: string }> = {
+  none:   { resist: 1, dodge: 1, label: "None" },
+  light:  { resist: 2, dodge: 1, label: "Light" },
+  normal: { resist: 3, dodge: 2, label: "Normal" },
+  heavy:  { resist: 4, dodge: 3, label: "Heavy" },
 };
 
 /** Rest clears this much Fatigue. */
@@ -181,14 +207,17 @@ export const DEFAULT_CONFIG: CombatConfig = {
 
 export const sixteenths = (n: number, maxHP: number) => (n / 16) * maxHP;
 
-export const attackCost = (f: Fighter) => sixteenths(WEAPONS[f.weapon].cost, f.maxHP);
-export const attackDamage = (f: Fighter) => sixteenths(WEAPONS[f.weapon].damage, f.maxHP);
-export const maneuverCost = (f: Fighter) => sixteenths(ARMOR[f.armor].move, f.maxHP);
+/** Attacks and Blocks use the weight of the action when it has one, otherwise the fighter's weapon. */
+export const attackCost = (f: Fighter, weight: Tier = f.weapon) => sixteenths(WEAPONS[weight].cost, f.maxHP);
+export const attackDamage = (f: Fighter, weight: Tier = f.weapon) => sixteenths(WEAPONS[weight].damage, f.maxHP);
 export const restAmount = (f: Fighter) => sixteenths(REST_CLEARS, f.maxHP);
 
-/** Share of incoming damage turned into Fatigue (0..1). */
-export const resistance = (f: Fighter, blocking: boolean) =>
-  Math.min(1, (ARMOR[f.armor].resist + (blocking ? WEAPONS[f.weapon].block : 0)) / 16);
+/** Share of incoming damage turned into Fatigue (0..1), with a Block of the given weight or none. */
+export const resistance = (f: Fighter, blockWeight: Tier | null) =>
+  Math.min(1, (ARMOR[f.armor].resist + (blockWeight ? WEAPONS[blockWeight].block : 0)) / 16);
+
+/** The Fatigue a dodged attack of this much damage turns into. */
+export const dodgeFatigue = (f: Fighter, damage: number) => (damage * ARMOR[f.armor].dodge) / 16;
 
 /** An action is affordable if paying for it leaves the fighter below its guard-break point. */
 export const canAfford = (f: Fighter, cost: number) => f.fatigue + cost < f.hp;
@@ -208,7 +237,7 @@ export interface EnemyKind {
   armor: ArmorTier;
   /**
    * Pick the next action, and optionally the stance shown instead of it.
-   * Only called when the enemy isn't broken and has no script step.
+   * Only called when the enemy isn't staggered and has no script step.
    */
   choose: (self: Enemy, state: CombatState, rng: Rng) => ActionType | { type: ActionType; stance: Stance };
 }
@@ -274,7 +303,7 @@ export const ENEMY_KINDS: Record<string, EnemyKind> = {
 
 function chooseIntent(e: Enemy, state: CombatState, rng: Rng): Intent {
   const dir = e.line === "back" ? "advance" : "retreat";
-  if (e.broken) return { type: "rest", dir, forced: true };
+  if (e.staggered) return { type: "rest", dir, forced: true };
   // Scripted turns show the action itself (the tutorial uses this to show every pose once).
   const step = e.script[state.turn - 1];
   if (step) return { type: step, dir, forced: false };
@@ -319,7 +348,7 @@ export function createCombat(
     death: 0,
     weapon: player.weapon,
     armor: player.armor,
-    broken: false,
+    staggered: false,
     charges: player.charges,
     reviving: false,
   };
@@ -339,11 +368,12 @@ export function createCombat(
       death: 0,
       weapon: kind.weapon,
       armor: kind.armor,
-      broken: false,
+      staggered: false,
       line: setup.line ?? "back",
       alive: true,
       script: setup.script ?? [],
       intent: { type: "block", dir: "advance", forced: false }, // replaced below
+      last: null,
     };
   });
 
@@ -367,7 +397,7 @@ export function createCombat(
 /** The action the player is locked into this turn, if any. */
 export function forcedAction(state: CombatState): "rest" | "revive" | null {
   if (state.player.reviving) return "revive";
-  if (state.player.broken) return "rest";
+  if (state.player.staggered) return "rest";
   return null;
 }
 
@@ -393,7 +423,7 @@ export function previewThreat(state: CombatState, action?: PlayerAction) {
   let unanswered: Enemy[];
   if (state.player.reviving) unanswered = [];
   else if (action?.type === "block") unanswered = attackers.filter(e => e.line === "front" && e.id !== action.target);
-  else if (action?.type === "maneuver") unanswered = attackers.filter(e => e.line === "front");
+  else if (action?.type === "maneuver") unanswered = attackers.filter(e => e.line === "front" && !e.intent.ranged);
   else unanswered = attackers;
   return { attackers, unanswered };
 }
@@ -405,8 +435,8 @@ export function previewThreat(state: CombatState, action?: PlayerAction) {
  *
  * 1. Attacks, fastest weapon first (light, normal, heavy). Each is answered by the target's
  *    Block or dodge, if it has one. Attacks of the same speed play one at a time in random
- *    order, but all of them land: a fighter dropped or broken by a tied attack grits through
- *    to finish its own. After each speed group, anyone killed or guard broken loses whatever
+ *    order, but all of them land: a fighter dropped or staggered by a tied attack grits through
+ *    to finish its own. After each speed group, anyone killed or staggered loses whatever
  *    they hadn't done yet: a slower attack, a Block for later attacks, a Rest, a move.
  * 2. Rests settle: a damaging hit cancels a voluntary Rest. Revives finish here too.
  * 3. Movement: player Maneuver, melee pulls, enemy Maneuvers.
@@ -440,8 +470,8 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
   const r1 = (n: number) => Math.round(n * 10) / 10;
   const snapshot = (): Record<string, FighterView> => {
     const v: Record<string, FighterView> = {};
-    v[p.id] = { hp: p.hp, fatigue: p.fatigue, death: p.death, broken: p.broken, alive: p.hp > 0 };
-    for (const e of alive) v[e.id] = { hp: e.hp, fatigue: e.fatigue, death: e.death, broken: e.broken, alive: e.hp > 0, line: e.line };
+    v[p.id] = { hp: p.hp, fatigue: p.fatigue, death: p.death, staggered: p.staggered, alive: p.hp > 0 };
+    for (const e of alive) v[e.id] = { hp: e.hp, fatigue: e.fatigue, death: e.death, staggered: e.staggered, alive: e.hp > 0, line: e.line };
     return v;
   };
   const endStep = () => {
@@ -454,40 +484,51 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
   const forced = forcedAction(s);
   const act: PlayerAction | null = forced === "revive" ? null : forced === "rest" ? { type: "rest" } : action;
   const resting = new Map<string, boolean>(); // id -> forced?
-  if (act?.type === "rest") resting.set(p.id, p.broken);
+  if (act?.type === "rest") resting.set(p.id, p.staggered);
   for (const e of alive) if (e.intent.type === "rest") resting.set(e.id, e.intent.forced);
 
-  /** Adds Fatigue, unless the fighter is broken: then it's already pinned at full. */
+  /** Adds Fatigue, unless the fighter is staggered: then it's already pinned at full. */
   const tire = (f: Fighter, amount: number) => {
     if (amount <= 0) return;
     gained.add(f.id);
-    if (!f.broken) f.fatigue += amount;
+    if (!f.staggered) f.fatigue += amount;
   };
-  /** A broken fighter's bar stays solid white, even as its health drops. */
-  const pinBroken = () => { for (const f of fighters) if (f.broken) f.fatigue = Math.max(0, f.hp); };
+  /** A staggered fighter's bar stays solid white, even as its health drops. */
+  const pinStaggered = () => { for (const f of fighters) if (f.staggered) f.fatigue = Math.max(0, f.hp); };
+
+  /** The weight of a fighter's Attack or Block this turn: the action's own, or its weapon's. */
+  const weightOf = (f: Fighter): Tier => (f === p ? p.weapon : (f as Enemy).intent.weight ?? f.weapon);
+  const isRanged = (f: Fighter) => f !== p && !!(f as Enemy).intent.ranged;
 
   const isBlocking = (f: Fighter, attacker: Enemy | Player) => {
     if (out.has(f.id)) return false;
     if (f === p) return act?.type === "block" && (act.target === attacker.id || locked.get(attacker.id) === "back");
     return (f as Enemy).intent.type === "block";
   };
+  /**
+   * A Maneuver dodges every attack except melee from the front line: a melee attacker already in
+   * the front line is right there. Ranged attacks can always be dodged.
+   */
   const isDodging = (f: Fighter, attacker: Fighter) => {
     if (out.has(f.id)) return false;
-    if (f === p) return act?.type === "maneuver" && locked.get(attacker.id) === "back";
+    const ranged = isRanged(attacker);
+    if (f === p) return act?.type === "maneuver" && (ranged || locked.get(attacker.id) === "back");
     const e = f as Enemy;
-    return e.intent.type === "maneuver" && locked.get(e.id) === "back" && attacker === p;
+    return e.intent.type === "maneuver" && attacker === p && (ranged || locked.get(e.id) === "back");
   };
+  const blockedSomething = new Set<string>(); // Blocks that actually caught an attack
+  const cancelled = new Set<string>();        // actions cancelled before they happened
 
   /* ---------- 1. Attacks, by speed ---------- */
   interface PendingAttack { attacker: Fighter; target: Fighter }
   const pending: PendingAttack[] = [];
   if (act?.type === "attack") pending.push({ attacker: p, target: byId(act.target)! });
   for (const e of alive) if (e.intent.type === "attack") pending.push({ attacker: e, target: p });
-  const speeds = [...new Set(pending.map(a => WEAPONS[a.attacker.weapon].speed))].sort((a, b) => a - b);
+  const speeds = [...new Set(pending.map(a => WEAPONS[weightOf(a.attacker)].speed))].sort((a, b) => a - b);
 
   for (const speed of speeds) {
     // Ties play one at a time, in random order.
-    const group = pending.filter(a => WEAPONS[a.attacker.weapon].speed === speed);
+    const group = pending.filter(a => WEAPONS[weightOf(a.attacker)].speed === speed);
     for (let i = group.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1));
       [group[i], group[j]] = [group[j], group[i]];
@@ -495,47 +536,59 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
     group.forEach(({ attacker, target }, n) => {
       if (n > 0) endStep(); // each attack is its own beat
       if (out.has(attacker.id)) {
-        events.push({ kind: "canceled", who: attacker.id, action: "attack", reason: fallen.has(attacker.id) ? "fallen" : "broken" });
-        say(`${nameOf(attacker)} ${fallen.has(attacker.id) ? "falls" : "breaks"} before the attack lands.`);
+        cancelled.add(attacker.id);
+        events.push({ kind: "canceled", who: attacker.id, action: "attack", reason: fallen.has(attacker.id) ? "fallen" : "staggered" });
+        say(`${nameOf(attacker)} ${fallen.has(attacker.id) ? "falls" : "staggers"} before the attack lands.`);
         return;
       }
       if (fallen.has(target.id)) {
+        cancelled.add(attacker.id);
         events.push({ kind: "canceled", who: attacker.id, action: "attack", reason: "no target" });
         return;
       }
-      const grit = attacker.hp <= 0 || (!attacker.broken && attacker.fatigue >= attacker.hp);
-      tire(attacker, attackCost(attacker));
+      const grit = attacker.hp <= 0 || (!attacker.staggered && attacker.fatigue >= attacker.hp);
+      const weight = weightOf(attacker);
+      const ranged = isRanged(attacker);
+      tire(attacker, attackCost(attacker, weight));
+      // Melee closes in on the target; a ranged attacker stays where it is.
       if (attacker === p) pulls.set(target.id, p.id);
-      else pulls.set(attacker.id, attacker.id);
+      else if (!ranged) pulls.set(attacker.id, attacker.id);
+      const dmg = attackDamage(attacker, weight) * (resting.has(target.id) ? cfg.restBonus : 1);
 
       if (target === p && reviving) {
-        events.push({ kind: "attack", attacker: attacker.id, target: p.id, result: "dodged", damage: 0, fatigue: 0, grit });
+        events.push({ kind: "attack", attacker: attacker.id, target: p.id, result: "dodged", damage: 0, fatigue: 0, ranged, grit });
         say(`${nameOf(attacker)}'s blow passes through you as you revive.`);
         return;
       }
       if (isDodging(target, attacker)) {
-        events.push({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: 0, grit });
-        say(`${nameOf(target)} ${target === p ? "evade" : "evades"} ${nameOf(attacker)}'s attack.`);
+        // Out of the way: no damage, only the effort of the dodge.
+        const effort = dodgeFatigue(target, dmg);
+        tire(target, effort);
+        events.push({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: effort, ranged, grit });
+        say(`${nameOf(target)} ${target === p ? "evade" : "evades"} ${nameOf(attacker)}'s attack: ${r1(effort)} Fatigue.`);
         return;
       }
       const blocking = isBlocking(target, attacker as Enemy);
-      const dmg = attackDamage(attacker) * (resting.has(target.id) ? cfg.restBonus : 1);
-      const resisted = dmg * resistance(target, blocking);
-      const taker = blocking ? attacker : target; // on a Block, everything resisted goes back to the attacker
-      tire(taker, resisted);
+      if (blocking) blockedSomething.add(target.id);
+      const resisted = dmg * resistance(target, blocking ? weightOf(target) : null);
+      // On a Block, everything resisted goes back to the attacker; unless the attack is ranged,
+      // when it simply stops there.
+      if (!blocking) tire(target, resisted);
+      else if (!ranged) tire(attacker, resisted);
       const through = dmg - resisted;
       if (through > 0) hurt.add(target.id);
       target.hp -= through;
-      events.push({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: resisted, grit });
+      const sentBack = blocking && ranged ? 0 : resisted;
+      events.push({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, grit });
       say(
         blocking
-          ? `${nameOf(attacker)} ${attacker === p ? "strike" : "strikes"} into ${target === p ? "your" : `${nameOf(target)}'s`} guard: ${r1(through)} damage, ${r1(resisted)} Fatigue sent back.`
+          ? `${nameOf(attacker)} ${attacker === p ? "strike" : "strikes"} into ${target === p ? "your" : `${nameOf(target)}'s`} guard: ${r1(through)} damage, ${r1(sentBack)} Fatigue sent back.`
           : `${nameOf(attacker)} ${attacker === p ? "hit" : "hits"} ${target === p ? "you" : nameOf(target)}: ${r1(through)} damage, ${r1(resisted)} as Fatigue.`,
         "hit",
       );
     });
 
-    // After the group lands: falls and breaks take effect before the next, slower group.
+    // After the group lands: falls and staggers take effect before the next, slower group.
     for (const f of fighters) {
       if (out.has(f.id)) continue;
       if (f === p && reviving) continue; // untouchable, and still at 0 until the revive lands
@@ -544,14 +597,14 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
         fallen.add(f.id);
         events.push({ kind: "fall", who: f.id });
         say(f === p ? "You fall." : `${f.name} falls still at last.`, "death");
-      } else if (!f.broken && f.fatigue >= f.hp) {
+      } else if (!f.staggered && f.fatigue >= f.hp) {
         out.add(f.id);
-        f.broken = true;
-        events.push({ kind: "break", who: f.id });
-        say(f === p ? "Your guard breaks." : `${f.name}'s guard breaks.`, "break");
+        f.staggered = true;
+        events.push({ kind: "stagger", who: f.id });
+        say(f === p ? "You stagger." : `${f.name} staggers.`, "stagger");
       }
     }
-    pinBroken();
+    pinStaggered();
     endStep();
   }
 
@@ -561,7 +614,7 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
     p.hp = p.maxHP / 2;
     p.fatigue = 0;
     p.death = 0;
-    p.broken = false;
+    p.staggered = false;
     events.push({ kind: "revive", who: p.id });
     say("You revive. Nothing could touch you this turn.");
   }
@@ -570,7 +623,7 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
     if (fallen.has(id)) continue;
     if (wasForced) {
       // The forced Rest always ends the break, hit or not, with Fatigue back to 0.
-      f.broken = false;
+      f.staggered = false;
       f.fatigue = 0;
       events.push({ kind: "rest", who: id, result: "recovered", forced: true });
       say(f === p ? "You come back to your senses." : `${f.name} recovers.`);
@@ -598,8 +651,8 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
     e.line = line;
     movedBy.set(e.id, by);
   };
+  // A Maneuver costs nothing in itself: only the attacks it dodged tired you.
   if (act?.type === "maneuver" && !out.has(p.id)) {
-    tire(p, maneuverCost(p));
     for (const e of alive) place(e, act.target !== "self" && e.id === act.target ? "front" : "back", p.id);
   }
   for (const [id, by] of pulls) {
@@ -607,8 +660,8 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
     if (e && !fallen.has(id)) place(e, "front", by);
   }
   for (const e of alive) {
-    if (e.intent.type !== "maneuver" || out.has(e.id)) continue;
-    tire(e, maneuverCost(e));
+    if (e.intent.type !== "maneuver") continue;
+    if (out.has(e.id)) { cancelled.add(e.id); continue; }
     place(e, e.intent.dir === "advance" ? "front" : "back", e.id);
   }
   for (const e of alive) {
@@ -618,7 +671,7 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
 
   /* ---------- 4. End of turn ---------- */
   for (const f of fighters) {
-    if (!gained.has(f.id) && !f.broken) f.fatigue /= 2;
+    if (!gained.has(f.id) && !f.staggered) f.fatigue /= 2;
     f.death /= 2; // nothing applies Death yet; kept so the rule is in place
   }
   for (const e of alive) {
@@ -626,9 +679,9 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
       e.alive = false;
       e.hp = 0;
       e.fatigue = 0;
-    } else if (!e.broken && e.fatigue >= e.hp) {
-      e.broken = true;
-      events.push({ kind: "break", who: e.id });
+    } else if (!e.staggered && e.fatigue >= e.hp) {
+      e.staggered = true;
+      events.push({ kind: "stagger", who: e.id });
     }
   }
 
@@ -641,7 +694,7 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
       p.hp = 0;
       p.fatigue = 0;
       p.death = 0;
-      p.broken = false;
+      p.staggered = false;
       say("The world refuses to let you go. You will revive at the end of next turn.", "death");
     } else {
       p.hp = 0;
@@ -649,15 +702,28 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
       events.push({ kind: "defeat", who: p.id });
       say("You fall, with nothing left to bring you back.", "death");
     }
-  } else if (!p.broken && p.fatigue >= p.hp) {
-    p.broken = true;
-    events.push({ kind: "break", who: p.id });
-    say("Your guard breaks.", "break");
+  } else if (!p.staggered && p.fatigue >= p.hp) {
+    p.staggered = true;
+    events.push({ kind: "stagger", who: p.id });
+    say("You stagger.", "stagger");
   }
-  pinBroken();
+  pinStaggered();
   endStep();
 
   if (s.enemies.every(e => !e.alive) && s.status === "playing") s.status = "won";
+
+  // How each enemy's action went, for what it can do next turn.
+  const interrupted = new Set<string>();
+  for (const st of steps) for (const ev of st.events) if (ev.kind === "rest" && ev.result === "interrupted") interrupted.add(ev.who);
+  for (const e of alive) {
+    if (!e.alive) continue;
+    const { type, forced } = e.intent;
+    const undone =
+      cancelled.has(e.id) ||
+      (type === "rest" && interrupted.has(e.id)) ||
+      (type === "block" && !blockedSomething.has(e.id));
+    e.last = { type, outcome: forced ? "recover" : undone ? "undone" : "done" };
+  }
 
   s.log.push({ turn: prev.turn, entries });
   s.lastTurn = steps;

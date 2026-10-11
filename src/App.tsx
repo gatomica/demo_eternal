@@ -277,7 +277,7 @@ interface WheelOption {
 type Wheel = Record<Dir, WheelOption | null>;
 
 
-/** How long a lost turn (guard break or revive) waits before it plays out on its own. */
+/** How long a lost turn (stagger or revive) waits before it plays out on its own. */
 const FORCED_TURN_MS = 900;
 
 /** Rows by depth, closest first: you, the front line, the back line. Empty lines are skipped. */
@@ -343,7 +343,7 @@ function viewAt(from: CombatState, after: Step["after"]): CombatState {
     f.hp = a.hp;
     f.fatigue = a.fatigue;
     f.death = a.death;
-    f.broken = a.broken;
+    f.staggered = a.staggered;
     if ("alive" in f) f.alive = a.alive;
     if ("line" in f && a.line) f.line = a.line;
   }
@@ -371,7 +371,7 @@ function effectsOf(step: Step | undefined, youManeuvered: boolean): Map<string, 
         add(ev.attacker, "fx-attack");
         add(ev.target, ev.result === "dodged" ? "fx-dodge" : ev.result === "blocked" ? "fx-block" : "fx-hit");
         break;
-      case "break":
+      case "stagger":
         add(ev.who, "fx-break");
         break;
       case "fall":
@@ -619,7 +619,7 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
   /** Resolve the turn, then play it back step by step. */
   const play = (action: PlayerAction) => {
     const next = resolveTurn(fight, action);
-    const pose: PoseName = forced ? "kneel" : action.type; // broken or reviving: down on one knee
+    const pose: PoseName = forced ? "kneel" : action.type; // staggered or reviving: down on one knee
     setFight(next);
     setPlayback(
       next.lastTurn.length
@@ -648,7 +648,7 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
     return () => window.clearTimeout(timer);
   }, [playback, paused]);
 
-  // A guard break or a revive costs you the turn: show it, then play it out on its own.
+  // A stagger or a revive costs you the turn: show it, then play it out on its own.
   useEffect(() => {
     if (!playing || !forced || busy || paused) return;
     const timer = window.setTimeout(() => play({ type: "rest" }), FORCED_TURN_MS);
@@ -701,25 +701,25 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
   /* ---------- what the screen shows ---------- */
   /**
    * During playback: a fighter shows its telegraph until its own attack, the strike frame on the
-   * step its attack lands, and a neutral stance after. Anyone broken goes down (player kneels,
+   * step its attack lands, and a neutral stance after. Anyone staggered goes down (player kneels,
    * enemies fall to the ground).
    */
   const strikeStep = (id: string) =>
     playback ? playback.steps.findIndex(st => st.events.some(ev => ev.kind === "attack" && ev.attacker === id)) : -1;
-  const playbackPose = (id: string, telegraph: PoseName, broken: boolean, down: PoseName): PoseName => {
+  const playbackPose = (id: string, telegraph: PoseName, staggered: boolean, down: PoseName): PoseName => {
     if (!playback) return telegraph;
     const struck = strikeStep(id);
     if (struck === playback.index) return impact ? "strike" : "attack"; // wind up while closing in, then strike
-    if (broken) return down;
+    if (staggered) return down;
     if (struck >= 0 && struck < playback.index) return "idle";
     return telegraph;
   };
   const playerPose: PoseName = playback
-    ? playbackPose("player", playback.playerPose, p.broken, "kneel")
+    ? playbackPose("player", playback.playerPose, p.staggered, "kneel")
     : forced ? "kneel" : (chosen?.action.type as PoseName | undefined) ?? "idle";
   // While you plan, a sleepwalker only shows its stance; as the turn plays, its action shows.
   const enemyPose = (e: Enemy): PoseName =>
-    playbackPose(e.id, playback ? actionPose(e) : poseForIntent(e), e.broken, "fallen");
+    playbackPose(e.id, playback ? actionPose(e) : poseForIntent(e), e.staggered, "fallen");
 
   // Everyone on the field: you, enemies still standing, and any falling during this step.
   const figures: SceneFigure[] = [

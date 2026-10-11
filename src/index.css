@@ -262,7 +262,7 @@ kbd {
 .bar-death { background: var(--void); }
 .bar-flash { position: absolute; inset: -1px; border-radius: 3px; background: #fff; pointer-events: none; animation: bar-flash 0.3s ease-out forwards; }
 @keyframes bar-flash { from { opacity: 0.85; } to { opacity: 0; } }
-.bar.is-broken { border-color: var(--sleep); box-shadow: 0 0 6px rgb(243 241 248 / 0.45); }
+.bar.is-staggered { border-color: var(--sleep); box-shadow: 0 0 6px rgb(243 241 248 / 0.45); }
 @media (prefers-reduced-motion: reduce) { .bar-trail > i { transition: none; } .bar-flash { animation: none; opacity: 0; } }
 
 /* ---------- Guard break shards ---------- */

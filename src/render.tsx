@@ -39,8 +39,8 @@ export interface Skeleton {
  * idle, attack, block, maneuver, rest: what a fighter is about to do (the telegraphs).
  * ready, intimidating, cautious: a sleepwalker's stances, hinting at a few actions at once.
  * strike: the impact frame, shown during playback the moment an attack lands.
- * fallen: an enemy's guard break, down on the ground and struggling to rise.
- * kneel: the player's guard break, down on one knee and struggling to stand.
+ * fallen: an enemy staggered, down on the ground and struggling to rise.
+ * kneel: the player staggered, down on one knee and struggling to stand.
  */
 export type PoseName =
   | "idle" | "attack" | "block" | "maneuver" | "rest"
@@ -152,13 +152,13 @@ export const POSES: Record<PoseName, Skeleton> = {
 
 /**
  * Which pose an enemy shows while you plan: its stance if it has one (a sleepwalker hides its
- * action), otherwise the action itself. A broken enemy is down on the ground.
+ * action), otherwise the action itself. A staggered enemy is down on the ground.
  */
 export const poseForIntent = (e: Enemy): PoseName =>
-  e.broken || e.intent.forced ? "fallen" : e.intent.stance ?? e.intent.type;
+  e.staggered || e.intent.forced ? "fallen" : e.intent.stance ?? e.intent.type;
 
 /** The pose for what an enemy is actually doing, revealed once the turn plays. */
-export const actionPose = (e: Enemy): PoseName => (e.broken || e.intent.forced ? "fallen" : e.intent.type);
+export const actionPose = (e: Enemy): PoseName => (e.staggered || e.intent.forced ? "fallen" : e.intent.type);
 
 /* ============================================================
  * Gear
@@ -372,7 +372,7 @@ function Segments({ v, maxHP }: { v: BarValues; maxHP: number }) {
  * Changes cut instantly, with a flash, while a lighter trail of the old values slowly catches up.
  * `before` lets a freshly shown bar start from earlier values, so it still animates the change.
  * `mirrored` anchors the bar on the right and fills it right to left, for enemies.
- * A guard break bursts into shards.
+ * A stagger bursts into shards.
  */
 export function HealthBar({ fighter, before, className, mirrored }: {
   fighter: Fighter;
@@ -389,7 +389,7 @@ export function HealthBar({ fighter, before, className, mirrored }: {
   const [flash, setFlash] = useState(startSig !== sig ? 1 : 0);
   const [shatter, setShatter] = useState(0);
   const lastSig = useRef(sig);
-  const wasBroken = useRef(fighter.broken);
+  const wasStaggered = useRef(fighter.staggered);
 
   useEffect(() => {
     if (sig !== lastSig.current) {
@@ -402,15 +402,15 @@ export function HealthBar({ fighter, before, className, mirrored }: {
   }, [sig, fighter.hp, fighter.fatigue, fighter.death]);
 
   useEffect(() => {
-    if (fighter.broken && !wasBroken.current) setShatter(n => n + 1);
-    wasBroken.current = fighter.broken;
-  }, [fighter.broken]);
+    if (fighter.staggered && !wasStaggered.current) setShatter(n => n + 1);
+    wasStaggered.current = fighter.staggered;
+  }, [fighter.staggered]);
 
   return (
     <div
-      className={`bar ${mirrored ? "is-mirrored" : ""} ${fighter.broken ? "is-broken" : ""} ${className ?? ""}`}
+      className={`bar ${mirrored ? "is-mirrored" : ""} ${fighter.staggered ? "is-staggered" : ""} ${className ?? ""}`}
       role="img"
-      aria-label={`${fighter.name}: health ${Math.round(now.hp)} of ${maxHP}, Fatigue ${Math.round(now.fatigue)}${fighter.broken ? ", guard broken" : ""}`}
+      aria-label={`${fighter.name}: health ${Math.round(now.hp)} of ${maxHP}, Fatigue ${Math.round(now.fatigue)}${fighter.staggered ? ", staggered" : ""}`}
       style={{ width: `calc(var(--bar-track) * ${Math.min(maxHP, BAR_FULL_HP) / BAR_FULL_HP})` }}
     >
       {/* The trail only shows health that was just lost, in a light red, sliding away. */}
@@ -423,7 +423,7 @@ export function HealthBar({ fighter, before, className, mirrored }: {
 }
 
 /* ============================================================
- * Guard break: white shards bursting outward
+ * Stagger: white shards bursting outward
  * ============================================================ */
 
 export function Shards({ count = 14, small }: { count?: number; small?: boolean }) {
