@@ -11,7 +11,9 @@
  * Gear attaches to joints: the weapon to the weapon hand, armor to the torso, shoulders and head.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import type { ArmorTier, Enemy, Fighter, Tier } from "./combat";
+import type { ArmorTier, Enemy, Fighter, WeaponTier } from "./combat";
+import { ENEMY_KINDS } from "./bestiary";
+import { WARDEN_POSES, WardenFigure, type CandleArm, type WardenPoseName, type WardenSkeleton } from "./warden";
 import { HORIZON, NEAR, FIGURE_HEIGHT, ease, lerpAngle, lerpCam, lerpVec, planningCamera, project, screenOf, toCamera, type Cam, type Vec } from "./scene";
 
 /* ============================================================
@@ -33,6 +35,8 @@ export interface Skeleton {
   rearLeg: { knee: Pt; foot: Pt };
   /** Grip position and blade angle in degrees (0 = facing direction, -90 = up). */
   weapon: { at: Pt; angle: number };
+  /** Something held: a wax lump or a small flame. */
+  prop?: { kind: "wax" | "flame"; at: Pt };
 }
 
 /**
@@ -41,14 +45,30 @@ export interface Skeleton {
  * strike: the impact frame, shown during playback the moment an attack lands.
  * fallen: an enemy staggered, down on the ground and struggling to rise.
  * kneel: the player staggered, down on one knee and struggling to stand.
+ * punch: the impact frame of a bare-handed attack.
+ * w-…: the waxed, always on their knees (see the waxed poses below).
  */
 export type PoseName =
   | "idle" | "attack" | "block" | "maneuver" | "rest"
   | "ready" | "intimidating" | "cautious"
-  | "strike" | "fallen" | "kneel";
+  | "strike" | "fallen" | "kneel" | "punch"
+  | "w-idle" | "w-hands" | "w-scratch" | "w-wax-hand" | "w-hurl"
+  | "w-cower" | "w-crawl" | "w-cradle" | "w-clutch" | "w-fallen"
+  | WardenPoseName;
+
+/**
+ * The waxed kneel, shins bound together and laid behind them. Seen at a 3/4 angle, "behind"
+ * runs back and away from the camera: up the screen, partly hidden by the body.
+ */
+const KNEELING = {
+  leadLeg: { knee: [58, 111] as Pt, foot: [38, 107] as Pt },
+  rearLeg: { knee: [51, 112] as Pt, foot: [31, 108] as Pt },
+};
+/** The waxed carry nothing; the grip just follows a hand (and isn't drawn). */
+const bare = (hand: Pt) => ({ at: hand, angle: 0 });
 
 /** Drawn facing right in a 100 × 120 box, feet on y = 114. */
-export const POSES: Record<PoseName, Skeleton> = {
+export const POSES: Record<Exclude<PoseName, WardenPoseName>, Skeleton> = {
   idle: {
     head: [50, 22], neck: [50, 33], hip: [50, 66],
     weaponArm: { elbow: [58, 47], hand: [64, 58] },
@@ -148,25 +168,126 @@ export const POSES: Record<PoseName, Skeleton> = {
     rearLeg: { knee: [42, 112], foot: [26, 114] },
     weapon: { at: [68, 80], angle: 84 },
   },
+  // A bare-handed blow: the free fist driven forward, the weapon held back and low.
+  punch: {
+    head: [59, 29], neck: [56, 40], hip: [48, 70],
+    weaponArm: { elbow: [44, 56], hand: [40, 66] },
+    freeArm: { elbow: [70, 42], hand: [84, 40] },
+    leadLeg: { knee: [66, 91], foot: [76, 114] },
+    rearLeg: { knee: [37, 93], foot: [24, 114] },
+    weapon: { at: [40, 66], angle: 120 },
+  },
+
+  /* ---------- The waxed: kneeling, head sealed in a lump of wax ---------- */
+  // Slumped on its knees, arms hanging.
+  "w-idle": {
+    head: [53, 45], neck: [51, 56], hip: [47, 88],
+    weaponArm: { elbow: [55, 72], hand: [57, 86] },
+    freeArm: { elbow: [45, 72], hand: [47, 86] },
+    ...KNEELING, weapon: bare([57, 86]),
+  },
+  // Hands Raised: both hands up, fingers hooked, about to claw.
+  "w-hands": {
+    head: [54, 43], neck: [52, 55], hip: [47, 88],
+    weaponArm: { elbow: [63, 45], hand: [67, 31] },
+    freeArm: { elbow: [45, 44], hand: [49, 30] },
+    ...KNEELING, weapon: bare([67, 31]),
+  },
+  // Scratch: thrown forward from the knees, both hands raking down.
+  "w-scratch": {
+    head: [78, 54], neck: [69, 62], hip: [52, 88],
+    weaponArm: { elbow: [80, 72], hand: [91, 84] },
+    freeArm: { elbow: [76, 66], hand: [89, 73] },
+    ...KNEELING, weapon: bare([91, 84]),
+  },
+  // Wax on Hand: leaning back, a lump of wax torn from itself held behind the shoulder.
+  "w-wax-hand": {
+    head: [45, 44], neck: [46, 55], hip: [48, 88],
+    weaponArm: { elbow: [36, 52], hand: [27, 43] },
+    freeArm: { elbow: [57, 64], hand: [66, 59] },
+    ...KNEELING, weapon: bare([27, 43]), prop: { kind: "wax", at: [25, 40] },
+  },
+  // Hurl Wax: the throwing arm whipped forward, the other flung back.
+  "w-hurl": {
+    head: [63, 46], neck: [58, 56], hip: [49, 88],
+    weaponArm: { elbow: [70, 48], hand: [83, 44] },
+    freeArm: { elbow: [46, 68], hand: [37, 77] },
+    ...KNEELING, weapon: bare([83, 44]),
+  },
+  // Cowering Sideways: twisted away and low, arms wrapped over the head.
+  "w-cower": {
+    head: [36, 55], neck: [39, 65], hip: [47, 90],
+    weaponArm: { elbow: [50, 56], hand: [40, 46] },
+    freeArm: { elbow: [47, 63], hand: [33, 51] },
+    ...KNEELING, weapon: bare([40, 46]),
+  },
+  // Crawling: on its hands, dragging its bound legs.
+  "w-crawl": {
+    head: [74, 71], neck: [65, 78], hip: [43, 93],
+    weaponArm: { elbow: [70, 96], hand: [75, 112] },
+    freeArm: { elbow: [62, 96], hand: [66, 112] },
+    leadLeg: { knee: [48, 111], foot: [28, 107] },
+    rearLeg: { knee: [42, 112], foot: [21, 108] },
+    weapon: bare([75, 112]),
+  },
+  // Cradle Flame: hands cupped at the chest around a small flame.
+  "w-cradle": {
+    head: [56, 46], neck: [53, 57], hip: [47, 88],
+    weaponArm: { elbow: [64, 80], hand: [64, 72] },
+    freeArm: { elbow: [52, 80], hand: [56, 73] },
+    ...KNEELING, weapon: bare([64, 72]), prop: { kind: "flame", at: [60, 70] },
+  },
+  // Clutch Flame: folded over it, head bowed, hugging the flame to its belly.
+  "w-clutch": {
+    head: [64, 60], neck: [58, 68], hip: [46, 90],
+    weaponArm: { elbow: [70, 86], hand: [64, 84] },
+    freeArm: { elbow: [58, 90], hand: [60, 85] },
+    ...KNEELING, weapon: bare([64, 84]), prop: { kind: "flame", at: [62, 84] },
+  },
+  // Staggered: toppled forward onto its sealed head, arms limp.
+  "w-fallen": {
+    head: [76, 106], neck: [66, 103], hip: [45, 98],
+    weaponArm: { elbow: [66, 112], hand: [76, 113] },
+    freeArm: { elbow: [55, 111], hand: [62, 114] },
+    ...KNEELING, weapon: bare([76, 113]),
+  },
 };
+
+/** Every pose, the Warden's included. */
+const ALL_POSES: Record<PoseName, Skeleton> = { ...POSES, ...WARDEN_POSES };
+
+/** A pose name from game data, if it's one we can draw. */
+export const asPose = (name: string | undefined, fallback: PoseName): PoseName =>
+  name && name in ALL_POSES ? (name as PoseName) : fallback;
+
+/** How an enemy kind looks when it isn't doing anything in particular, and when it's staggered. */
+export const idlePoseOf = (e: Enemy): PoseName => asPose(ENEMY_KINDS[e.kind]?.idlePose, "idle");
+export const downPoseOf = (e: Enemy): PoseName => asPose(ENEMY_KINDS[e.kind]?.downPose, "fallen");
 
 /**
  * Which pose an enemy shows while you plan: its stance if it has one (a sleepwalker hides its
  * action), otherwise the action itself. A staggered enemy is down on the ground.
  */
 export const poseForIntent = (e: Enemy): PoseName =>
-  e.staggered || e.intent.forced ? "fallen" : e.intent.stance ?? e.intent.type;
+  e.staggered || e.intent.forced ? downPoseOf(e) : asPose(e.intent.pose, e.intent.type);
 
 /** The pose for what an enemy is actually doing, revealed once the turn plays. */
-export const actionPose = (e: Enemy): PoseName => (e.staggered || e.intent.forced ? "fallen" : e.intent.type);
+export const actionPose = (e: Enemy): PoseName =>
+  e.staggered || e.intent.forced ? downPoseOf(e) : asPose(e.intent.actPose, e.intent.type);
+
+/** An enemy's attack as it winds up (closing in) and as it lands. */
+export const windUpPose = (e: Enemy): PoseName => asPose(e.intent.actPose, "attack");
+export const strikePose = (e: Enemy): PoseName => asPose(e.intent.strikePose, "strike");
 
 /* ============================================================
  * Gear
  * ============================================================ */
 
 /** Weapons are drawn along +x from the grip at (0, 0). */
-function Weapon({ tier }: { tier: Tier }) {
+function Weapon({ tier }: { tier: WeaponTier }) {
   switch (tier) {
+    case "baseline": // bare hands
+      return null;
     case "light": // dagger
       return (
         <g>
@@ -215,13 +336,13 @@ function Helmet({ s }: { s: Skeleton }) {
 }
 
 /** How far each weapon reaches from the grip, so the strike trail ends at its tip. */
-const WEAPON_REACH: Record<Tier, number> = { light: 15, normal: 34, heavy: 41 };
+const WEAPON_REACH: Record<WeaponTier, number> = { baseline: 0, light: 15, normal: 34, heavy: 41 };
 
 /**
  * The swing trail on a strike: a tapered crescent around the shoulder, sweeping from where the
  * weapon was raised (up and behind) to its tip, fading out as it plays.
  */
-function StrikeTrail({ s, tier }: { s: Skeleton; tier: Tier }) {
+function StrikeTrail({ s, tier }: { s: Skeleton; tier: WeaponTier }) {
   const reach = WEAPON_REACH[tier];
   const rad = (s.weapon.angle * Math.PI) / 180;
   const tip: Pt = [s.weapon.at[0] + Math.cos(rad) * reach, s.weapon.at[1] + Math.sin(rad) * reach];
@@ -253,31 +374,66 @@ export interface StickFigureProps {
    *  "front": an enemy, seen from the front, facing left toward the player. */
   view: "front" | "back";
   pose: PoseName;
-  weapon: Tier;
+  weapon: WeaponTier;
   armor: ArmorTier;
   dim?: boolean;
   className?: string;
   title?: string;
-  /** "waxed": unarmed, legs and a shoulder sealed in wax. */
-  variant?: "waxed";
+  /** "waxed": kneeling, shins bound together and head sealed in wax. "warden": the Penitent Warden. */
+  variant?: "waxed" | "warden";
+  /** The Warden's candle arm. */
+  arm?: CandleArm;
+  /** The Warden: keep the trails of the spins he just finished fading. */
+  lingerTrail?: boolean;
 }
 
-/** Sickly yellow wax sealing the legs stiff, crusted up the belly and over one shoulder. */
-function Wax({ s, near }: { s: Skeleton; near: Pt }) {
-  const belly: Pt = [(s.hip[0] * 2 + s.neck[0]) / 3, (s.hip[1] * 2 + s.neck[1]) / 3];
+/** Sickly yellow wax binding the shins together (drawn behind the body). */
+function WaxBinding({ s }: { s: Skeleton }) {
   return (
     <g className="fig-wax">
-      <polyline points={limb(s.hip, s.rearLeg.knee, s.rearLeg.foot)} />
-      <polyline points={limb(s.hip, s.leadLeg.knee, s.leadLeg.foot)} />
-      <polyline points={limb(s.hip, belly)} />
-      <circle cx={near[0]} cy={near[1] + 1} r={6} />
+      <polyline points={limb(s.leadLeg.knee, s.leadLeg.foot)} className="fig-wax-bind" />
+      <polyline points={limb(s.rearLeg.knee, s.rearLeg.foot)} className="fig-wax-bind" />
     </g>
   );
 }
 
-export function StickFigure({ view, pose, weapon, armor, dim, className, title, variant }: StickFigureProps) {
-  const s = POSES[pose];
+/** The lump of wax sealing the head. */
+function WaxHead({ s }: { s: Skeleton }) {
+  const [hx, hy] = s.head;
+  return (
+    <g className="fig-wax">
+      <ellipse cx={hx} cy={hy} rx={9.5} ry={10} className="fig-wax-head" />
+      <path d={`M${hx - 4} ${hy + 8} q1 5 0 7 M${hx + 3} ${hy + 9} q1 3 0 4`} className="fig-wax-drip" />
+    </g>
+  );
+}
+
+/** A held wax lump, or a small flame. */
+function Prop({ prop }: { prop: NonNullable<Skeleton["prop"]> }) {
+  const [x, y] = prop.at;
+  if (prop.kind === "wax") return <circle cx={x} cy={y} r={4.5} className="fig-wax-head" />;
+  return (
+    <g className="fig-flame">
+      <path d={`M${x} ${y - 6} C${x + 3.3} ${y - 2} ${x + 2.7} ${y + 2} ${x} ${y + 2} C${x - 2.7} ${y + 2} ${x - 3.3} ${y - 2} ${x} ${y - 6} Z`} />
+      <path d={`M${x} ${y - 2.6} C${x + 1.3} ${y - 0.6} ${x + 1.3} ${y + 1.4} ${x} ${y + 1.4} C${x - 1.3} ${y + 1.4} ${x - 1.3} ${y - 0.6} ${x} ${y - 2.6} Z`} className="fig-flame-core" />
+    </g>
+  );
+}
+
+export function StickFigure({ view, pose, weapon, armor, dim, className, title, variant, arm, lingerTrail }: StickFigureProps) {
+  const s = ALL_POSES[pose];
   const front = view === "front";
+  if (variant === "warden" && "ball" in s) {
+    return (
+      <svg viewBox="0 0 100 120" className={`figure figure-${view} ${dim ? "is-dim" : ""} ${className ?? ""}`} role="img" aria-label={title}>
+        {title && <title>{title}</title>}
+        <ellipse cx={50} cy={115} rx={28} ry={3.2} className="fig-shadow" />
+        <g transform={front ? "translate(100 0) scale(-1 1)" : undefined}>
+          <WardenFigure s={s as WardenSkeleton} front={front} arm={arm ?? "lit"} lingerTrail={lingerTrail} />
+        </g>
+      </svg>
+    );
+  }
   const [hx, hy] = s.head;
   const [nx, ny] = s.neck;
   // Turned 3/4, the shoulders sit slightly apart: the near one lower, toward the camera.
@@ -306,28 +462,31 @@ export function StickFigure({ view, pose, weapon, armor, dim, className, title, 
       <ellipse cx={50} cy={115} rx={26} ry={3} className="fig-shadow" />
       {/* Enemies face left: mirror the whole drawing. */}
       <g transform={front ? "translate(100 0) scale(-1 1)" : undefined}>
-        {pose === "strike" && !waxed && <StrikeTrail s={s} tier={weapon} />}
+        {pose === "strike" && weapon !== "baseline" && <StrikeTrail s={s} tier={weapon} />}
         {!front && weaponEl}
         {!front && weaponArm}
         {front && freeArm}
         <polyline points={limb(s.hip, s.rearLeg.knee, s.rearLeg.foot)} className="fig-limb fig-far" />
+        {waxed && <WaxBinding s={s} />}
         <polyline points={limb(farShoulder, nearShoulder)} className="fig-limb" />
         <line x1={nx} y1={ny} x2={s.hip[0]} y2={s.hip[1]} className="fig-limb" />
         <Armor tier={armor} s={s} near={nearShoulder} />
         <circle cx={hx} cy={hy} r={7.5} className="fig-head" />
         {armor === "heavy" && <Helmet s={s} />}
-        {front && (
+        {front && !waxed && (
           // Only enemies show a face, turned toward the player. The player is always seen from behind.
           <g className="fig-eyes">
             <circle cx={hx + 2} cy={hy} r={1.3} />
             <circle cx={hx + 5.4} cy={hy} r={1.2} />
           </g>
         )}
-        <polyline points={limb(s.hip, s.leadLeg.knee, s.leadLeg.foot)} className="fig-limb" />
-        {waxed && <Wax s={s} near={nearShoulder} />}
+        {/* The waxed's shins are under the binding, behind the body: only the thigh shows in front. */}
+        <polyline points={waxed ? limb(s.hip, s.leadLeg.knee) : limb(s.hip, s.leadLeg.knee, s.leadLeg.foot)} className="fig-limb" />
+        {waxed && <WaxHead s={s} />}
         {!front && freeArm}
         {front && weaponEl}
         {front && weaponArm}
+        {s.prop && <Prop prop={s.prop} />}
       </g>
     </svg>
   );
@@ -449,9 +608,10 @@ const FIGURE_UNITS = 102;
 const FEET_Y = 114;
 
 /** Where a figure standing at `p` appears on screen: its 100 × 120 drawing box, and its depth. */
-export function figureBox(cam: Cam, p: Vec, w: number, h: number) {
+/** `scale`: how much bigger than a normal figure (the Warden towers over everyone). */
+export function figureBox(cam: Cam, p: Vec, w: number, h: number, scale = 1) {
   const { sx, sy, ppm, depth } = project(cam, p, w, h);
-  const unit = (ppm * FIGURE_HEIGHT) / FIGURE_UNITS;
+  const unit = (ppm * FIGURE_HEIGHT * scale) / FIGURE_UNITS;
   return { x: sx - 50 * unit, y: sy - FEET_Y * unit, w: 100 * unit, h: 120 * unit, depth };
 }
 
@@ -459,9 +619,13 @@ export interface SceneFigure {
   id: string;
   view: "front" | "back";
   pose: PoseName;
-  weapon: Tier;
+  weapon: WeaponTier;
   armor: ArmorTier;
-  variant?: "waxed";
+  variant?: "waxed" | "warden";
+  arm?: CandleArm;
+  lingerTrail?: boolean;
+  /** Size relative to a normal figure. */
+  scale?: number;
   /** Playback animations (fx-hit, fx-step...). */
   classes: string[];
   /** Changes on every playback beat, so animations replay. */
@@ -500,7 +664,119 @@ export function shotCamera(shot: SceneShot): Cam {
  * Draws the floor and every figure through the camera. When a new shot arrives, everyone (and
  * the camera) moves from wherever they are right now to the new spots, over the shot's duration.
  */
-export function Scene({ figures, shot }: { figures: SceneFigure[]; shot: SceneShot }) {
+/** Something thrown across the field during a beat: from a figure to another, passing through it. */
+export interface Projectile {
+  from: string;
+  to: string;
+  kind: "fan" | "blast" | "wax";
+  /** Changes every beat, so the flight replays. */
+  key: string;
+}
+
+/** The thrown thing itself, drawn pointing right (the scene rotates it to its flight). */
+function ProjectileShape({ kind }: { kind: Projectile["kind"] }) {
+  if (kind === "wax") {
+    return (
+      <svg viewBox="-10 -10 20 20" className="projectile-svg">
+        <circle cx={0} cy={0} r={6} className="fig-wax-head" />
+        <path d="M-6 0 Q-10 1 -9 4" className="fig-beard-strand" />
+      </svg>
+    );
+  }
+  // A fan of flame lying flat, like the swat's sweep: a wide, level crescent seen at an angle.
+  // It's headed a little toward the player as well as the camera, so its bow leans left and its
+  // right end dips. Flame tongues rise from its back edge.
+  const L: Pt = [-48, -1], R: Pt = [48, 5];
+  const back: Pt = [-14, 8], front: Pt = [-14, 26];
+  const at = (c: Pt, t: number): Pt => [
+    (1 - t) ** 2 * L[0] + 2 * t * (1 - t) * c[0] + t ** 2 * R[0],
+    (1 - t) ** 2 * L[1] + 2 * t * (1 - t) * c[1] + t ** 2 * R[1],
+  ];
+  const tongues = [0.1, 0.21, 0.32, 0.43, 0.54, 0.65, 0.76, 0.87].map(t => {
+    const a = at(back, t - 0.045), b = at(back, t + 0.045), m = at(back, t);
+    const h = 10 + 5 * Math.sin(t * Math.PI); // taller in the middle
+    // Rooted inside the band (a little below the back edge), so each tongue grows out of it.
+    return `M${a[0]} ${a[1] + 3} Q${a[0] + 1} ${m[1] - h * 0.55} ${m[0] + 1.5} ${m[1] - h} Q${b[0] - 0.5} ${m[1] - h * 0.4} ${b[0]} ${b[1] + 3} Z`;
+  });
+  const band = (f: Pt, b: Pt) => `M${L[0]} ${L[1]} Q${f[0]} ${f[1]} ${R[0]} ${R[1]} Q${b[0]} ${b[1]} ${L[0]} ${L[1]} Z`;
+  return (
+    <svg viewBox="-50 -18 100 36" className="projectile-svg is-fan">
+      {tongues.map((d, i) => <path key={i} d={d} className="fig-burst-outer" />)}
+      <path d={band(front, back)} className="fig-burst-outer" />
+      <path d={`M-38 3 Q-14 21 38 7 Q-14 12 -38 3 Z`} className="fig-burst-inner" />
+    </svg>
+  );
+}
+
+/** How long the shockwave takes to spread, and how long after the flash it starts. */
+const SHOCK_MS = 640;
+const SHOCK_DELAY_MS = 120;
+
+/**
+ * Flame Blast's shockwave: a ring lying flat on the floor (an ellipse, the floor seen at an
+ * angle) centered at (cx, cy), spreading out to `reach`. Only the side facing `toward` (radians,
+ * in the ring's own unsquashed terms) burns: flames tallest straight ahead, dying away around the
+ * sides, nothing behind or inside. The ring grows but its flames keep their size, so it reads as
+ * a widening ring rather than something coming at the camera; they only grow taller as it
+ * advances. Drawn in screen pixels.
+ */
+function Shockwave({ cx, cy, reach, toward, flame }: { cx: number; cy: number; reach: number; toward: number; flame: number }) {
+  const [p, setP] = useState(0);
+  useEffect(() => {
+    const start = performance.now() + SHOCK_DELAY_MS;
+    let raf = 0;
+    const tick = () => {
+      const k = Math.min(1, Math.max(0, (performance.now() - start) / SHOCK_MS));
+      setP(k);
+      if (k < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  if (p <= 0) return null;
+  const SQUASH = 0.3;
+  const eased = 1 - (1 - p) ** 2.2;
+  const rx = reach * (0.08 + 0.92 * eased), ry = rx * SQUASH;
+  const opacity = p < 0.7 ? 1 : 1 - (p - 0.7) / 0.3;
+  // Flames sit evenly along the burning arc, a fixed distance apart, whatever the ring's size.
+  const spacing = flame * 0.16;
+  const step = Math.max(0.035, spacing / rx);
+  const flames: { y: number; d: string; core: string }[] = [];
+  const arc: string[] = [];
+  for (let off = -1.47; off <= 1.47; off += step) {
+    const t = toward + off;
+    const w = Math.cos(off);
+    const x = cx + rx * Math.cos(t), y = cy + ry * Math.sin(t);
+    arc.push(`${arc.length ? "L" : "M"}${x} ${y}`);
+    if (w < 0.2) continue;
+    // The flames rise as the wave advances: low as it leaves his feet, full height by the time
+    // it reaches you.
+    const hgt = flame * (0.25 + 0.95 * eased) * w ** 1.6;
+    const half = flame * (0.06 + 0.04 * w);
+    const lean = Math.cos(t) * flame * 0.05; // flames lean outward a little
+    const tongue = (k: number) => {
+      const hh = hgt * k, ww = half * k;
+      return `M${x - ww} ${y} Q${x - ww * 0.6 + lean * 0.5 * k} ${y - hh * 0.55} ${x + lean * k} ${y - hh} Q${x + ww * 0.7 + lean * 0.4 * k} ${y - hh * 0.45} ${x + ww} ${y} Z`;
+    };
+    flames.push({ y, d: tongue(1), core: tongue(0.5) });
+  }
+  flames.sort((m, n) => m.y - n.y); // farther ones first
+  return (
+    <svg className="shockwave" style={{ opacity }} aria-hidden="true">
+      {/* The glowing edge goes underneath, so the flames hide it where they stand. */}
+      <path d={arc.join(" ")} className="shockwave-ring" />
+      <path d={arc.join(" ")} className="shockwave-ring-inner" />
+      {flames.map((f, i) => (
+        <g key={i}>
+          <path d={f.d} className="fig-burst-outer" />
+          <path d={f.core} className="fig-burst-inner" />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+export function Scene({ figures, shot, projectiles = [] }: { figures: SceneFigure[]; shot: SceneShot; projectiles?: Projectile[] }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   useLayoutEffect(() => {
@@ -571,7 +847,7 @@ export function Scene({ figures, shot }: { figures: SceneFigure[]; shot: SceneSh
   const placed = figures
     .map(f => {
       const p = posNow(f.id);
-      return p && w ? { f, box: figureBox(c, p, w, h) } : null;
+      return p && w ? { f, box: figureBox(c, p, w, h, f.scale) } : null;
     })
     .filter((x): x is { f: SceneFigure; box: ReturnType<typeof figureBox> } => !!x && x.box.depth > NEAR)
     .sort((a, b) => b.box.depth - a.box.depth); // far first, so nearer figures draw on top
@@ -600,11 +876,62 @@ export function Scene({ figures, shot }: { figures: SceneFigure[]; shot: SceneSh
           }}
         >
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            <StickFigure view={f.view} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} />
+            <StickFigure view={f.view} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} arm={f.arm} lingerTrail={f.lingerTrail} />
             {f.classes.includes("fx-break") && <Shards />}
           </div>
         </button>
       ))}
+      {projectiles.map(pr => {
+        const a = placed.find(x => x.f.id === pr.from)?.box;
+        const b = placed.find(x => x.f.id === pr.to)?.box;
+        if (!a || !b) return null;
+        // From the thrower's chest height to the target's, and on through it.
+        const sx = a.x + a.w / 2, sy = a.y + a.h * 0.42;
+        const tx = b.x + b.w / 2, ty = b.y + b.h * 0.45;
+        const dx = tx - sx, dy = ty - sy;
+        // Past the target it keeps coming, toward the camera: further along, and down the screen.
+        const ex = dx * 1.35, ey = dy + b.h * 0.35;
+        const size = Math.max(a.h, b.h) * (pr.kind === "wax" ? 0.12 : pr.kind === "fan" ? 1.1 : 0.45);
+        const flight = (Math.atan2(dy, dx) * 180) / Math.PI;
+        const angle = pr.kind === "fan" ? 0 : flight; // the fan's lean is drawn into its shape
+        if (pr.kind === "blast") {
+          // A giant fireball flashes in before him and fades fast; a shockwave of flame follows
+          // through, spreading flat across the floor from his feet. Seen at the same 3/4 angle
+          // as the fan, it's a ring, but only burns on the side heading for the target: tall
+          // flames there, dying away around the sides, nothing behind him and nothing inside.
+          const ax = a.x + a.w / 2, ay = a.y + a.h * 0.95, bx = tx, by = b.y + b.h * 0.95;
+          const SQUASH = 0.3; // the floor seen at an angle: circles become flat ellipses
+          const toward = Math.atan2((by - ay) / SQUASH, bx - ax);
+          const reach = Math.hypot(bx - ax, (by - ay) / SQUASH) * 1.25; // passes through the target
+          const fx = ax + (bx - ax) * 0.2, fy = (a.y + a.h * 0.45) + (ty - (a.y + a.h * 0.45)) * 0.2;
+          const ball = a.h * 0.9;
+          return (
+            <div key={pr.key}>
+              <div className="blast-flash" style={{ left: fx, top: fy, width: ball, height: ball }}>
+                <svg viewBox="-50 -50 100 100" className="shockwave-svg">
+                  <circle cx={0} cy={0} r={48} className="fig-burst-outer" />
+                  <circle cx={-6} cy={4} r={34} className="blast-mid" />
+                  <circle cx={-10} cy={6} r={20} className="fig-burst-inner" />
+                </svg>
+              </div>
+              <Shockwave cx={ax} cy={ay} reach={reach} toward={toward} flame={b.h * 0.75} />
+            </div>
+          );
+        }
+        return (
+          <div
+            key={pr.key}
+            className={`projectile projectile-${pr.kind}`}
+            style={{
+              left: sx, top: sy, width: size, height: pr.kind === "fan" ? size * 0.32 : size,
+              ["--dx" as string]: `${dx}px`, ["--dy" as string]: `${dy}px`,
+              ["--ex" as string]: `${ex}px`, ["--ey" as string]: `${ey}px`, ["--rot" as string]: `${angle}deg`,
+            }}
+          >
+            <ProjectileShape kind={pr.kind} />
+          </div>
+        );
+      })}
     </div>
   );
 }

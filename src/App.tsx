@@ -1,9 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ARMOR,
   ENCOUNTERS,
+  ENEMY_KINDS,
   WEAPONS,
   createCombat,
+  describeAction,
   forcedAction,
   resolveTurn,
   type ArmorTier,
@@ -13,8 +15,9 @@ import {
   type PlayerAction,
   type Step,
   type Tier,
+  type WeaponTier,
 } from "./combat";
-import { HealthBar, Scene, StickFigure, actionPose, figureBox, poseForIntent, shotCamera, type BarValues, type PoseName, type SceneFigure, type SceneShot, type ShotCamera } from "./render";
+import { HealthBar, Scene, StickFigure, actionPose, asPose, downPoseOf, figureBox, idlePoseOf, poseForIntent, strikePose, windUpPose, shotCamera, type BarValues, type PoseName, type Projectile, type SceneFigure, type SceneShot, type ShotCamera } from "./render";
 import {
   actionCamera,
   behind,
@@ -28,8 +31,10 @@ import {
   type Vec,
 } from "./scene";
 import { Exploration, type Journey, type MapFoe } from "./explore";
+import { nextStances } from "./patterns";
+import { WARDEN_POSES, type WardenPoseName } from "./warden";
 
-type Screen = "menu" | "test" | "explore";
+type Screen = "menu" | "test" | "explore" | "viewer";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("menu");
@@ -38,6 +43,7 @@ export default function App() {
       {screen === "menu" && <MainMenu onStart={setScreen} />}
       {screen === "test" && <TestCombat onExit={() => setScreen("menu")} />}
       {screen === "explore" && <Journeying onExit={() => setScreen("menu")} />}
+      {screen === "viewer" && <ModelViewer onExit={() => setScreen("menu")} />}
     </div>
   );
 }
@@ -89,6 +95,7 @@ function useKeys(handler: (key: Key) => void) {
 const MENU_OPTIONS: { label: string; screen: Screen }[] = [
   { label: "Test combat", screen: "test" },
   { label: "Exploration", screen: "explore" },
+  { label: "Model viewer", screen: "viewer" },
 ];
 
 function MainMenu({ onStart }: { onStart: (screen: Screen) => void }) {
@@ -121,18 +128,19 @@ function MainMenu({ onStart }: { onStart: (screen: Screen) => void }) {
  * ============================================================ */
 
 interface Setup {
-  weapon: Tier;
+  weapon: WeaponTier;
   armor: ArmorTier;
   encounterId: string;
 }
 
-const PLAYER_MAX_HP = 40;
+/** Your starting health (the tutorial's). */
+const PLAYER_MAX_HP = 20;
 const REVIVE_CHARGES = 2;
 
 function startFight(setup: Setup): CombatState {
   const encounter = ENCOUNTERS.find(e => e.id === setup.encounterId)!;
   return createCombat(
-    { maxHP: PLAYER_MAX_HP, weapon: setup.weapon, armor: setup.armor, charges: REVIVE_CHARGES },
+    { maxHP: PLAYER_MAX_HP, weapon: setup.weapon, armor: setup.armor, charges: encounter.charges ?? REVIVE_CHARGES },
     encounter.enemies,
   );
 }
@@ -145,6 +153,226 @@ function TestCombat({ onExit }: { onExit: () => void }) {
 
   if (!run) return <SetupScreen setup={setup} onChange={setSetup} onStart={start} onExit={onExit} />;
   return <CombatScreen key={run.id} initial={run.state} onRetry={start} onChangeLoadout={() => setRun(null)} onExit={onExit} />;
+}
+
+/* ============================================================
+ * Model viewer: one enemy against a dummy you, nobody gets hurt. Pick the enemy first, then on
+ * its panel: its statuses, the stance it shows, and click any action that stance allows (with
+ * those statuses) to watch it play out.
+ * ============================================================ */
+
+const VIEWER_KINDS = Object.keys(ENEMY_KINDS);
+
+/** A status the viewer can flip, and what each side is called. */
+interface ViewerToggle { key: string; off: string; on: string }
+/** Statuses each kind can be shown with (the line applies to everyone). */
+const VIEWER_TOGGLES: Record<string, ViewerToggle[]> = {
+  warden: [
+    { key: "sealed", off: "Unsealed", on: "Sealed" },
+    { key: "phase2", off: "Phase 1", on: "Phase 2" },
+  ],
+};
+const LINE_TOGGLE: ViewerToggle = { key: "back", off: "Front line", on: "Back line" };
+
+interface ViewerShow {
+  stance: string;
+  /** The action played (or about to be). */
+  action?: string;
+  /** Statuses that are on: "back", and the kind's own flags. */
+  on: Record<string, boolean>;
+  /** The fight's turn as shown. Once it moves past this, the action has played. */
+  turn: number;
+  /** The stance it moves on to after the action (picked when it's played). */
+  next?: string;
+}
+
+function viewerFight(kind: string): CombatState {
+  return createCombat(
+    { name: "Dummy", maxHP: PLAYER_MAX_HP, weapon: "normal", armor: "light", charges: 0 },
+    [{ kind, line: "front" }],
+    { dummy: true },
+  );
+}
+
+/** Applies the viewer's choices to the enemy: its line, its statuses, its stance and action. */
+function applyShow(s: CombatState, show: ViewerShow): CombatState {
+  const v = structuredClone(s);
+  const e = v.enemies[0];
+  const kind = ENEMY_KINDS[e.kind];
+  // Once the action has played, it stands in the stance it moved on to, statuses as the action left them.
+  const played = s.turn > show.turn;
+  const stanceName = played && show.next ? show.next : show.stance;
+  e.alive = true;
+  e.staggered = false;
+  e.reviving = false;
+  e.hp = e.maxHP;
+  e.fatigue = 0;
+  if (!played) {
+    e.line = show.on.back ? "back" : "front";
+    for (const t of VIEWER_TOGGLES[e.kind] ?? []) e.flags[t.key] = !!show.on[t.key];
+    if (e.flags.phase2) e.flags.sealed = false; // phase two burns unsealed for good
+  }
+  const stance = kind.pattern.stances.find(x => x.name === stanceName);
+  const actionName = !played && show.action ? show.action : stance?.groups[0][0].name ?? "";
+  const action = kind.pattern.actions.get(actionName.toLowerCase());
+  if (action) e.intent = { ...describeAction(e.kind, e.line, stanceName, action), pose: kind.stancePoses[stanceName] };
+  v.status = "playing";
+  return v;
+}
+
+/** The actions a stance allows with the enemy as shown (conditions like *Sealed checked). */
+function viewerActions(kindName: string, state: CombatState, stanceName: string) {
+  const kind = ENEMY_KINDS[kindName];
+  const stance = kind.pattern.stances.find(x => x.name === stanceName);
+  const e = state.enemies[0];
+  // Actions a fixed rule can force from any stance (the Warden's Usurp Flame) come last.
+  const fixed = (kind.fixedActions ?? []).map(n => kind.pattern.actions.get(n.toLowerCase())!);
+  return [...(stance?.groups.flat() ?? []), ...fixed].map(a => ({
+    action: a,
+    fixed: fixed.includes(a),
+    available: a.needs.every(n => kind.conditions?.[n]?.(e, state) ?? false),
+  }));
+}
+
+/** Pick which enemy to look at. A/D change, E opens it, Q goes back to the menu. */
+function ViewerSetup({ kind, onChange, onStart, onExit }: {
+  kind: string;
+  onChange: (k: string) => void;
+  onStart: () => void;
+  onExit: () => void;
+}) {
+  useKeys(key => {
+    if (key === "left" || key === "right") {
+      const i = VIEWER_KINDS.indexOf(kind);
+      onChange(VIEWER_KINDS[(i + (key === "right" ? 1 : VIEWER_KINDS.length - 1)) % VIEWER_KINDS.length]);
+    } else if (key === "select") onStart();
+    else if (key === "back" || key === "pause") onExit();
+  });
+  return (
+    <main className="setup">
+      <h2 className="setup-title">Model viewer</h2>
+      <Picker
+        label="Enemy"
+        focused
+        value={kind}
+        options={VIEWER_KINDS}
+        labels={Object.fromEntries(VIEWER_KINDS.map(k => [k, ENEMY_KINDS[k].name]))}
+        onChange={onChange}
+      />
+      <p className="hint">
+        <kbd>A</kbd><kbd>D</kbd> change · <kbd>E</kbd> view · <kbd>Q</kbd> menu
+      </p>
+      <div className="setup-buttons">
+        <button className="hud-button" onClick={onExit}>Menu</button>
+        <button className="commit" onClick={onStart}>View</button>
+      </div>
+    </main>
+  );
+}
+
+function ModelViewer({ onExit }: { onExit: () => void }) {
+  const [kind, setKind] = useState(VIEWER_KINDS[0]);
+  const [viewing, setViewing] = useState(false);
+  const [run, setRun] = useState(0);
+  if (!viewing) return <ViewerSetup kind={kind} onChange={setKind} onStart={() => { setRun(r => r + 1); setViewing(true); }} onExit={onExit} />;
+  return <ViewerFight key={`${kind}-${run}`} kind={kind} onBack={() => setViewing(false)} onRetry={() => setRun(r => r + 1)} onExit={onExit} />;
+}
+
+function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
+  kind: string;
+  onBack: () => void;
+  onRetry: () => void;
+  onExit: () => void;
+}) {
+  const kind = ENEMY_KINDS[kindName];
+  const [show, setShow] = useState<ViewerShow>(() => ({ stance: kind.pattern.stances[0].name, on: {}, turn: 1 }));
+  const [playSignal, setPlaySignal] = useState(0);
+  const initial = useMemo(() => viewerFight(kindName), [kindName]);
+  const override = useCallback((s: CombatState) => applyShow(s, show), [show]);
+  const shown = applyShow(initial, show);
+  const toggles = [LINE_TOGGLE, ...(VIEWER_TOGGLES[kindName] ?? [])];
+  const flip = (key: string) => setShow(prev => ({ ...prev, action: undefined, next: undefined, on: { ...prev.on, [key]: !prev.on[key] } }));
+  // Playing an action also picks, at random, which of the stances it leads to it moves on to,
+  // as in a fight; it settles into that stance as the action ends.
+  const play = (action: string) => {
+    const options = nextStances(kind.pattern, { action, outcome: "done" });
+    const next = options[Math.floor(Math.random() * options.length)].name;
+    setShow(prev => ({ ...prev, action, next }));
+    setPlaySignal(n => n + 1);
+  };
+  // Once it's over, that stance is the one shown, and its statuses follow what the action did
+  // (Flame Blast seals him, say).
+  const afterTurn = (s: CombatState) => {
+    const e = s.enemies[0];
+    setShow(prev => {
+      const on: Record<string, boolean> = { ...prev.on, back: e.line === "back" };
+      for (const t of VIEWER_TOGGLES[kindName] ?? []) on[t.key] = !!e.flags[t.key];
+      return { stance: prev.next ?? prev.stance, on, turn: s.turn };
+    });
+  };
+
+  const panel = (
+    <aside className="viewer-panel" aria-label="Model viewer">
+      <div className="viewer-head">
+        <h2 className="viewer-title">{kind.name}</h2>
+        <button className="hud-button viewer-change" onClick={onBack}>Change enemy</button>
+      </div>
+      <div className="viewer-section">
+        <span className="picker-label">Status</span>
+        <div className="picker-options">
+          {toggles.map(t => {
+            const on = !!show.on[t.key];
+            const locked = t.key === "sealed" && !!show.on.phase2;
+            return (
+              <button key={t.key} className="chip viewer-toggle" aria-pressed={on} disabled={locked} onClick={() => flip(t.key)}>
+                {locked ? `${t.off} (phase 2)` : on ? t.on : t.off}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="viewer-section">
+        <span className="picker-label">Stance</span>
+        <div className="picker-options">
+          {kind.pattern.stances.map(st => (
+            <button key={st.name} className="chip" aria-pressed={st.name === show.stance} onClick={() => setShow(prev => ({ ...prev, stance: st.name, action: undefined, next: undefined }))}>
+              {st.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="viewer-section">
+        <span className="picker-label">Actions from this stance</span>
+        <div className="picker-options">
+          {viewerActions(kindName, shown, show.stance).map(({ action: a, available, fixed }) => (
+            <button
+              key={a.name}
+              className="chip viewer-action"
+              disabled={!available}
+              title={available ? `Play ${a.name}` : `Not available: needs ${a.needs.join(", ")}`}
+              onClick={e => { e.currentTarget.blur(); play(a.name); }}
+            >
+              ▶ {a.name} <span className="viewer-kind">{fixed ? "fixed rule" : a.type}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+
+  return (
+    <CombatScreen
+      initial={initial}
+      override={override}
+      panel={panel}
+      playSignal={playSignal}
+      onTurnPlayed={afterTurn}
+      onRetry={onRetry}
+      onChangeLoadout={onBack}
+      changeLabel="Change enemy"
+      onExit={onExit}
+    />
+  );
 }
 
 /* ============================================================
@@ -199,7 +427,9 @@ function Journeying({ onExit }: { onExit: () => void }) {
   );
 }
 
-const TIER_KEYS = Object.keys(WEAPONS) as Tier[];
+/** Weapons to pick from. "None" (baseline) fights bare-handed: weak, fast attacks and a Block with no bonus. */
+const TIER_KEYS = Object.keys(WEAPONS) as WeaponTier[];
+const TIER_LABELS: Record<string, string> = { baseline: "None" };
 const ARMOR_KEYS = Object.keys(ARMOR) as ArmorTier[];
 
 /** W/S pick a row, A/D change the value in it, E starts, Q goes back to the menu. */
@@ -210,7 +440,7 @@ function SetupScreen({ setup, onChange, onStart, onExit }: {
   onExit: () => void;
 }) {
   const rows = [
-    { label: "Weapon", field: "weapon", options: TIER_KEYS, labels: undefined },
+    { label: "Weapon", field: "weapon", options: TIER_KEYS, labels: TIER_LABELS },
     { label: "Armor", field: "armor", options: ARMOR_KEYS, labels: undefined },
     {
       label: "Encounter",
@@ -298,6 +528,8 @@ function defaultSelection(fight: CombatState): Selection {
 
 /** How long each step of a turn's playback stays on screen (after the impact, for attacks). */
 const STEP_MS = 800;
+/** How long a Rest's own pose shows before the fighter settles into its next stance. */
+const REST_POSE_MS = 300;
 /** How long an attacker takes to close in on its target before the blow lands. */
 const APPROACH_MS = 320;
 /** How long a clean hit takes to knock its target back. */
@@ -378,8 +610,12 @@ function effectsOf(step: Step | undefined, youManeuvered: boolean): Map<string, 
         add(ev.who, "fx-fall");
         break;
       case "move":
-        if (ev.cause !== "player") add(ev.who, "fx-step");
+        if (ev.cause !== "player") { if (!fx.get(ev.who)?.classes.includes("fx-step")) add(ev.who, "fx-step"); }
         else if (youManeuvered && !fx.get("player")?.classes.includes("fx-step")) add("player", "fx-step");
+        break;
+      case "maneuver":
+        // Everyone who Maneuvered plays their step, even when it changed no distance.
+        if (!fx.get(ev.who)?.classes.includes("fx-step")) add(ev.who, "fx-step");
         break;
       default:
         break;
@@ -413,15 +649,26 @@ function roman(n: number): string {
 
 const barValues = (f: { hp: number; fatigue: number; death: number }): BarValues => ({ hp: f.hp, fatigue: f.fatigue, death: f.death });
 
-function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
+function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, changeLabel, onTurnPlayed }: {
   initial: CombatState;
+  /** The model viewer: rewrites the fight before it's shown or played (the enemy's pose and action). */
+  override?: (s: CombatState) => CombatState;
+  /** Extra controls drawn over the fight (the model viewer's). */
+  panel?: ReactNode;
+  /** Each change plays a turn in which you just Rest (the model viewer's actions). You can't act yourself. */
+  playSignal?: number;
+  /** The pause menu's label for onChangeLoadout. */
+  changeLabel?: string;
+  /** Called as a turn finishes playing, with the fight as it now stands. */
+  onTurnPlayed?: (s: CombatState) => void;
   onRetry: () => void;
   onChangeLoadout: () => void;
   onExit: () => void;
   /** Set for fights from the map: when it's over, carry on (won or not) instead of retrying. */
   onDone?: (won: boolean) => void;
 }) {
-  const [fight, setFight] = useState(initial);
+  const [fightRaw, setFight] = useState(initial);
+  const fight = useMemo(() => (override ? override(fightRaw) : fightRaw), [fightRaw, override]);
   const [playback, setPlayback] = useState<Playback | null>(null);
   const [selection, setSelection] = useState<Selection>(() => defaultSelection(initial));
   const [wheelOpen, setWheelOpen] = useState(false);
@@ -549,7 +796,8 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
       if (playback.index !== playback.steps.length - 1) return; // stay put until the final step
       // The final step: re-frame you where you ended up, or follow you if you Maneuvered.
       const act = playback.action;
-      const moved = step?.events.some(ev => ev.kind === "move" && ev.cause === "player");
+      // You walk whenever your Maneuver happened, even if it changed no distance.
+      const moved = playback.steps.some(st => st.events.some(ev => ev.kind === "maneuver" && ev.who === "player"));
       let anchor = w.pos.player;
       if (act?.type === "maneuver" && moved) {
         anchor = act.target === "self"
@@ -564,8 +812,8 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
     const t = w.pos[attack.target];
     if (!a || !t) return;
     if (playback.phase === "approach") {
-      // The attacker closes in, and the camera moves in on the two of them.
-      const at = closeIn(a, t, STRIKE_GAP);
+      // A melee attacker closes in (a ranged one stays put), and the camera moves in on the two.
+      const at = attack.ranged ? a : closeIn(a, t, STRIKE_GAP);
       shoot({ ...w.pos, [attack.attacker]: at }, actionCamera(shotCamera(shot), at, t), APPROACH_MS);
     } else if (attack.result === "hit") {
       // A clean hit knocks the target back, and it stays there. Blocks only rock it (CSS).
@@ -581,7 +829,8 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
     const p = shot.positions[selId];
     const { w, h } = viewport;
     if (!p || !w) return setAnchor(null);
-    const b = figureBox(shotCamera(shot), p, w, h);
+    const foe = fight.enemies.find(e => e.id === selId);
+    const b = figureBox(shotCamera(shot), p, w, h, foe && ENEMY_KINDS[foe.kind]?.scale);
     setAnchor({ x: b.x, y: b.y, w: b.w, h: b.h, hudW: w, hudH: h });
   }, [wheelOpen, selId, shot, viewport]);
 
@@ -632,17 +881,26 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
     if (option && playing && !busy) play(option.action);
   };
 
+  // The model viewer's Play: a turn where you only Rest, so the enemy's action plays on its own.
+  const lastSignal = useRef(playSignal);
+  useEffect(() => {
+    if (playSignal === lastSignal.current) return;
+    lastSignal.current = playSignal;
+    if (playing && !busy) play({ type: "rest" });
+  });
+
   // Advance the playback one step at a time.
   useEffect(() => {
     if (!playback || paused) return;
     const timer = window.setTimeout(
-      () =>
-        setPlayback(pb => {
-          if (!pb) return null;
-          if (pb.phase === "approach") return { ...pb, phase: "impact" };
-          const index = pb.index + 1;
-          return index < pb.steps.length ? { ...pb, index, phase: phaseFor(pb.steps[index]) } : null;
-        }),
+      () => {
+        const pb = playback;
+        if (pb.phase === "approach") return setPlayback({ ...pb, phase: "impact" });
+        const index = pb.index + 1;
+        if (index < pb.steps.length) return setPlayback({ ...pb, index, phase: phaseFor(pb.steps[index]) });
+        onTurnPlayed?.(fightRaw); // same render as the playback ending, so nothing flickers
+        setPlayback(null);
+      },
       playback.phase === "approach" ? APPROACH_MS : STEP_MS,
     );
     return () => window.clearTimeout(timer);
@@ -658,7 +916,7 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
   const pauseOptions: { label: string; run: () => void }[] = [
     { label: "Resume", run: () => setPaused(false) },
     { label: "Restart fight", run: onRetry },
-    ...(onDone ? [] : [{ label: "Change loadout", run: onChangeLoadout }]),
+    ...(onDone ? [] : [{ label: changeLabel ?? "Change loadout", run: onChangeLoadout }]),
     { label: "Main menu", run: onExit },
   ];
   const finish = () => onDone?.(fight.status === "won");
@@ -685,6 +943,7 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
       return;
     }
     if (forced) return; // the turn plays itself
+    if (playSignal !== undefined) return; // the model viewer: its panel plays the turns
     if (!wheelOpen) {
       if (key === "up") moveDepth(1);
       else if (key === "down") moveDepth(-1);
@@ -706,20 +965,58 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
    */
   const strikeStep = (id: string) =>
     playback ? playback.steps.findIndex(st => st.events.some(ev => ev.kind === "attack" && ev.attacker === id)) : -1;
-  const playbackPose = (id: string, telegraph: PoseName, staggered: boolean, down: PoseName): PoseName => {
-    if (!playback) return telegraph;
+  // A Rest's own pose only lasts a moment; then it already settles into its next stance.
+  const [restOver, setRestOver] = useState<string | null>(null);
+  useEffect(() => {
+    if (!playback) return;
+    const t = window.setTimeout(() => setRestOver(stepKey), REST_POSE_MS);
+    return () => window.clearTimeout(t);
+  }, [stepKey]);
+  /** The step where someone's Rest actually happened (not cut short), or -1. */
+  const restStep = (id: string) =>
+    playback ? playback.steps.findIndex(st => st.events.some(ev => ev.kind === "rest" && ev.who === id && ev.result === "rested")) : -1;
+  interface Poses { telegraph: PoseName; down: PoseName; windUp: PoseName; strike: PoseName; idle: PoseName; rested?: PoseName }
+  const playbackPose = (id: string, staggered: boolean, poses: Poses): PoseName => {
+    if (!playback) return poses.telegraph;
     const struck = strikeStep(id);
-    if (struck === playback.index) return impact ? "strike" : "attack"; // wind up while closing in, then strike
-    if (staggered) return down;
-    if (struck >= 0 && struck < playback.index) return "idle";
-    return telegraph;
+    if (struck === playback.index) return impact ? poses.strike : poses.windUp; // wind up while closing in, then strike
+    if (staggered) return poses.down;
+    if (struck >= 0 && struck < playback.index) return poses.idle;
+    // A Rest that went through shows its own pose from the moment it happens, briefly.
+    const rested = restStep(id);
+    if (poses.rested && rested >= 0 && playback.index >= rested) {
+      return playback.index === rested && restOver !== stepKey ? poses.rested : poses.idle;
+    }
+    return poses.telegraph;
   };
+  const punching = p.weapon === "baseline";
   const playerPose: PoseName = playback
-    ? playbackPose("player", playback.playerPose, p.staggered, "kneel")
+    ? playbackPose("player", p.staggered, {
+        telegraph: playback.playerPose, down: "kneel", windUp: "attack", strike: punching ? "punch" : "strike", idle: "idle",
+      })
     : forced ? "kneel" : (chosen?.action.type as PoseName | undefined) ?? "idle";
-  // While you plan, a sleepwalker only shows its stance; as the turn plays, its action shows.
+  // While you plan, an enemy only shows its stance; as the turn plays, its action shows.
+  // After its attack, an enemy already settles into the stance it takes next (if it's still up).
+  const settledPose = (e: Enemy): PoseName => {
+    const now = fight.enemies.find(x => x.id === e.id);
+    return now && now.alive && !now.staggered && !now.intent.forced ? poseForIntent(now) : idlePoseOf(e);
+  };
   const enemyPose = (e: Enemy): PoseName =>
-    playbackPose(e.id, playback ? actionPose(e) : poseForIntent(e), e.staggered, "fallen");
+    playbackPose(e.id, e.staggered, {
+      telegraph: playback ? actionPose(e) : poseForIntent(e),
+      down: downPoseOf(e), windUp: windUpPose(e), strike: strikePose(e), idle: settledPose(e),
+      rested: e.intent.restPose ? asPose(e.intent.restPose, "rest") : undefined,
+    });
+
+  // Ranged attacks throw something across the field as they land.
+  const projectiles: Projectile[] = [];
+  if (playback && impact && step) {
+    for (const ev of step.events) {
+      if (ev.kind !== "attack" || !ev.ranged) continue;
+      const kind = playback.from.enemies.find(e => e.id === ev.attacker)?.intent.projectile;
+      if (kind) projectiles.push({ from: ev.attacker, to: ev.target, kind, key: `${stepKey}-${ev.attacker}` });
+    }
+  }
 
   // Everyone on the field: you, enemies still standing, and any falling during this step.
   const figures: SceneFigure[] = [
@@ -734,7 +1031,7 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
       selected: !busy && sel.kind === "player",
       disabled: busy || !playing || forced !== null,
       label: "Select yourself",
-      onPick: () => openWheel({ kind: "player" }),
+      onPick: () => { if (playSignal === undefined) openWheel({ kind: "player" }); },
     },
     ...view.enemies
       .filter(e => e.alive || fx.get(e.id)?.classes.includes("fx-fall"))
@@ -744,24 +1041,29 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone }: {
         pose: enemyPose(e),
         weapon: e.weapon,
         armor: e.armor,
-        variant: e.kind === "waxed" ? "waxed" : undefined,
+        variant: ENEMY_KINDS[e.kind]?.variant,
+        scale: ENEMY_KINDS[e.kind]?.scale,
+        arm: e.kind === "warden" ? (e.flags.phase2 ? "scorched" : e.flags.sealed ? "out" : "lit") : undefined,
+        // Its rest pose just gave way to its next stance: its spin trails keep fading meanwhile.
+        lingerTrail: !!playback && restStep(e.id) === playback.index && restOver === stepKey && !!e.intent.restPose && !!WARDEN_POSES[e.intent.restPose as WardenPoseName]?.spinTrail,
         classes: fx.get(e.id)?.classes ?? [],
         stepKey,
         selected: !busy && sel.kind === "enemy" && sel.id === e.id,
         disabled: busy || !playing || forced !== null,
         label: `Select ${e.name}`,
-        onPick: () => openWheel({ kind: "enemy", id: e.id }),
+        onPick: () => { if (playSignal === undefined) openWheel({ kind: "enemy", id: e.id }); },
       })),
   ];
 
   return (
     <div className={`hud ${busy ? "is-cinematic" : ""}`} ref={hudRef}>
       <section className="stage" aria-label="Battlefield">
-        <Scene figures={figures} shot={shot} />
+        <Scene figures={figures} shot={shot} projectiles={projectiles} />
       </section>
 
       {/* Cutscene mode: black strips slide in while a turn plays out. When they leave, it's your move. */}
       <div className="letterbox letterbox-top" aria-hidden="true" />
+      {panel && !busy && !paused && panel}
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
 
       {/* The two health bars sit in fixed slots, so nothing else on screen can push them around. */}

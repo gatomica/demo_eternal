@@ -386,7 +386,7 @@ interface Look {
   ink: string;
   /** Eye color, or null for closed eyes (sleepwalkers walk in their sleep). */
   eye: string | null;
-  /** Wax color sealing the legs and a shoulder, for the waxed. */
+  /** The waxed: on their knees, shins bound and head sealed in wax of this color, crawling on their hands. */
   wax?: string;
   /** Arms held out in front, the way sleepwalkers walk. */
   reach?: boolean;
@@ -405,9 +405,7 @@ function drawWalker(
   const line = (x1: number, y1: number, x2: number, y2: number) => {
     g.beginPath(); g.moveTo(X(x1), Y(y1)); g.lineTo(X(x2), Y(y2)); g.stroke();
   };
-  // The legs, remembered so wax can be laid over them.
-  const legs: [number, number, number, number][] = [];
-  const leg = (x1: number, y1: number, x2: number, y2: number) => { legs.push([x1, y1, x2, y2]); line(x1, y1, x2, y2); };
+  const leg = line;
   const step = frame === "stepL" ? -1 : frame === "stepR" ? 1 : 0;
   const bob = step ? -0.025 : 0;
   const foot = 0.36, hip = 0.08 + bob, neck = -0.2 + bob, shoulder = neck + 0.05, headY = -0.36 + bob, r = 0.15;
@@ -423,6 +421,8 @@ function drawWalker(
   g.lineWidth = Math.max(2, 0.075 * T);
   g.lineCap = "round";
   g.lineJoin = "round";
+
+  if (look.wax) { drawKneeler(g, X, Y, line, T, facing, step, foot, look); return; }
 
   if (facing === "up" || facing === "down") {
     // Legs: the stepping foot lifts; the arm on the other side swings.
@@ -457,15 +457,6 @@ function drawWalker(
     }
   }
 
-  if (look.wax) {
-    // Wax sealing the legs stiff and crusted over one shoulder.
-    g.strokeStyle = look.wax;
-    g.lineWidth = Math.max(3, 0.13 * T);
-    for (const [x1, y1, x2, y2] of legs) line(x1, y1 + 0.03, x2, y2 - 0.02);
-    g.fillStyle = look.wax;
-    g.beginPath(); g.arc(X(facing === "left" ? 0.04 : -0.05), Y(shoulder + 0.01), 0.07 * T, 0, Math.PI * 2); g.fill();
-  }
-
   g.fillStyle = look.ink;
   g.beginPath(); g.arc(X(0), Y(headY), r * T, 0, Math.PI * 2); g.fill();
 
@@ -476,6 +467,53 @@ function drawWalker(
   if (facing === "down") { eye(-0.05, headY + 0.01); eye(0.05, headY + 0.01); }
   if (facing === "left") eye(-0.08, headY);
   if (facing === "right") eye(0.08, headY);
+}
+
+/**
+ * The waxed on the map: kneeling, the bound shins dragged behind, hauling itself along on its
+ * hands, its head a lump of wax.
+ */
+function drawKneeler(
+  g: CanvasRenderingContext2D, X: (u: number) => number, Y: (v: number) => number,
+  line: (x1: number, y1: number, x2: number, y2: number) => void,
+  T: number, facing: Dir, step: number, foot: number, look: Look,
+) {
+  const wax = look.wax!;
+  const hip = 0.2, neck = 0.02;
+  const waxLine = (x1: number, y1: number, x2: number, y2: number, w = 0.12) => {
+    g.strokeStyle = wax; g.lineWidth = Math.max(3, w * T); line(x1, y1, x2, y2);
+    g.strokeStyle = look.ink; g.lineWidth = Math.max(2, 0.075 * T);
+  };
+  const head = (u: number, v: number) => {
+    g.fillStyle = wax;
+    g.beginPath(); g.ellipse(X(u), Y(v), 0.15 * T, 0.16 * T, 0, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = "rgba(0,0,0,0.35)"; g.lineWidth = 1; g.stroke();
+    g.strokeStyle = look.ink; g.lineWidth = Math.max(2, 0.075 * T);
+  };
+  if (facing === "left" || facing === "right") {
+    const m = facing === "right" ? 1 : -1;
+    const lean = step ? 0.03 : 0;
+    // Thighs down to the knees, the bound shins flat behind.
+    line(0, hip, m * 0.06, foot - 0.02);
+    waxLine(m * 0.05, foot - 0.02, -m * 0.2, foot);
+    // Torso leaning forward, arms planted ahead, one reaching further each step.
+    const nx = m * (0.12 + lean), ny = neck + 0.04;
+    line(0, hip, nx, ny);
+    line(nx, ny + 0.03, m * (0.22 + (step === 1 ? 0.05 : 0)), foot);
+    line(nx, ny + 0.03, m * (0.17 + (step === -1 ? 0.05 : 0)), foot);
+    head(m * (0.2 + lean), ny - 0.1);
+  } else {
+    // From the front or behind: knees apart on the ground, shins bound behind them.
+    const toward = facing === "down" ? 1 : -1;
+    waxLine(-0.07, foot - 0.04 * toward, 0.07, foot - 0.04 * toward, 0.11);
+    line(-0.02, hip, -0.07, foot);
+    line(0.02, hip, 0.07, foot);
+    line(0, neck, 0, hip);
+    const lift = (side: number) => (step === side ? -0.05 : 0);
+    line(-0.02, neck + 0.05, -0.15, foot + lift(-1));
+    line(0.02, neck + 0.05, 0.15, foot + lift(1));
+    head(0, neck - 0.13);
+  }
 }
 
 /* ============================================================
