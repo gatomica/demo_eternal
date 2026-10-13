@@ -54,7 +54,7 @@ export type PoseName =
   | "ready" | "intimidating" | "cautious"
   | "strike" | "fallen" | "kneel" | "punch"
   | "w-idle" | "w-hands" | "w-scratch" | "w-wax-hand" | "w-hurl"
-  | "w-cower" | "w-crawl" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
+  | "w-cower" | "w-crawl" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
   | WardenPoseName;
 
 /**
@@ -239,6 +239,16 @@ export const POSES: Record<Exclude<PoseName, WardenPoseName>, Skeleton> = {
     leadLeg: { knee: [48, 111], foot: [28, 107] },
     rearLeg: { knee: [42, 112], foot: [21, 108] },
     weapon: bare([75, 112]),
+  },
+  // Slither Back: sat down, dragging itself backwards on its rear, hands planted behind it,
+  // bound legs stretched out toward you, heels digging in, head still turned your way.
+  "w-slither": {
+    head: [42, 72], neck: [36, 83], hip: [47, 107],
+    weaponArm: { elbow: [27, 95], hand: [22, 112] },
+    freeArm: { elbow: [31, 97], hand: [28, 112] },
+    leadLeg: { knee: [61, 103], foot: [80, 111] },
+    rearLeg: { knee: [59, 105], foot: [78, 113] },
+    weapon: bare([22, 112]),
   },
   // Cradle Flame: hands cupped at the chest around a small flame.
   "w-cradle": {

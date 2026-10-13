@@ -168,7 +168,7 @@ export const ENEMY_KINDS: Record<string, EnemyKind> = {
       "Hurl Wax": { act: "w-wax-hand", strike: "w-hurl", projectile: "wax" },
       Brace: { act: "w-cower" },
       "Drag Forward": { act: "w-crawl" },
-      "Slither Back": { act: "w-crawl" },
+      "Slither Back": { act: "w-slither" },
       "Clutch Flame": { act: "w-clutch" },
     },
   },

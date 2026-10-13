@@ -1185,6 +1185,8 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
     telegraph: PoseName; down: PoseName; windUp: PoseName; strike: PoseName; idle: PoseName; rested?: PoseName;
     /** The strike pose hands off to the next stance a moment in (REST_POSE_MS), its trails still fading. */
     strikeHandsOff?: boolean;
+    /** The pose it hands off to, if not `idle`. */
+    handOff?: PoseName;
     /** A Block or Maneuver: hold this pose, and only take `react` (the block, the dodge) as an attack on them lands. */
     guard?: { hold: PoseName; react: PoseName; keepAfterDodge?: boolean };
   }
@@ -1193,7 +1195,7 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
     const struck = strikeStep(id);
     // Wind up while closing in, then strike. A strike that spins on into the next stance (its
     // trails carrying on) takes that stance a moment in, like a Rest's own pose does.
-    if (struck === playback.index) return impact ? (poses.strikeHandsOff && restOver === stepKey ? poses.idle : poses.strike) : poses.windUp;
+    if (struck === playback.index) return impact ? (poses.strikeHandsOff && restOver === stepKey ? poses.handOff ?? poses.idle : poses.strike) : poses.windUp;
     if (staggered) return poses.down;
     if (struck >= 0 && struck < playback.index) return poses.idle;
     if (poses.guard) {
@@ -1226,9 +1228,17 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
     : forced ? "kneel" : (chosen?.action.type as PoseName | undefined) ?? "idle";
   // While you plan, an enemy only shows its stance; as the turn plays, its action shows.
   // After its attack, an enemy already settles into the stance it takes next (if it's still up).
+  /** Still on its feet once the turn is over (not staggered, fallen or reviving). */
+  const standingAfter = (e: Enemy) => {
+    // As the turn ended (its last step), not the fight now: the viewer resets it once played.
+    const end = playback?.steps[playback.steps.length - 1]?.after[e.id];
+    if (end && (end.staggered || !end.alive || end.hp <= 0)) return false;
+    const now = fight.enemies.find(x => x.id === e.id);
+    return !!now && now.alive && !now.staggered && !now.intent.forced;
+  };
   const settledPose = (e: Enemy): PoseName => {
     const now = fight.enemies.find(x => x.id === e.id);
-    return now && now.alive && !now.staggered && !now.intent.forced ? poseForIntent(now) : idlePoseOf(e);
+    return now && standingAfter(e) ? poseForIntent(now) : idlePoseOf(e);
   };
   // An enemy that's going to Rest holds its stance until the Rest actually happens.
   const restTelegraph = (e: Enemy): PoseName => {
@@ -1252,7 +1262,8 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
   const shownFlags = (e: Enemy) => {
     const rested = !!playback && restStep(e.id) >= 0 && playback.index >= restStep(e.id) && (restStep(e.id) < playback.index || restOver === stepKey);
     const struck = playback ? strikeStep(e.id) : -1;
-    const attacked = !!playback && struck >= 0 && (playback.index > struck || (playback.index === struck && impact && handsOff(e) && restOver === stepKey));
+    // (A strike that leaves him staggered plays out with the look he had; it only changes as he drops.)
+    const attacked = !!playback && struck >= 0 && (playback.index > struck || (playback.index === struck && impact && handsOff(e) && restOver === stepKey && standingAfter(e)));
     const u = usurpStep(e.id);
     const usurped = !!playback && u >= 0 && (playback.index > u || (playback.index === u && (playback.phase === "impact" || usurpStage === "reveal")));
     // Until his phase-two scene plays, he keeps the look he started the turn with: whatever the turn
@@ -1278,7 +1289,8 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
     // Having taken a flame, his candle burns again, whatever else the turn did.
     if (usurped) return f.phase2 ? "scorched" : "lit";
     // Staggered (shown down), his flame is out (before phase two).
-    if ((e.staggered || enemyPose(e) === downPoseOf(e)) && !f.phase2) return "out";
+    const striking = !!playback && strikeStep(e.id) === playback.index;
+    if (((e.staggered && !striking) || enemyPose(e) === downPoseOf(e)) && !f.phase2) return "out";
     return f.phase2 ? "scorched" : f.sealed ? "out" : "lit";
   };
   /** The step where this enemy took a flame (Usurp Flame), or -1. */
@@ -1337,6 +1349,9 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
       // The Warden attacks straight out of whatever stance he's in.
       down: downPoseOf(e), windUp: ENEMY_KINDS[e.kind]?.variant === "warden" && e.intent.stance ? poseForIntent(e) : windUpPose(e), strike: strikePose(e), idle: settledPose(e),
       strikeHandsOff: handsOff(e),
+      // Its strike always plays out in full: if it ends up staggered (or down), it still spins on
+      // into the pose its strike ends in, and only drops once the step is over.
+      handOff: handsOff(e) && !standingAfter(e) ? (WARDEN_POSES[e.intent.strikePose as WardenPoseName].trailEndsAt as PoseName) : undefined,
       rested: e.intent.restPose ? asPose(e.intent.restPose, "rest") : undefined,
     });
   };

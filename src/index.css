@@ -160,7 +160,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Enemies lunge left toward you; you lunge right toward them. */
 .figure-slot .fx-attack { animation: lunge-left 0.5s ease-out; }
 [data-fig="player"] .fx-attack { animation: lunge-right 0.5s ease-out; }
-.fx-hit { animation: hit-shake 0.4s ease-out 0.15s; }
+/* A clean hit (not blocked, not dodged) flashes the target red. */
+.fx-hit { animation: hit-shake 0.4s ease-out 0.15s, hit-red 0.3s linear 0.15s; }
+/* Hit hard enough to stagger: the red flash too, then the break. */
+.fx-hit.fx-break { animation: hit-shake 0.4s ease-out, break-fade 0.8s ease-out forwards, hit-red 0.3s linear 0.15s; }
 /* A blocked hit flashes the blocker. (The jolt apart, like a dodge's step, moves them for real in the scene.) */
 .fx-block { animation: block-flash 0.4s ease-out 0.15s; }
 .fx-dodge { animation: dodge-blur 0.5s ease-out; }
@@ -174,6 +177,11 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @keyframes dodge-blur { 40% { opacity: 0.6; } }
 @keyframes hit-shake { 20% { transform: translateX(-3%); } 40% { transform: translateX(3%); } 60% { transform: translateX(-2%); } 80% { transform: translateX(1%); } }
 @keyframes block-flash { 30% { filter: brightness(1.8); } }
+/* Red, then straight back: a fade would pass through orange on the way. */
+@keyframes hit-red {
+  0%, 55% { filter: brightness(0.45) sepia(1) saturate(14) hue-rotate(-32deg) brightness(1.2); }
+  56%, 100% { filter: none; }
+}
 @keyframes break-fade { to { filter: grayscale(1) brightness(0.8); } }
 @keyframes fall { to { transform: translateY(8%); opacity: 0; } }
 @keyframes step-bob { 25%, 75% { transform: translateY(-2.5%); } 50% { transform: translateY(0); } }
