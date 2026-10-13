@@ -29,12 +29,15 @@ export interface EnemyKind {
   /**
    * How each action is drawn: `act` while it happens (and an attack's wind-up), `strike` the
    * moment an attack lands, `rest` once a Rest actually happens at the end of the turn, and the
-   * `projectile` a ranged attack throws.
+   * `projectile` a ranged attack throws (or, for a melee one, `impact`: a shockwave where it lands).
+   * `guard`: a Block that holds the stance and only takes this pose as an attack on it lands.
    */
-  actionPoses?: Record<string, { act?: string; strike?: string; rest?: string; projectile?: "fan" | "blast" | "wax" }>;
+  actionPoses?: Record<string, { act?: string; strike?: string; rest?: string; projectile?: "fan" | "blast" | "wax" | "impact"; guard?: string }>;
   /** Shown once its attack has landed (default "idle"), and while staggered (default "fallen"). */
   idlePose?: string;
   downPose?: string;
+  /** A Rest broken by a blow (default "flinch"), held to the end of the turn. */
+  flinchPose?: string;
   /** Conditions named in the pattern (`*Name`, written in lowercase here), checked when picking. */
   conditions?: Record<string, (self: Enemy, state: CombatState) => boolean>;
   /**
@@ -73,6 +76,8 @@ function enterPhaseTwo(r: TurnReport) {
   if (self.flags.sealed) r.event({ kind: "flag", who: self.id, flag: "sealed", on: false });
   self.flags.sealed = false;
   r.event({ kind: "phase", who: self.id, phase: 2 });
+  // Once he's back on his feet, he always takes up Idle (the only "Second Phase >" stance).
+  self.nextFrom = "Second Phase";
   r.say(`${self.name} tears the wax from his arm. The flame beneath has been burning all along.`, "stagger");
   for (const e of state.enemies) {
     if (e === self || !e.alive || e.kind !== "waxed") continue;
@@ -82,6 +87,13 @@ function enterPhaseTwo(r: TurnReport) {
     r.event({ kind: "candle", who: e.id });
   }
   if (state.enemies.some(e => e.kind === "waxed")) r.say("The waxed around him catch fire, burning like candles.");
+}
+
+function setFlaming(r: TurnReport, on: boolean) {
+  if (!!r.self.flags.flaming === on) return;
+  r.self.flags.flaming = on;
+  r.event({ kind: "flag", who: r.self.id, flag: "flaming", on });
+  r.say(on ? `${r.self.name} grips the flail in his burning hand. It catches fire.` : `The flail's fire is smothered against the ground.`);
 }
 
 function setSealed(r: TurnReport, on: boolean) {
@@ -150,6 +162,7 @@ export const ENEMY_KINDS: Record<string, EnemyKind> = {
     },
     idlePose: "w-idle",
     downPose: "w-fallen",
+    flinchPose: "w-flinch",
     actionPoses: {
       Scratch: { act: "w-hands", strike: "w-scratch" },
       "Hurl Wax": { act: "w-wax-hand", strike: "w-hurl", projectile: "wax" },
@@ -170,7 +183,7 @@ export const ENEMY_KINDS: Record<string, EnemyKind> = {
     weapon: "normal",
     armor: "normal",
     revives: 1,
-    flags: { sealed: false, phase2: false },
+    flags: { sealed: false, phase2: false, flaming: false, phase2Pending: false },
     pattern: parsePattern("Penitent Warden", `
       actions:
         Flail Swing:  attack, normal, #waxing
@@ -181,12 +194,12 @@ export const ENEMY_KINDS: Record<string, EnemyKind> = {
         Flame Blast:  attack, heavy, ranged, *Unsealed
         Chain Guard:  block, normal
         Wax Guard:    block, light, *Sealed
-        Stride:       maneuver, advance
+        Stride:       maneuver, retreat
         Usurp Flame:  maneuver, advance, *Sealed
         Wind Up Flail: rest
         Clutch Arm:   rest
       stances:
-        Usurp Flame / Recover            > Idle                    > Stride / Wind Up Flail
+        Usurp Flame / Recover / Second Phase > Idle                    > Stride / Wind Up Flail
         Chain Guard / Clutch Arm         > Wax Shoulder In         > Fan Flames / Wax Guard / Wind Up Flail
         Fan Flames / Wax Guard           > Wax Arm Back            > Wax Punch, Flame Blast / Stride
         Flame Blast                      > Arm Over Chest          > Fan Flames / Wax Guard / Clutch Arm
@@ -209,19 +222,20 @@ export const ENEMY_KINDS: Record<string, EnemyKind> = {
     },
     idlePose: "wd-idle",
     downPose: "wd-fallen",
+    flinchPose: "wd-flinch",
     actionPoses: {
       "Flail Swing": { act: "wd-clutch-flail", strike: "wd-swing" },
       "Rising Flail": { act: "wd-spin-behind", strike: "wd-rising" },
-      "Flail Slam": { act: "wd-spin-over", strike: "wd-slam" },
-      "Wax Punch": { act: "wd-arm-back", strike: "wd-punch" },
+      "Flail Slam": { act: "wd-spin-over", strike: "wd-slam", projectile: "impact" },
+      "Wax Punch": { act: "wd-arm-back", strike: "wd-punch", projectile: "impact" },
       "Fan Flames": { act: "wd-shoulder", strike: "wd-fan", projectile: "fan" },
       "Flame Blast": { act: "wd-arm-back", strike: "wd-blast", projectile: "blast" },
       "Chain Guard": { act: "wd-chain-guard" },
-      "Wax Guard": { act: "wd-wax-guard" },
+      "Wax Guard": { act: "wd-wax-guard", guard: "wd-wax-swat" },
       Stride: { act: "wd-stride" },
       "Usurp Flame": { act: "wd-usurp" },
       "Wind Up Flail": { act: "wd-spin-behind", rest: "wd-wound-up" },
-      "Clutch Arm": { act: "wd-clutch-arm" },
+      "Clutch Arm": { act: "wd-clutch-arm", rest: "wd-clutch-arm" },
     },
     fixedActions: ["Usurp Flame"],
     conditions: {
@@ -254,20 +268,35 @@ export const ENEMY_KINDS: Record<string, EnemyKind> = {
             r.event({ kind: "encased", who: ally.id });
             r.say(`${self.name} tears the flame from ${ally.name}, sealing it whole in wax.`);
           } else {
+            // Your flame taken, you're sealed whole in wax until you get back up.
             state.player.waxed = false;
+            state.player.encased = true;
             r.event({ kind: "usurp", who: self.id, target: "player" });
-            r.say(`${self.name} tears your flame away. The wax on you crumbles.`, "hit");
+            r.say(`${self.name} tears your flame away, sealing you whole in wax.`, "hit");
           }
           setSealed(r, false);
         }
-        if (action === "Flame Blast" || action === "Clutch Arm") setSealed(r, true);
+        if (action === "Flame Blast") setSealed(r, true);
+        if (action === "Clutch Arm") {
+          // His flame can't be put out any more: clutching the flail, he sets it alight instead.
+          if (self.flags.phase2) setFlaming(r, true);
+          else setSealed(r, true);
+        }
+        // Smashed into the ground, the flail's fire goes out.
+        if (action === "Flail Slam") setFlaming(r, false);
       }
+      // The way into phase two opens when he's staggered while already Sealed (the skill route,
+      // revive still in hand) or when he falls with his revive (the default route); it happens as
+      // he gets back up: as he recovers from the stagger, or as his revive lands.
       if (r.staggered) {
-        // Staggered while already Sealed: the skill route into phase two, revive still in hand.
-        if (r.was.sealed && !self.flags.phase2) enterPhaseTwo(r);
+        if (r.was.sealed && !self.flags.phase2) self.flags.phase2Pending = true;
         else setSealed(r, true);
       }
-      if (r.fell) enterPhaseTwo(r);
+      if (r.fell && !self.flags.phase2) self.flags.phase2Pending = true;
+      if (self.flags.phase2Pending && outcome === "recover" && !self.staggered && !self.reviving) {
+        self.flags.phase2Pending = false;
+        enterPhaseTwo(r);
+      }
     },
   },
 };

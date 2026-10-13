@@ -50,9 +50,11 @@ export interface Intent {
   actPose?: string;
   strikePose?: string;
   /** What flies from it to its target, for a ranged attack. */
-  projectile?: "fan" | "blast" | "wax";
+  projectile?: "fan" | "blast" | "wax" | "impact";
   /** For a Rest: the pose once it actually happens, at the end of the turn. */
   restPose?: string;
+  /** For a Block: it holds its stance, and only takes this pose as an attack on it lands. */
+  guardPose?: string;
   /** The weight of this Attack or Block, when the action has its own. Otherwise the fighter's weapon. */
   weight?: WeaponTier;
   /** A ranged attack: the attacker stays put, a Block sends nothing back, and it can always be dodged. */
@@ -93,6 +95,8 @@ export interface Fighter {
    * Clears when Fatigue drops to 0.
    */
   waxed: boolean;
+  /** Its flame taken while staggered and Waxed (Usurp Flame): sealed whole in wax until it gets up. */
+  encased?: boolean;
   /** Staggered: Fatigue is pinned at full (it can't grow further) and the next turn is a forced Rest,
    *  which always ends with Fatigue at 0. */
   staggered: boolean;
@@ -102,7 +106,7 @@ export interface Player extends Fighter {
   /** Healing item charges, spent automatically to revive. */
   charges: number;
   /** True during the protected turn after falling with a charge left. Health stays at 0 until the
-   *  turn ends, then comes back to half (along with rests). */
+   *  turn ends, then comes back to full health (along with rests). */
   reviving: boolean;
 }
 
@@ -117,6 +121,8 @@ export interface Enemy extends Fighter {
   last: LastAction | null;
   /** Statuses of its own, by name (the Warden's "sealed", "phase2"). Patterns check them as conditions. */
   flags: Record<string, boolean>;
+  /** Its next stance is picked as if this had just happened (e.g. "Second Phase"), once it's free to act. */
+  nextFrom?: string;
   /** Revives left. A boss revives to full health, only when it falls. */
   revives: number;
   /** True during its protected revive turn. */
@@ -175,6 +181,8 @@ export type CombatEvent =
   | { kind: "move"; who: string; from: Line; to: Line; cause: string }
   | { kind: "revive"; who: string }
   | { kind: "defeat"; who: string }
+  /** A flaming flail's direct hit: `who` takes `damage` more. */
+  | { kind: "burned"; who: string; damage: number }
   /** A direct waxing hit: `who` is now Waxed (`bonus`: extra Fatigue, if it already was). */
   | { kind: "waxed"; who: string; bonus: number }
   /** Usurp Flame: `who` took `target`'s flame. */
@@ -196,6 +204,10 @@ export interface FighterView {
   staggered: boolean;
   alive: boolean;
   line?: Line;
+  waxed?: boolean;
+  encased?: boolean;
+  /** How an enemy left the fight, once it has. */
+  fate?: "fallen" | "encased" | "candle";
 }
 
 /**
@@ -248,6 +260,8 @@ export const ARMOR: Record<ArmorTier, { resist: number; weight: number; label: s
 
 /** Even unburdened, a dodge costs this many sixteenths of the damage dodged. */
 export const DODGE_BASE = 1;
+/** A flaming flail's direct hit deals this much of its damage again, as extra damage. */
+export const FLAMING_BONUS = 1 / 4;
 
 /** Rest clears this much Fatigue. */
 export const REST_CLEARS = 8;
@@ -317,7 +331,7 @@ export function describeAction(kindName: string, line: Line, stance: string | un
   return {
     type: a.type, dir, forced: false, stance, action: a.name,
     pose: stance ? kind.stancePoses[stance] ?? poses?.act : poses?.act,
-    actPose: poses?.act, strikePose: poses?.strike, projectile: poses?.projectile, restPose: poses?.rest,
+    actPose: poses?.act, strikePose: poses?.strike, projectile: poses?.projectile, restPose: poses?.rest, guardPose: poses?.guard,
     weight: a.weight, ranged: a.ranged || undefined, tags: a.tags.length ? a.tags : undefined,
   };
 }
@@ -343,7 +357,9 @@ function chooseIntent(e: Enemy, state: CombatState, rng: Rng): Intent {
   }
 
   const available = (a: ActionDef) => a.needs.every(n => kind.conditions?.[n]?.(e, state) ?? false);
-  const memory = e.last ? { action: e.last.name, outcome: e.last.outcome } : null;
+  // Something it must pick on from (a boss's second phase) overrides what it just did.
+  const memory = e.nextFrom ? { action: e.nextFrom, outcome: "done" as const } : e.last ? { action: e.last.name, outcome: e.last.outcome } : null;
+  e.nextFrom = undefined;
   const picked = choose(kind.pattern, memory, available, rng);
   // A fixed rule overrides the action (the stance still shows as picked).
   const fixed = kind.forced?.(e, state, rng);
@@ -540,8 +556,8 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
   const r1 = (n: number) => Math.round(n * 10) / 10;
   const snapshot = (): Record<string, FighterView> => {
     const v: Record<string, FighterView> = {};
-    v[p.id] = { hp: p.hp, fatigue: p.fatigue, death: p.death, staggered: p.staggered, alive: p.hp > 0 };
-    for (const e of alive) v[e.id] = { hp: e.hp, fatigue: e.fatigue, death: e.death, staggered: e.staggered, alive: e.hp > 0, line: e.line };
+    v[p.id] = { hp: p.hp, fatigue: p.fatigue, death: p.death, staggered: p.staggered, alive: p.hp > 0, waxed: p.waxed, encased: !!p.encased };
+    for (const e of alive) v[e.id] = { hp: e.hp, fatigue: e.fatigue, death: e.death, staggered: e.staggered, alive: e.hp > 0, line: e.line, waxed: e.waxed, fate: e.fate };
     return v;
   };
   const endStep = () => {
@@ -661,7 +677,16 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
       const sentBack = blocking && ranged ? 0 : resisted;
       events.push({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, grit });
       // A direct waxing hit (the Warden's flail) leaves wax behind; on wax already there, it also tires.
-      if (!blocking && attacker !== p && (attacker as Enemy).intent.tags?.includes("waxing")) {
+      // Once his flame is free (phase two) it leaves no wax; set on fire, it burns for extra damage.
+      const waxer = attacker !== p ? (attacker as Enemy) : undefined;
+      if (!blocking && waxer?.intent.tags?.includes("waxing") && waxer.flags.flaming) {
+        const burn = through * FLAMING_BONUS;
+        if (!cfg.dummy) target.hp -= burn;
+        if (burn > 0) hurt.add(target.id);
+        events.push({ kind: "burned", who: target.id, damage: burn });
+        say(`The flaming flail burns ${target === p ? "you" : nameOf(target)}: ${r1(burn)} extra damage.`, "hit");
+      }
+      if (!blocking && waxer?.intent.tags?.includes("waxing") && !waxer.flags.phase2) {
         const bonus = target.waxed ? through / 8 : 0;
         tire(target, bonus);
         target.waxed = true;
@@ -698,11 +723,13 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
 
   /* ---------- 2. Rests and revives settle ---------- */
   if (reviving) {
-    // The revive lands at the end of the protected turn: back to half health, fresh.
-    p.hp = p.maxHP / 2;
+    // The revive lands at the end of the protected turn: back to full health, fresh, like a boss.
+    p.hp = p.maxHP;
     p.fatigue = 0;
     p.death = 0;
     p.staggered = false;
+    p.waxed = false;
+    p.encased = false;
     events.push({ kind: "revive", who: p.id });
     say("You revive. Nothing could touch you this turn.");
   }
@@ -717,13 +744,21 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
     events.push({ kind: "revive", who: e.id });
     say(`${e.name} rises again, whole.`);
   }
+  // Your flame about to be taken (Usurp Flame on you): you stay down, sealed, until he has it;
+  // you only get back up at the very end of the turn.
+  const usurpOnYou = alive.some(e => e.intent.action === "Usurp Flame" && (!e.intent.target || e.intent.target === p.id) && !out.has(e.id));
+  let recoverLast = false;
   for (const [id, wasForced] of resting) {
     const f = byId(id)!;
     if (fallen.has(id)) continue;
+    if (wasForced && f === p && usurpOnYou && p.staggered) { recoverLast = true; continue; }
     if (wasForced) {
       // The forced Rest always ends the break, hit or not, with Fatigue back to 0.
       f.staggered = false;
       f.fatigue = 0;
+      // With its Fatigue gone, so is everything that hung on it: the wax breaks away.
+      f.waxed = false;
+      f.encased = false;
       events.push({ kind: "rest", who: id, result: "recovered", forced: true });
       say(f === p ? "You come back to your senses." : `${f.name} recovers.`);
       continue;
@@ -739,6 +774,7 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
       f.fatigue = 0;
       if (!hurt.has(id)) heal(f, leftover);
     }
+    if (f.fatigue <= 0) f.waxed = false;
     events.push({ kind: "rest", who: id, result: "rested", forced: wasForced });
   }
   endStep();
@@ -834,8 +870,10 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
     events.push({ kind: "stagger", who: p.id });
     say("You stagger.", "stagger");
   }
-  // Wax only lasts while there's Fatigue to hold it.
-  for (const f of fighters) if (f.waxed && f.fatigue <= 0) f.waxed = false;
+  // Wax only lasts while there's Fatigue to hold it (a staggered fighter keeps it until it recovers).
+  for (const f of fighters) if (f.waxed && f.fatigue <= 0 && !f.staggered) f.waxed = false;
+  // Back on its feet, the wax sealing it breaks away.
+  for (const f of fighters) if (f.encased && !f.staggered) f.encased = false;
   pinStaggered();
   endStep();
 
@@ -869,6 +907,16 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
     });
   }
   endStep();
+  if (recoverLast) {
+    // The forced Rest ends the break, as always: the wax sealing you breaks away with it.
+    p.staggered = false;
+    p.fatigue = 0;
+    p.waxed = false;
+    p.encased = false;
+    events.push({ kind: "rest", who: p.id, result: "recovered", forced: true });
+    say("You come back to your senses, the wax cracking off you.");
+    endStep();
+  }
 
   if (s.enemies.every(e => !e.alive) && s.status === "playing") s.status = "won";
 

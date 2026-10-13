@@ -161,11 +161,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .figure-slot .fx-attack { animation: lunge-left 0.5s ease-out; }
 [data-fig="player"] .fx-attack { animation: lunge-right 0.5s ease-out; }
 .fx-hit { animation: hit-shake 0.4s ease-out 0.15s; }
-/* A blocked hit rocks the blocker back, but it stands its ground. */
-.figure-slot .fx-block { animation: block-flash 0.4s ease-out 0.15s, block-push-right 0.45s ease-out 0.1s; }
-[data-fig="player"] .fx-block { animation: block-flash 0.4s ease-out 0.15s, block-push-left 0.45s ease-out 0.1s; }
-.figure-slot .fx-dodge { animation: dodge-right 0.5s ease-out; }
-[data-fig="player"] .fx-dodge { animation: dodge-left 0.5s ease-out; }
+/* A blocked hit flashes the blocker. (The jolt apart, like a dodge's step, moves them for real in the scene.) */
+.fx-block { animation: block-flash 0.4s ease-out 0.15s; }
+.fx-dodge { animation: dodge-blur 0.5s ease-out; }
 .fx-break { animation: hit-shake 0.4s ease-out, break-fade 0.8s ease-out forwards; }
 .fx-fall { animation: fall 0.7s ease-in 0.2s forwards; }
 /* Walking to a new spot: quick steps in place while the scene moves the figure. */
@@ -173,12 +171,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @keyframes lunge-left { 40% { transform: translateX(-14%); } }
 @keyframes lunge-right { 40% { transform: translateX(14%); } }
-@keyframes dodge-right { 40% { transform: translateX(10%); opacity: 0.6; } }
-@keyframes dodge-left { 40% { transform: translateX(-10%); opacity: 0.6; } }
+@keyframes dodge-blur { 40% { opacity: 0.6; } }
 @keyframes hit-shake { 20% { transform: translateX(-3%); } 40% { transform: translateX(3%); } 60% { transform: translateX(-2%); } 80% { transform: translateX(1%); } }
 @keyframes block-flash { 30% { filter: brightness(1.8); } }
-@keyframes block-push-right { 30% { transform: translateX(7%); } }
-@keyframes block-push-left { 30% { transform: translateX(-7%); } }
 @keyframes break-fade { to { filter: grayscale(1) brightness(0.8); } }
 @keyframes fall { to { transform: translateY(8%); opacity: 0; } }
 @keyframes step-bob { 25%, 75% { transform: translateY(-2.5%); } 50% { transform: translateY(0); } }
@@ -293,6 +288,7 @@ kbd {
 .fig-wax-bind { fill: none; stroke: var(--wax); stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
 .fig-wax-head { fill: var(--wax); stroke: color-mix(in srgb, var(--wax) 70%, black); stroke-width: 1; }
 .fig-wax-drip { fill: none; stroke: var(--wax); stroke-width: 2.5; stroke-linecap: round; }
+.fig-wax-shell { fill: none; stroke: var(--wax); stroke-width: 13; stroke-linecap: round; stroke-linejoin: round; }
 .fig-flame path { fill: #e0782f; animation: flame-flicker 0.6s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: 50% 100%; }
 .fig-flame .fig-flame-core { fill: #f6d77a; }
 @keyframes flame-flicker { from { transform: scale(1, 1); } to { transform: scale(0.88, 1.12); } }
@@ -315,7 +311,13 @@ kbd {
 .fig-beard-strand { fill: none; stroke: var(--wax); stroke-width: 1.8; stroke-linecap: round; }
 .fig-hood { fill: #6c6871; }
 .fig-hood-dark { fill: #0c0a0f; }
-.fig-flail-handle { stroke: var(--grip); stroke-width: 2.6; stroke-linecap: round; }
+.fig-flail-handle { stroke: #6b6874; stroke-width: 2.6; stroke-linecap: round; }
+.fig-handle-wax { fill: var(--wax); }
+.fig-handle-drip { stroke: var(--wax); stroke-width: 1.2; stroke-linecap: round; }
+/* The flail's head: all wax. */
+.fig-head-wax { fill: var(--wax); stroke: color-mix(in srgb, var(--wax) 65%, black); stroke-width: 0.8; stroke-linejoin: round; }
+.fig-head-layer { fill: none; stroke: color-mix(in srgb, var(--wax) 70%, black); stroke-width: 1; stroke-linecap: round; }
+.fig-head-shine { fill: color-mix(in srgb, var(--wax) 55%, white); opacity: 0.7; }
 .fig-beak { fill: var(--wax); stroke: color-mix(in srgb, var(--wax) 65%, black); stroke-width: 0.8; stroke-linejoin: round; }
 .fig-chain { fill: none; stroke: var(--metal); stroke-width: 1.6; stroke-dasharray: 2 1.4; stroke-linecap: round; }
 .fig-censer { fill: #4a4850; stroke: var(--metal); stroke-width: 1.2; }
@@ -335,6 +337,8 @@ kbd {
 .fig-flame-b path { animation-delay: -0.25s; }
 .fig-flame-c path { animation-delay: -0.45s; animation-duration: 0.5s; }
 .fig-burst-outer { fill: #e0782f; }
+/* A candle flame blown flat by a fast swing, smudged by the speed. */
+.fig-flame-smudge { filter: blur(0.7px); opacity: 0.9; }
 .fig-burst-inner { fill: #f6d77a; }
 @media (prefers-reduced-motion: reduce) { .fig-arm-embers, .fig-smoke { animation: none; } }
 .fig-ground { stroke: var(--line); stroke-width: 1.5; }
@@ -349,6 +353,13 @@ kbd {
 .fig-far { stroke: var(--ink-far); }
 .fig-trail { fill: var(--sleep); opacity: 0; animation: trail 0.45s ease-out; }
 @keyframes trail { 0% { opacity: 0.7; } 100% { opacity: 0; } }
+/* Flame Blast's punch trail, in the candle flame's colours. */
+.fig-trail-flame { opacity: 0; animation: trail 0.45s ease-out; }
+.fig-trail-flame-outer { fill: #e0782f; }
+.fig-trail-flame-core { fill: #f6d77a; }
+/* Wax Punch's trail: the same streak in the wax arm's colours. */
+.fig-trail-wax-outer { fill: var(--wax); }
+.fig-trail-wax-core { fill: #ddcd8a; }
 /* Trails shown one after another (each starts hidden until its turn). */
 .fig-trail-seq { fill: var(--sleep); opacity: 0; animation: trail-seq 0.5s ease-out both; }
 @keyframes trail-seq { 0% { opacity: 0; } 12% { opacity: 0.75; } 100% { opacity: 0; } }
@@ -360,8 +371,15 @@ kbd {
 @keyframes chain-seq { 0% { opacity: 0; } 20% { opacity: 0.9; } 40% { opacity: 0.3; } 60% { opacity: 0.8; } 80% { opacity: 0.2; } 100% { opacity: 0; } }
 /* A chain whirling too fast to see: copies flickering in and out. */
 .fig-chain-blur { animation: chain-blur 0.36s steps(3) infinite alternate; }
-.fig-censer-smudge { fill: #8d866a; filter: blur(1.4px); }
+.fig-censer-smudge { fill: var(--wax); filter: blur(1.4px); }
 .fig-spin-path { fill: none; stroke: var(--sleep); stroke-width: 8; opacity: 0.22; }
+/* The Warden's flail: its trails and the ring it spins in are wax (burnt black in phase two). */
+.wd-figure .fig-trail, .wd-figure .fig-trail-seq { fill: var(--wax); }
+.wd-figure .fig-ring-flash, .wd-figure .fig-spin-path { stroke: var(--wax); }
+/* A flaming flail: its trails, ring and blurred heads are fire. */
+.wd-flaming .fig-trail, .wd-flaming .fig-trail-seq { fill: #e0782f; }
+.wd-flaming .fig-ring-flash, .wd-flaming .fig-spin-path { stroke: #e0782f; }
+.wd-flaming .fig-censer-smudge { fill: #f0a040; }
 .fig-spin-disc { fill: var(--metal); opacity: 0.16; }
 @keyframes chain-blur { 0% { opacity: 0.15; } 50% { opacity: 0.85; } 100% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .fig-trail-seq { animation: none; opacity: 0.25; } .fig-chain-blur { animation: none; opacity: 0.5; } }
@@ -415,6 +433,47 @@ kbd {
 }
 /* The shockwave is drawn in screen pixels over the whole scene (see Shockwave in render.tsx). */
 .shockwave { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1999; pointer-events: none; overflow: visible; }
+.impact-ring { fill: none; stroke: #f4f1ea; }
+/* Usurp Flame: the light dying around everything but one flame, then its trail into his hand. */
+/* The Warden's flame put out: a puff of smoke leaving his hand. */
+.fig-smoke-wisp { fill: none; stroke: #8a8794; stroke-width: 1.6; stroke-linecap: round; opacity: 0; animation: smoke-wisp 0.9s ease-out both; transform-box: fill-box; transform-origin: 50% 100%; }
+.fig-smoke-cloud { fill: #8a8794; opacity: 0; animation: smoke-cloud 0.7s ease-out both; transform-box: fill-box; transform-origin: 50% 50%; }
+@keyframes smoke-wisp { 0% { opacity: 0.9; transform: translateY(2px) scaleY(0.4); } 100% { opacity: 0; transform: translateY(-10px) scaleY(1.2); } }
+@keyframes smoke-cloud { 0% { opacity: 0.7; transform: scale(0.6); } 100% { opacity: 0; transform: translateY(-6px) scale(2.2); } }
+/* The arena's sealed sleepwalkers (floor mounds and wax walls). */
+.arena-slot { position: absolute; pointer-events: none; }
+.arena-wall { fill: #8c7a3e; stroke: #6d5f2f; stroke-width: 1.5; }
+.arena-mound { fill: #9c8843; stroke: #6d5f2f; stroke-width: 1.2; }
+.arena-drip { fill: none; stroke: #a8944c; stroke-width: 2.4; stroke-linecap: round; }
+.arena-relief { fill: #a8944c; stroke: #6d5f2f; stroke-width: 1; }
+.arena-relief-limb { fill: none; stroke: #a8944c; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+.arena-head { fill: var(--wax); stroke: #6d5f2f; stroke-width: 1; }
+.arena-candle { fill: #e9dfc0; }
+.arena-wick { stroke: #1b1714; stroke-width: 1; stroke-linecap: round; }
+.arena-candle-flame { position: absolute; overflow: visible; pointer-events: none; }
+/* The waxed where they fell: left in place, faded. */
+.figure-slot .is-remains { opacity: 0.55; }
+/* The phase-two scene: flames streaming into his hand, and his flare. */
+.ignite-trail { opacity: 0; animation: usurp-trail 0.7s ease-out both; }
+.ignite-trail-outer { fill: none; stroke: #e0782f; stroke-width: 5; stroke-linecap: round; }
+.ignite-trail-core { fill: none; stroke: #f6d77a; stroke-width: 2; stroke-linecap: round; }
+.scene-lone-flame.is-kindling { animation: kindle 0.4s ease-out both; }
+@keyframes kindle { from { opacity: 0; transform: scale(0.3); } to { opacity: 1; transform: scale(1); } }
+.ignite-flare { z-index: 3003; }
+/* Phase two: his wax burnt pitch black; the inside of his cloak and his hood burning. */
+.wd-phase2 { --wax: #16120f; }
+.wd-phase2 .fig-stain, .wd-phase2 .fig-stain-run { fill: #0f0c0a; stroke: #0f0c0a; }
+.wd-phase2 .fig-cloak-inside { fill: #c4521c; animation: inner-fire 0.45s ease-in-out infinite alternate; }
+.wd-phase2 .fig-hood-dark { fill: #b2441a; animation: inner-fire 0.5s ease-in-out infinite alternate-reverse; }
+@keyframes inner-fire { from { fill: #a63c16; } to { fill: #f08a2c; } }
+.scene-dark { position: absolute; inset: 0; background: #000; z-index: 3000; pointer-events: none; }
+.scene-lone-flame { position: absolute; z-index: 3001; overflow: visible; pointer-events: none; }
+.usurp-trail-layer { z-index: 3002; } /* over the darkness, as the light comes back */
+.usurp-trail { opacity: 0; animation: usurp-trail 1s ease-out 0.15s; }
+@keyframes usurp-trail { 0% { opacity: 0; } 15% { opacity: 0.95; } 100% { opacity: 0; } }
+.impact-flash { fill: #ffffff; }
+.impact-spike { fill: #f4f1ea; }
+.shockwave .impact-ring { stroke-width: 3; }
 .shockwave-ring { fill: none; stroke: #e0782f; stroke-width: 6; stroke-linecap: round; }
 .shockwave-ring-inner { fill: none; stroke: #f6d77a; stroke-width: 2.4; stroke-linecap: round; }
 @media (prefers-reduced-motion: reduce) { .blast-flash { animation-duration: 0.01s; } }

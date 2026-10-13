@@ -17,7 +17,7 @@ import {
   type Tier,
   type WeaponTier,
 } from "./combat";
-import { HealthBar, Scene, StickFigure, actionPose, asPose, downPoseOf, figureBox, idlePoseOf, poseForIntent, strikePose, windUpPose, shotCamera, type BarValues, type PoseName, type Projectile, type SceneFigure, type SceneShot, type ShotCamera } from "./render";
+import { HealthBar, IGNITE, Scene, StickFigure, actionPose, asPose, downPoseOf, flinchPoseOf, figureBox, idlePoseOf, poseForIntent, strikePose, windUpPose, shotCamera, type BarValues, type PoseName, type Projectile, type SceneFigure, type SceneShot, type ShotCamera } from "./render";
 import {
   actionCamera,
   behind,
@@ -31,8 +31,8 @@ import {
   type Vec,
 } from "./scene";
 import { Exploration, type Journey, type MapFoe } from "./explore";
-import { nextStances } from "./patterns";
-import { WARDEN_POSES, type WardenPoseName } from "./warden";
+import { nextStances, type ActionDef } from "./patterns";
+import { WARDEN_POSES, flailOf, type CandleArm, type WardenPoseName } from "./warden";
 
 type Screen = "menu" | "test" | "explore" | "viewer";
 
@@ -170,6 +170,7 @@ const VIEWER_TOGGLES: Record<string, ViewerToggle[]> = {
   warden: [
     { key: "sealed", off: "Unsealed", on: "Sealed" },
     { key: "phase2", off: "Phase 1", on: "Phase 2" },
+    { key: "flaming", off: "Flail unlit", on: "Flaming flail" },
   ],
 };
 const LINE_TOGGLE: ViewerToggle = { key: "back", off: "Front line", on: "Back line" };
@@ -184,6 +185,8 @@ interface ViewerShow {
   turn: number;
   /** The stance it moves on to after the action (picked when it's played). */
   next?: string;
+  /** Play the Rest but break it with a blow (to see its flinch). */
+  interrupt?: boolean;
 }
 
 function viewerFight(kind: string): CombatState {
@@ -193,6 +196,9 @@ function viewerFight(kind: string): CombatState {
     { dummy: true },
   );
 }
+
+/** The viewer's extra "stance": knocked down, its only action the forced Rest that recovers. */
+const STAGGERED = "Staggered";
 
 /** Applies the viewer's choices to the enemy: its line, its statuses, its stance and action. */
 function applyShow(s: CombatState, show: ViewerShow): CombatState {
@@ -211,6 +217,16 @@ function applyShow(s: CombatState, show: ViewerShow): CombatState {
     e.line = show.on.back ? "back" : "front";
     for (const t of VIEWER_TOGGLES[e.kind] ?? []) e.flags[t.key] = !!show.on[t.key];
     if (e.flags.phase2) e.flags.sealed = false; // phase two burns unsealed for good
+    else e.flags.flaming = false; // only his phase-two flame can set the flail alight
+  }
+  if (stanceName === STAGGERED) {
+    e.staggered = true;
+    e.fatigue = e.hp;
+    // A stagger puts the Warden's flame out (before phase two).
+    if ("sealed" in e.flags && !e.flags.phase2) e.flags.sealed = true;
+    e.intent = { type: "rest", dir: e.line === "back" ? "advance" : "retreat", forced: true };
+    v.status = "playing";
+    return v;
   }
   const stance = kind.pattern.stances.find(x => x.name === stanceName);
   const actionName = !played && show.action ? show.action : stance?.groups[0][0].name ?? "";
@@ -223,6 +239,10 @@ function applyShow(s: CombatState, show: ViewerShow): CombatState {
 /** The actions a stance allows with the enemy as shown (conditions like *Sealed checked). */
 function viewerActions(kindName: string, state: CombatState, stanceName: string) {
   const kind = ENEMY_KINDS[kindName];
+  // Staggered, the only way on is to recover (into a `Recover >` stance).
+  if (stanceName === STAGGERED) {
+    return [{ action: { name: "Recover", type: "rest", needs: [] as string[] } as unknown as ActionDef, fixed: false, available: true }];
+  }
   const stance = kind.pattern.stances.find(x => x.name === stanceName);
   const e = state.enemies[0];
   // Actions a fixed rule can force from any stance (the Warden's Usurp Flame) come last.
@@ -291,13 +311,20 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
   const override = useCallback((s: CombatState) => applyShow(s, show), [show]);
   const shown = applyShow(initial, show);
   const toggles = [LINE_TOGGLE, ...(VIEWER_TOGGLES[kindName] ?? [])];
-  const flip = (key: string) => setShow(prev => ({ ...prev, action: undefined, next: undefined, on: { ...prev.on, [key]: !prev.on[key] } }));
+  const flip = (key: string) =>
+    setShow(prev => {
+      const on = { ...prev.on, [key]: !prev.on[key] };
+      // Entering phase two, he always ends up in the "Second Phase >" stance (Idle).
+      const second = key === "phase2" && on.phase2 ? nextStances(kind.pattern, { action: "Second Phase", outcome: "done" })[0]?.name : undefined;
+      return { ...prev, action: undefined, next: undefined, interrupt: undefined, on, stance: second ?? prev.stance };
+    });
   // Playing an action also picks, at random, which of the stances it leads to it moves on to,
   // as in a fight; it settles into that stance as the action ends.
-  const play = (action: string) => {
-    const options = nextStances(kind.pattern, { action, outcome: "done" });
+  const play = (action: string, interrupt = false) => {
+    // A broken Rest counts as undone: it picks up again from the Recover stances.
+    const options = nextStances(kind.pattern, { action, outcome: interrupt ? "undone" : "done" });
     const next = options[Math.floor(Math.random() * options.length)].name;
-    setShow(prev => ({ ...prev, action, next }));
+    setShow(prev => ({ ...prev, action, next, interrupt }));
     setPlaySignal(n => n + 1);
   };
   // Once it's over, that stance is the one shown, and its statuses follow what the action did
@@ -322,10 +349,10 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
         <div className="picker-options">
           {toggles.map(t => {
             const on = !!show.on[t.key];
-            const locked = t.key === "sealed" && !!show.on.phase2;
+            const locked = (t.key === "sealed" && !!show.on.phase2) || (t.key === "flaming" && !show.on.phase2);
             return (
               <button key={t.key} className="chip viewer-toggle" aria-pressed={on} disabled={locked} onClick={() => flip(t.key)}>
-                {locked ? `${t.off} (phase 2)` : on ? t.on : t.off}
+                {locked ? (t.key === "flaming" ? `${t.off} (phase 1)` : `${t.off} (phase 2)`) : on ? t.on : t.off}
               </button>
             );
           })}
@@ -334,9 +361,9 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
       <div className="viewer-section">
         <span className="picker-label">Stance</span>
         <div className="picker-options">
-          {kind.pattern.stances.map(st => (
-            <button key={st.name} className="chip" aria-pressed={st.name === show.stance} onClick={() => setShow(prev => ({ ...prev, stance: st.name, action: undefined, next: undefined }))}>
-              {st.name}
+          {[...kind.pattern.stances.map(st => st.name), STAGGERED].map(name => (
+            <button key={name} className="chip" aria-pressed={name === show.stance} onClick={() => setShow(prev => ({ ...prev, stance: name, action: undefined, next: undefined }))}>
+              {name}
             </button>
           ))}
         </div>
@@ -344,7 +371,7 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
       <div className="viewer-section">
         <span className="picker-label">Actions from this stance</span>
         <div className="picker-options">
-          {viewerActions(kindName, shown, show.stance).map(({ action: a, available, fixed }) => (
+          {viewerActions(kindName, shown, show.stance).flatMap(({ action: a, available, fixed }) => [
             <button
               key={a.name}
               className="chip viewer-action"
@@ -353,8 +380,22 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
               onClick={e => { e.currentTarget.blur(); play(a.name); }}
             >
               ▶ {a.name} <span className="viewer-kind">{fixed ? "fixed rule" : a.type}</span>
-            </button>
-          ))}
+            </button>,
+            // A Rest can also be broken by a blow, to see the flinch.
+            ...(a.type === "rest" && !fixed && show.stance !== STAGGERED
+              ? [
+                  <button
+                    key={`${a.name}-flinch`}
+                    className="chip viewer-action"
+                    disabled={!available}
+                    title={`Play ${a.name}, broken by a blow`}
+                    onClick={e => { e.currentTarget.blur(); play(a.name, true); }}
+                  >
+                    ↯ Flinch <span className="viewer-kind">{a.name} interrupted</span>
+                  </button>,
+                ]
+              : []),
+          ])}
         </div>
       </div>
     </aside>
@@ -366,6 +407,7 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
       override={override}
       panel={panel}
       playSignal={playSignal}
+      attackOnPlay={!!show.interrupt}
       onTurnPlayed={afterTurn}
       onRetry={onRetry}
       onChangeLoadout={onBack}
@@ -542,6 +584,11 @@ const NUDGE_MS = 500;
 /** How close an attacker gets to its target (meters), and how far a clean hit knocks it back. */
 const STRIKE_GAP = 0.9;
 const KNOCKBACK = 0.45;
+/** How far a Block jolts the blocker and the attacker apart. */
+const BLOCK_PUSH = 0.3;
+/** How far a dodge carries someone: back if retreating, sideways if closing in. */
+const DODGE_BACK = 1.5;
+const DODGE_SIDE = 1.2;
 /** A Maneuver toward an enemy ends this far short of it; falling back covers this much ground. */
 const ENGAGE_GAP = 1.4;
 const FALL_BACK = 2.2;
@@ -557,14 +604,28 @@ interface Playback {
   from: CombatState;
   steps: Step[];
   index: number;
-  phase: "approach" | "impact";
+  /** "usurp": Usurp Flame's scene plays before the step itself (see USURP_STAGES); "ignite": the
+   *  Warden's phase-two scene (see IGNITE). */
+  phase: "approach" | "impact" | "usurp" | "ignite";
   playerPose: PoseName;
   /** What you did this turn (null for a forced turn). */
   action: PlayerAction | null;
 }
 
 const isAttackStep = (st: Step | undefined) => !!st?.events.some(ev => ev.kind === "attack");
-const phaseFor = (st: Step | undefined): Playback["phase"] => (isAttackStep(st) ? "approach" : "impact");
+const usurpOf = (st: Step | undefined) => st?.events.find((ev): ev is Extract<Step["events"][number], { kind: "usurp" }> => ev.kind === "usurp");
+const phaseTwoOf = (st: Step | undefined) => st?.events.find((ev): ev is Extract<Step["events"][number], { kind: "phase" }> => ev.kind === "phase" && ev.phase === 2);
+const phaseFor = (st: Step | undefined): Playback["phase"] => (phaseTwoOf(st) ? "ignite" : usurpOf(st) ? "usurp" : isAttackStep(st) ? "approach" : "impact");
+
+/**
+ * Usurp Flame's scene, before the step that takes the flame plays out: the light dies around the
+ * two of them (only the target's flame still burning) as the camera settles between them; he
+ * dashes at it, the camera closing in, and everything goes black as he reaches it; then the light
+ * returns on him standing in Idle, the flame streaming from the target over him into his hand.
+ * When each stage starts, in ms.
+ */
+const USURP_STAGES = { focus: 0, dash: 900, black: 1500, reveal: 2000, done: 3000 } as const;
+type UsurpStage = Exclude<keyof typeof USURP_STAGES, "done">;
 
 /** The fight as it stood after a given step: the turn's starting state with that step's bars and positions. */
 function viewAt(from: CombatState, after: Step["after"]): CombatState {
@@ -578,6 +639,9 @@ function viewAt(from: CombatState, after: Step["after"]): CombatState {
     f.staggered = a.staggered;
     if ("alive" in f) f.alive = a.alive;
     if ("line" in f && a.line) f.line = a.line;
+    if (a.waxed !== undefined) f.waxed = a.waxed;
+    if (a.encased !== undefined) f.encased = a.encased;
+    if ("fate" in f && a.fate) f.fate = a.fate;
   }
   return v;
 }
@@ -649,7 +713,7 @@ function roman(n: number): string {
 
 const barValues = (f: { hp: number; fatigue: number; death: number }): BarValues => ({ hp: f.hp, fatigue: f.fatigue, death: f.death });
 
-function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, changeLabel, onTurnPlayed }: {
+function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, changeLabel, onTurnPlayed }: {
   initial: CombatState;
   /** The model viewer: rewrites the fight before it's shown or played (the enemy's pose and action). */
   override?: (s: CombatState) => CombatState;
@@ -657,6 +721,8 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
   panel?: ReactNode;
   /** Each change plays a turn in which you just Rest (the model viewer's actions). You can't act yourself. */
   playSignal?: number;
+  /** The model viewer: you attack it this turn (to break its Rest). */
+  attackOnPlay?: boolean;
   /** The pause menu's label for onChangeLoadout. */
   changeLabel?: string;
   /** Called as a turn finishes playing, with the fight as it now stands. */
@@ -675,6 +741,12 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
   const [highlight, setHighlight] = useState<Dir | null>(null);
 
   const [paused, setPaused] = useState(false);
+  /** Usurp Flame's scene, while it plays (see USURP_STAGES). */
+  const [usurpStage, setUsurpStage] = useState<UsurpStage | null>(null);
+  /** The Warden's phase-two scene, while it plays: who, when it started, and how far in it is. */
+  const [igniteState, setIgniteState] = useState<{ who: string; start: number; seed: number } | null>(null);
+  const setIgnite = (v: { who: string; start: number; seed: number } | null) => { setIgniteT(0); setIgniteState(v); };
+  const [igniteT, setIgniteT] = useState(0);
   const [pauseIndex, setPauseIndex] = useState(0);
   const busy = playback !== null;
   const forced = forcedAction(fight);
@@ -785,10 +857,32 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
 
   useLayoutEffect(() => {
     const w = world.current;
+    if (igniteState) {
+      const ignite = igniteState;
+      // The camera slowly pulls back from him, as far as it goes, while the light dies.
+      const at = w.pos[ignite.who];
+      if (!at) return;
+      const yaw = shotCamera(shot).yaw;
+      const back = 9;
+      shoot(w.pos, { x: at.x - Math.sin(yaw) * back, z: at.z - Math.cos(yaw) * back, yaw }, IGNITE.draw);
+      return;
+    }
     if (!playback) {
       // Planning: you stand where you are; the camera eases toward your selection.
       const { pos, camera } = settle(fight, w.pos.player ?? w.anchor);
       shoot(pos, camera, NUDGE_MS);
+      return;
+    }
+    const usurp = usurpOf(step);
+    if (playback.phase === "usurp" && usurp) {
+      // The camera settles between him and his target, then closes in as he dashes at it.
+      const a = w.pos[usurp.who], t = w.pos[usurp.target];
+      if (!a || !t) return;
+      if (usurpStage === "focus") shoot(w.pos, actionCamera(shotCamera(shot), a, t), USURP_STAGES.dash);
+      if (usurpStage === "dash") {
+        const at = closeIn(a, t, STRIKE_GAP);
+        shoot({ ...w.pos, [usurp.who]: at }, actionCamera(shotCamera(shot), at, t), USURP_STAGES.black - USURP_STAGES.dash);
+      }
       return;
     }
     const attack = step?.events.find(ev => ev.kind === "attack");
@@ -816,11 +910,33 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
       const at = attack.ranged ? a : closeIn(a, t, STRIKE_GAP);
       shoot({ ...w.pos, [attack.attacker]: at }, actionCamera(shotCamera(shot), at, t), APPROACH_MS);
     } else if (attack.result === "hit") {
-      // A clean hit knocks the target back, and it stays there. Blocks only rock it (CSS).
+      // A clean hit knocks the target back, and it stays there.
       shoot({ ...w.pos, [attack.target]: pushedAway(a, t, KNOCKBACK) }, shot.camera, KNOCK_MS);
+    } else if (attack.result === "blocked") {
+      // A block jolts them both apart a little, and they stay there (like a knockback).
+      const knocked = { ...w.pos, [attack.target]: pushedAway(a, t, BLOCK_PUSH) };
+      if (!attack.ranged) knocked[attack.attacker] = pushedAway(t, a, BLOCK_PUSH);
+      shoot(knocked, shot.camera, KNOCK_MS);
+    } else if (attack.result === "dodged") {
+      // A dodge gets out of the way: further back if they were retreating, to the side if they
+      // were closing in.
+      const retreating = attack.target === "player"
+        ? playback.action?.type === "maneuver" && playback.action.target === "self"
+        : playback.from.enemies.find(e => e.id === attack.target)?.intent.dir === "retreat";
+      // Seen from the camera: "back" is straight away from the camera, "to the side" straight
+      // across the screen, away from the attacker. A retreating dodge goes just as far each way.
+      const cam = shotCamera(shot);
+      const cd = Math.hypot(t.x - cam.x, t.z - cam.z) || 1;
+      const back = { x: (t.x - cam.x) / cd, z: (t.z - cam.z) / cd };
+      let side = { x: -back.z, z: back.x };
+      if (side.x * (t.x - a.x) + side.z * (t.z - a.z) < 0) side = { x: -side.x, z: -side.z };
+      const to = retreating
+        ? { x: t.x + (back.x + side.x) * DODGE_BACK, z: t.z + (back.z + side.z) * DODGE_BACK }
+        : { x: t.x + side.x * DODGE_SIDE, z: t.z + side.z * DODGE_SIDE };
+      shoot({ ...w.pos, [attack.target]: to }, shot.camera, KNOCK_MS);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playback?.index, playback?.phase, !!playback, selId, fight]);
+  }, [playback?.index, playback?.phase, !!playback, selId, fight, usurpStage, igniteState]);
 
   /** Where the selected figure will be on screen once the camera settles, for the wheel. */
   const [anchor, setAnchor] = useState<Anchor | null>(null);
@@ -882,22 +998,90 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
   };
 
   // The model viewer's Play: a turn where you only Rest, so the enemy's action plays on its own.
+  // Against a Block or a Maneuver you attack instead, so there's something to block or dodge.
   const lastSignal = useRef(playSignal);
   useEffect(() => {
     if (playSignal === lastSignal.current) return;
     lastSignal.current = playSignal;
-    if (playing && !busy) play({ type: "rest" });
+    const foe = fight.enemies.find(e => e.alive);
+    // (Not against a fixed rule like Usurp Flame: that plays on its own.)
+    const fixedRule = !!foe && !!ENEMY_KINDS[foe.kind]?.fixedActions?.includes(foe.intent.action ?? "");
+    if (playing && !busy) play(!fixedRule && (attackOnPlay || foe?.intent.type === "block" || foe?.intent.type === "maneuver") ? { type: "attack", target: foe!.id } : { type: "rest" });
   });
+
+  // The phase-two scene: started by the step where he enters phase two (or, in the model viewer,
+  // by switching him to it), ticking until it ends.
+  useEffect(() => {
+    if (playback?.phase !== "ignite") return;
+    const ev = phaseTwoOf(playback.steps[playback.index]);
+    if (ev) setIgnite({ who: ev.who, start: performance.now(), seed: Math.random() * 100 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playback?.index, playback?.phase, !!playback]);
+  const phaseTwoBefore = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    for (const e of fight.enemies) {
+      const now = !!e.flags.phase2, was = phaseTwoBefore.current[e.id];
+      if (!playback && was === false && now && e.kind === "warden") setIgnite({ who: e.id, start: performance.now(), seed: Math.random() * 100 });
+      phaseTwoBefore.current[e.id] = now;
+    }
+  });
+  useEffect(() => {
+    if (!igniteState) return;
+    const ignite = igniteState;
+    let raf = 0;
+    const tick = () => {
+      const t = performance.now() - ignite.start;
+      setIgniteT(t);
+      if (t < IGNITE.end) raf = requestAnimationFrame(tick);
+      else {
+        setIgnite(null);
+        setPlayback(pb => (pb && pb.phase === "ignite" ? { ...pb, phase: "impact" } : pb));
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [igniteState]);
+  // Until the scene's state is set (an effect, a render late), it's already as good as started:
+  // so his new form never shows for that one frame.
+  const pendingWho = igniteState
+    ? undefined
+    : playback?.phase === "ignite"
+      ? phaseTwoOf(playback.steps[playback.index])?.who
+      : !playback
+        ? fight.enemies.find(e => e.kind === "warden" && e.flags.phase2 && phaseTwoBefore.current[e.id] === false)?.id
+        : undefined;
+  const ignite = igniteState ?? (pendingWho ? { who: pendingWho, start: 0, seed: 0 } : null);
+  const igniteNow = igniteState ? igniteT : 0;
+
+  // Usurp Flame's scene: its stages on a timer, then the step itself plays.
+  useEffect(() => {
+    if (!playback || playback.phase !== "usurp") return;
+    const pb = playback;
+    const timers = (Object.keys(USURP_STAGES) as (keyof typeof USURP_STAGES)[]).map(k =>
+      window.setTimeout(() => {
+        if (k === "done") { setUsurpStage(null); setPlayback({ ...pb, phase: "impact" }); }
+        else setUsurpStage(k);
+      }, USURP_STAGES[k]),
+    );
+    return () => timers.forEach(t => window.clearTimeout(t));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playback?.index, playback?.phase, !!playback]);
 
   // Advance the playback one step at a time.
   useEffect(() => {
-    if (!playback || paused) return;
+    if (!playback || paused || playback.phase === "usurp" || playback.phase === "ignite") return;
     const timer = window.setTimeout(
       () => {
         const pb = playback;
         if (pb.phase === "approach") return setPlayback({ ...pb, phase: "impact" });
         const index = pb.index + 1;
         if (index < pb.steps.length) return setPlayback({ ...pb, index, phase: phaseFor(pb.steps[index]) });
+        // Anyone who dodged is still walking to their new spot: they keep their pose until there.
+        const walking = { ...dodgers.current };
+        if (Object.keys(walking).length) {
+          setWalkOff(walking);
+          window.setTimeout(() => setWalkOff(null), NUDGE_MS);
+        }
         onTurnPlayed?.(fightRaw); // same render as the playback ending, so nothing flickers
         setPlayback(null);
       },
@@ -975,13 +1159,52 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
   /** The step where someone's Rest actually happened (not cut short), or -1. */
   const restStep = (id: string) =>
     playback ? playback.steps.findIndex(st => st.events.some(ev => ev.kind === "rest" && ev.who === id && ev.result === "rested")) : -1;
-  interface Poses { telegraph: PoseName; down: PoseName; windUp: PoseName; strike: PoseName; idle: PoseName; rested?: PoseName }
+  /** Who is Maneuvering this turn (and in what pose), so they keep it while they walk off after it. */
+  const dodgers = useRef<Record<string, PoseName>>({});
+  const [walkOff, setWalkOff] = useState<Record<string, PoseName> | null>(null);
+  const dodgersOf = useRef<unknown>(null);
+  if (playback && dodgersOf.current !== playback.from) { dodgersOf.current = playback.from; dodgers.current = {}; }
+  const track = (id: string, pose: PoseName): PoseName => {
+    if (playback && maneuvering(id) && dodgedBefore(id)) dodgers.current[id] = pose;
+    return pose;
+  };
+  /** Someone chose to Maneuver this turn (and it hasn't been turned into a forced Rest). */
+  const maneuvering = (id: string) =>
+    !!playback && (id === "player" ? playback.action?.type === "maneuver" : playback.from.enemies.some(e => e.id === id && e.intent.type === "maneuver" && !e.intent.forced));
+  /**
+   * Someone's Maneuver is under way: they've dodged an attack this turn (in an earlier step, or
+   * this one once it lands), or their own move has happened. From then on they stay in its pose.
+   * (A blow that hits them instead doesn't: they didn't get out of the way.)
+   */
+  const dodgedBefore = (id: string) =>
+    !!playback && playback.steps.some((st, i) => (i < playback.index || (i === playback.index && impact)) && st.events.some(ev => (ev.kind === "attack" && ev.target === id && ev.result === "dodged") || (ev.kind === "maneuver" && ev.who === id)));
+  /** The steps where someone is attacked (whether it lands, is blocked or dodged). */
+  const targetedSteps = (id: string) =>
+    playback ? playback.steps.flatMap((st, i) => (st.events.some(ev => ev.kind === "attack" && ev.target === id) ? [i] : [])) : [];
+  interface Poses {
+    telegraph: PoseName; down: PoseName; windUp: PoseName; strike: PoseName; idle: PoseName; rested?: PoseName;
+    /** The strike pose hands off to the next stance a moment in (REST_POSE_MS), its trails still fading. */
+    strikeHandsOff?: boolean;
+    /** A Block or Maneuver: hold this pose, and only take `react` (the block, the dodge) as an attack on them lands. */
+    guard?: { hold: PoseName; react: PoseName; keepAfterDodge?: boolean };
+  }
   const playbackPose = (id: string, staggered: boolean, poses: Poses): PoseName => {
     if (!playback) return poses.telegraph;
     const struck = strikeStep(id);
-    if (struck === playback.index) return impact ? poses.strike : poses.windUp; // wind up while closing in, then strike
+    // Wind up while closing in, then strike. A strike that spins on into the next stance (its
+    // trails carrying on) takes that stance a moment in, like a Rest's own pose does.
+    if (struck === playback.index) return impact ? (poses.strikeHandsOff && restOver === stepKey ? poses.idle : poses.strike) : poses.windUp;
     if (staggered) return poses.down;
     if (struck >= 0 && struck < playback.index) return poses.idle;
+    if (poses.guard) {
+      const hits = targetedSteps(id);
+      // A Maneuver only takes its pose when it gets out of the way (a dodge) or actually moves;
+      // from then on it keeps it to the end of the turn, walking off to its new spot in it too.
+      // Hit while it holds its stance, it just keeps holding it.
+      if (poses.guard.keepAfterDodge) return dodgedBefore(id) ? poses.guard.react : poses.guard.hold;
+      if (hits.includes(playback.index)) return impact ? poses.guard.react : poses.guard.hold;
+      return hits.length && hits[0] < playback.index ? poses.idle : poses.guard.hold;
+    }
     // A Rest that went through shows its own pose from the moment it happens, briefly.
     const rested = restStep(id);
     if (poses.rested && rested >= 0 && playback.index >= rested) {
@@ -990,9 +1213,15 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
     return poses.telegraph;
   };
   const punching = p.weapon === "baseline";
-  const playerPose: PoseName = playback
+  /** Your forced Rest (or revive) has landed this turn: you're back on your feet. */
+  const playerBackUp = !!playback && playback.steps.some((st, i) =>
+    (i < playback.index || (i === playback.index && impact)) &&
+    st.events.some(ev => (ev.kind === "rest" && ev.who === "player" && ev.result === "recovered") || (ev.kind === "revive" && ev.who === "player")));
+  const playerPose: PoseName = !playback && walkOff?.player ? walkOff.player : playback
     ? playbackPose("player", p.staggered, {
-        telegraph: playback.playerPose, down: "kneel", windUp: "attack", strike: punching ? "punch" : "strike", idle: "idle",
+        // A forced turn kneels until the Rest (or revive) brings you back; then you're up.
+        telegraph: playerBackUp ? "idle" : playback.playerPose, down: "kneel", windUp: "attack", strike: punching ? "punch" : "strike", idle: "idle",
+        guard: playback.action?.type === "block" || playback.action?.type === "maneuver" ? { hold: "idle", react: playback.playerPose, keepAfterDodge: playback.action.type === "maneuver" } : undefined,
       })
     : forced ? "kneel" : (chosen?.action.type as PoseName | undefined) ?? "idle";
   // While you plan, an enemy only shows its stance; as the turn plays, its action shows.
@@ -1001,29 +1230,173 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
     const now = fight.enemies.find(x => x.id === e.id);
     return now && now.alive && !now.staggered && !now.intent.forced ? poseForIntent(now) : idlePoseOf(e);
   };
-  const enemyPose = (e: Enemy): PoseName =>
-    playbackPose(e.id, e.staggered, {
-      telegraph: playback ? actionPose(e) : poseForIntent(e),
-      down: downPoseOf(e), windUp: windUpPose(e), strike: strikePose(e), idle: settledPose(e),
+  // An enemy that's going to Rest holds its stance until the Rest actually happens.
+  const restTelegraph = (e: Enemy): PoseName => {
+    if (!playback || e.intent.type !== "rest" || e.intent.forced || e.staggered) return actionPose(e);
+    const at = restStep(e.id);
+    return at >= 0 && playback.index >= at ? actionPose(e) : poseForIntent(e);
+  };
+  /** Its strike pose spins on into its next stance (Flail Swing): it hands off partway through. */
+  const handsOff = (e: Enemy) => !!WARDEN_POSES[e.intent.strikePose as WardenPoseName]?.trailEndsAt;
+  /** Its strike has just handed off to its next stance (still this step). */
+  const strikeJustOver = (e: Enemy) =>
+    !!playback && impact && handsOff(e) && strikeStep(e.id) === playback.index && restOver === stepKey;
+  /** Its Rest's own pose has just given way to its next stance (still this step). */
+  const restJustOver = (e: Enemy) =>
+    !!playback && !!e.intent.restPose && restStep(e.id) === playback.index && restOver === stepKey;
+  /**
+   * The Warden's candle arm. Once a Rest has gone through, or his attack has landed and he has
+   * moved on to his next stance, it already shows what that did to it (Flame Blast puts it out).
+   */
+  /** The Warden's flags as shown: once a Rest, his attack or a taken flame has played out, what it did. */
+  const shownFlags = (e: Enemy) => {
+    const rested = !!playback && restStep(e.id) >= 0 && playback.index >= restStep(e.id) && (restStep(e.id) < playback.index || restOver === stepKey);
+    const struck = playback ? strikeStep(e.id) : -1;
+    const attacked = !!playback && struck >= 0 && (playback.index > struck || (playback.index === struck && impact && handsOff(e) && restOver === stepKey));
+    const u = usurpStep(e.id);
+    const usurped = !!playback && u >= 0 && (playback.index > u || (playback.index === u && (playback.phase === "impact" || usurpStage === "reveal")));
+    // Until his phase-two scene plays, he keeps the look he started the turn with: whatever the turn
+    // went on to do, his new form only shows once the scene reveals it.
+    const p2 = playback ? playback.steps.findIndex(st => !!phaseTwoOf(st)) : -1;
+    if (playback && p2 >= 0 && playback.index <= p2 && !(playback.index === p2 && playback.phase === "impact")) return e.flags;
+    // Once it has played, he's in his new form for good.
+    if (phaseTwoDone(e)) return fight.enemies.find(x => x.id === e.id)?.flags ?? e.flags;
+    return ((rested || attacked || usurped) && fight.enemies.find(x => x.id === e.id)?.flags) || e.flags;
+  };
+  const candleArmOf = (e: Enemy): CandleArm => {
+    // The phase-two scene: no flame of his own until it flares, then his arm burns for good.
+    // (Until all is dark, he still looks as he did; then no flame until it flares.)
+    if (ignite && ignite.who === e.id) {
+      if (igniteNow >= IGNITE.flare) return "scorched";
+      if (igniteNow >= IGNITE.kindle) return "out";
+      return "out";
+    }
+    // Having taken a flame and the light is coming back.
+    const u = usurpStep(e.id);
+    const usurped = !!playback && u >= 0 && (playback.index > u || (playback.index === u && (playback.phase === "impact" || usurpStage === "reveal")));
+    const f = shownFlags(e);
+    // Having taken a flame, his candle burns again, whatever else the turn did.
+    if (usurped) return f.phase2 ? "scorched" : "lit";
+    // Staggered (shown down), his flame is out (before phase two).
+    if ((e.staggered || enemyPose(e) === downPoseOf(e)) && !f.phase2) return "out";
+    return f.phase2 ? "scorched" : f.sealed ? "out" : "lit";
+  };
+  /** The step where this enemy took a flame (Usurp Flame), or -1. */
+  const usurpStep = (id: string) => (playback ? playback.steps.findIndex(st => usurpOf(st)?.who === id) : -1);
+  /** When each Warden's flame was last put out (lit → out), while its smoke still shows. */
+  const [smoke, setSmoke] = useState<Record<string, number>>({});
+  const armsNow = useRef<Record<string, CandleArm>>({});
+  const armsBefore = useRef<Record<string, CandleArm>>({});
+  useEffect(() => {
+    const now = armsNow.current, before = armsBefore.current;
+    const out = Object.keys(now).filter(id => before[id] === "lit" && now[id] === "out");
+    armsBefore.current = { ...now };
+    if (!out.length) return;
+    const t = performance.now();
+    setSmoke(prev => ({ ...prev, ...Object.fromEntries(out.map(id => [id, t])) }));
+    window.setTimeout(() => setSmoke(prev => Object.fromEntries(Object.entries(prev).filter(([, at]) => at !== t))), 1000);
+  });
+  /** The step where a blow breaks someone's Rest (they flinch, to the end of the turn), or -1. */
+  const flinchStep = (e: Enemy) => {
+    if (!playback || e.intent.type !== "rest" || e.intent.forced) return -1;
+    const broken = playback.steps.some(st => st.events.some(ev => ev.kind === "rest" && ev.who === e.id && ev.result === "interrupted"));
+    if (!broken) return -1;
+    return playback.steps.findIndex(st => st.events.some(ev => ev.kind === "attack" && ev.target === e.id && ev.result === "hit"));
+  };
+  /** His phase-two scene has played this turn (he entered it, and the scene is over). */
+  const phaseTwoDone = (e: Enemy) => {
+    if (!playback) return false;
+    const p2 = playback.steps.findIndex(st => phaseTwoOf(st)?.who === e.id);
+    return p2 >= 0 && (playback.index > p2 || (playback.index === p2 && playback.phase === "impact"));
+  };
+  const enemyPose = (e: Enemy): PoseName => {
+    // After his phase-two scene, he's already standing in his next stance (Idle).
+    if (phaseTwoDone(e) && !ignite) return settledPose(e);
+    // The phase-two scene: he stands in Idle, unseen in the dark until his flare.
+    // While the light fades he's still down; once all is dark he's already standing in Idle.
+    if (ignite && ignite.who === e.id) return igniteNow >= IGNITE.kindle ? "wd-idle" : downPoseOf(e);
+    // A Rest broken by a blow: it flinches as the blow lands, and stays flinching.
+    const fl = flinchStep(e);
+    if (playback && fl >= 0 && !e.staggered && (playback.index > fl || (playback.index === fl && impact))) return flinchPoseOf(e);
+    // Usurp Flame: crouched to spring, the dash, then standing in Idle as the light returns.
+    const u = usurpStep(e.id);
+    if (playback && u >= 0 && playback.index >= u) {
+      if (playback.index === u && playback.phase === "usurp") {
+        if (usurpStage === "reveal") return "wd-idle";
+        if (usurpStage === "dash" || usurpStage === "black") return "wd-usurp-dash";
+        return "wd-usurp";
+      }
+      return settledPose(e);
+    }
+    // A Block or Maneuver holds its stance; it only blocks (or dodges) as the blow lands, then
+    // settles into its next stance.
+    const guarding = (e.intent.type === "block" || e.intent.type === "maneuver") && !e.intent.forced;
+    return playbackPose(e.id, e.staggered, {
+      guard: guarding ? { hold: poseForIntent(e), react: e.intent.guardPose ? asPose(e.intent.guardPose, "block") : actionPose(e), keepAfterDodge: e.intent.type === "maneuver" } : undefined,
+      telegraph: playback ? restTelegraph(e) : poseForIntent(e),
+      // The Warden attacks straight out of whatever stance he's in.
+      down: downPoseOf(e), windUp: ENEMY_KINDS[e.kind]?.variant === "warden" && e.intent.stance ? poseForIntent(e) : windUpPose(e), strike: strikePose(e), idle: settledPose(e),
+      strikeHandsOff: handsOff(e),
       rested: e.intent.restPose ? asPose(e.intent.restPose, "rest") : undefined,
     });
+  };
+
+  // Usurp Flame's scene: the darkness (all but the target's flame), and the flame's trail into his hand.
+  const usurpNow = playback?.phase === "usurp" ? usurpOf(step) : undefined;
+  const usurpDark = usurpNow && usurpStage
+    ? {
+        level: usurpStage === "reveal" ? 0 : usurpStage === "focus" ? 0.85 : 1,
+        ms: usurpStage === "focus" ? USURP_STAGES.dash : usurpStage === "dash" ? USURP_STAGES.black - USURP_STAGES.dash : usurpStage === "reveal" ? USURP_STAGES.done - USURP_STAGES.reveal : 0,
+        // The target's flame burns on in the dark; as the light returns, it's already in his hand.
+        flame: usurpStage === "focus" || usurpStage === "dash" ? usurpNow.target : usurpStage === "reveal" ? usurpNow.who : undefined,
+      }
+    : undefined;
+  const usurpTrail = usurpNow && usurpStage === "reveal" ? { from: usurpNow.target, to: usurpNow.who, key: `${stepKey}-usurp` } : undefined;
 
   // Ranged attacks throw something across the field as they land.
   const projectiles: Projectile[] = [];
   if (playback && impact && step) {
     for (const ev of step.events) {
-      if (ev.kind !== "attack" || !ev.ranged) continue;
-      const kind = playback.from.enemies.find(e => e.id === ev.attacker)?.intent.projectile;
-      if (kind) projectiles.push({ from: ev.attacker, to: ev.target, kind, key: `${stepKey}-${ev.attacker}` });
+      if (ev.kind !== "attack") continue;
+      const thrower = playback.from.enemies.find(e => e.id === ev.attacker);
+      const kind = thrower?.intent.projectile;
+      // Melee attacks throw nothing, but some leave a shockwave where they land.
+      if (!ev.ranged && kind !== "impact") continue;
+      // A Warden blast starts at his fist, wherever his landing pose puts it.
+      const landing = thrower?.intent.strikePose && WARDEN_POSES[thrower.intent.strikePose as WardenPoseName];
+      // ...or, for a flail brought down on the floor, where its head lands.
+      const origin = (kind === "blast" || kind === "impact") && landing ? (landing.slamTrail ? flailOf(landing).ball : landing.freeArm.hand) : undefined;
+      // A flaming flail's slam burns.
+      const fiery = kind === "impact" && !!thrower?.flags.flaming;
+      if (kind) projectiles.push({ from: ev.attacker, to: ev.target, kind, origin, fiery, key: `${stepKey}-${ev.attacker}` });
     }
   }
 
   // Everyone on the field: you, enemies still standing, and any falling during this step.
+  // Once his flame has broken free, the arena's candles (and the waxed remains) burn for good.
+  const phaseTwoStep = playback ? playback.steps.findIndex(st => !!phaseTwoOf(st)) : -1;
+  const arenaLit = ignite
+    ? igniteNow >= IGNITE.flare
+    : (playback
+      ? phaseTwoStep >= 0
+        ? playback.index > phaseTwoStep || (playback.index === phaseTwoStep && playback.phase === "impact")
+        : playback.from.enemies.some(e => e.kind === "warden" && e.flags.phase2)
+      : fight.enemies.some(e => e.kind === "warden" && e.flags.phase2));
+  const playerSealed = (p.waxed || !!p.encased) && p.staggered;
   const figures: SceneFigure[] = [
     {
       id: "player",
       view: "back",
-      pose: playerPose,
+      // Staggered while Waxed, you're sealed like the waxed: kneeling, shins bound, head in wax,
+      // your flame burning on it (until it's taken).
+      // Staggered while Waxed (or with your flame taken), you're sealed whole in wax, and stay
+      // that way until you recover: no other look in between.
+      pose: track("player", playerSealed ? "w-idle" : playerPose),
+      variant: playerSealed ? "waxed" : undefined,
+      candle: p.waxed && p.staggered && !(usurpNow?.target === "player" && usurpStage === "reveal"),
+      encased: playerSealed,
+      // Waxed but still standing: wax caked on you.
+      waxCaked: p.waxed && !p.staggered,
       weapon: p.weapon,
       armor: p.armor,
       classes: fx.get("player")?.classes ?? [],
@@ -1034,22 +1407,30 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
       onPick: () => { if (playSignal === undefined) openWheel({ kind: "player" }); },
     },
     ...view.enemies
-      .filter(e => e.alive || fx.get(e.id)?.classes.includes("fx-fall"))
+      // The waxed stay where they fell, faded, for the rest of the fight.
+      .filter(e => e.alive || fx.get(e.id)?.classes.includes("fx-fall") || e.kind === "waxed")
       .map((e): SceneFigure => ({
         id: e.id,
         view: "front",
-        pose: enemyPose(e),
+        pose: !playback && walkOff?.[e.id] ? walkOff[e.id] : track(e.id, enemyPose(e)),
         weapon: e.weapon,
         armor: e.armor,
         variant: ENEMY_KINDS[e.kind]?.variant,
         scale: ENEMY_KINDS[e.kind]?.scale,
-        arm: e.kind === "warden" ? (e.flags.phase2 ? "scorched" : e.flags.sealed ? "out" : "lit") : undefined,
-        // Its rest pose just gave way to its next stance: its spin trails keep fading meanwhile.
-        lingerTrail: !!playback && restStep(e.id) === playback.index && restOver === stepKey && !!e.intent.restPose && !!WARDEN_POSES[e.intent.restPose as WardenPoseName]?.spinTrail,
-        classes: fx.get(e.id)?.classes ?? [],
+        arm: e.kind === "warden" ? (armsNow.current[e.id] = candleArmOf(e)) : undefined,
+        // Phase two's look (black wax, burning inside) from the moment all is dark.
+        phase2Look: !!ignite && ignite.who === e.id && igniteNow >= IGNITE.kindle,
+        flailFire: e.kind === "warden" && !!shownFlags(e).flaming,
+        // Its rest pose just gave way to its next stance: that pose's trails keep fading meanwhile.
+        lingerFrom: restJustOver(e) ? (e.intent.restPose as WardenPoseName) : strikeJustOver(e) ? (e.intent.strikePose as WardenPoseName) : undefined,
+        smokeSince: smoke[e.id],
+        classes: [...(fx.get(e.id)?.classes ?? []), ...(!e.alive && e.kind === "waxed" ? ["is-remains"] : [])],
+        candle: !e.alive && e.kind === "waxed" && arenaLit && e.fate !== "encased",
+        // Its flame taken: sealed whole in wax.
+        encased: !e.alive && e.fate === "encased",
         stepKey,
-        selected: !busy && sel.kind === "enemy" && sel.id === e.id,
-        disabled: busy || !playing || forced !== null,
+        selected: !busy && sel.kind === "enemy" && sel.id === e.id && e.alive,
+        disabled: busy || !playing || forced !== null || !e.alive,
         label: `Select ${e.name}`,
         onPick: () => { if (playSignal === undefined) openWheel({ kind: "enemy", id: e.id }); },
       })),
@@ -1058,7 +1439,12 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
   return (
     <div className={`hud ${busy ? "is-cinematic" : ""}`} ref={hudRef}>
       <section className="stage" aria-label="Battlefield">
-        <Scene figures={figures} shot={shot} projectiles={projectiles} />
+        <Scene
+          figures={figures} shot={shot} projectiles={projectiles} usurpTrail={usurpTrail} arenaLit={arenaLit}
+          arena={fight.enemies.some(e => e.kind === "warden")}
+          dark={ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < 40 ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark}
+          ignite={ignite ? { who: ignite.who, t: igniteNow, seed: ignite.seed } : undefined}
+        />
       </section>
 
       {/* Cutscene mode: black strips slide in while a turn plays out. When they leave, it's your move. */}

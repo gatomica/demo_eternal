@@ -24,7 +24,8 @@
  *   for), `*Condition` (only available while that condition holds), and `#tag` (a rule it
  *   triggers, e.g. `#waxing`: a direct hit leaves the target Waxed).
  * - A stance line is `Comes from > Stance > Leads to`.
- *   - Comes from: action names (and `Recover`) separated by `/` or `,`, or `All`.
+ *   - Comes from: action names (and `Recover`, or `Second Phase`: right after a boss enters its
+ *     second phase) separated by `/` or `,`, or `All`.
  *   - Leads to: `/` separates kinds of action, `,` separates actions of the same kind.
  * - Recover is the turn after being staggered (or reviving). `Recover >` stances are also the
  *   ones an enemy opens a fight with.
@@ -132,7 +133,7 @@ export function parsePattern(label: string, src: string): Pattern {
     else {
       fromSet = new Set<string>();
       for (const n of from.split(/[/,]/).map(x => x.trim()).filter(Boolean)) {
-        if (n.toLowerCase() === "recover") fromSet.add("recover");
+        if (n.toLowerCase() === "recover" || n.toLowerCase() === "second phase") fromSet.add(n.toLowerCase());
         else fromSet.add(find(n, where).name.toLowerCase());
       }
     }
