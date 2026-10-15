@@ -398,6 +398,74 @@ export interface EnemySetup {
   line?: Line;
   /** Action names (or kinds) to open with, one per turn. */
   script?: string[];
+  /**
+   * The fight's opening scene: a waxed cradling its flame for a boss to take before the fight
+   * begins (the Warden's Usurp Flame). It starts the fight already encased. See `openingOf`.
+   */
+  offering?: boolean;
+}
+
+/** A scene played before the first turn: the fight as it stood before it, and its steps. */
+export interface Opening {
+  from: CombatState;
+  steps: Step[];
+}
+
+/**
+ * The fight's opening scene, if its setup has one: a Warden takes the flame an offering waxed
+ * cradles (Usurp Flame), showing the mechanic before the fight begins. He starts Sealed, his
+ * flame out; the scene leaves him Unsealed, the waxed encased for good, and every first intent
+ * chosen afresh (his comes from "Usurp Flame >": Idle). Returns the fight after it.
+ */
+export function openingOf(state: CombatState, setups: EnemySetup[], rng: Rng = Math.random): { state: CombatState; opening?: Opening } {
+  const offering = state.enemies.find((e, i) => setups[i]?.offering && e.kind === "waxed");
+  const warden = state.enemies.find(e => e.kind === "warden");
+  if (!offering || !warden) return { state };
+  const kind = (k: string) => ENEMY_KINDS[k];
+  const usurp = kind("warden").pattern.actions.get("usurp flame");
+  const clutch = kind("waxed").pattern.actions.get("clutch flame");
+  if (!usurp || !clutch) return { state };
+
+  // After: the flame his, the waxed sealed whole in wax, and everyone's first move chosen.
+  const after = structuredClone(state);
+  const w = after.enemies.find(e => e.id === warden.id)!;
+  const o = after.enemies.find(e => e.id === offering.id)!;
+  w.flags.sealed = false;
+  w.last = { type: "maneuver", name: "Usurp Flame", outcome: "done" };
+  o.alive = false;
+  o.fate = "encased";
+  o.hp = 0;
+  o.fatigue = 0;
+  after.log = [{ turn: 0, entries: [
+    { text: `${w.name} tears the flame from ${o.name}, sealing it whole in wax.`, kind: "info" },
+    { text: "The fight begins.", kind: "info" },
+  ] }];
+  after.lastTurn = [];
+  chooseIntents(after, rng);
+
+  // Before: the same (so the others hold the stances they'll fight from), but his flame out
+  // and the waxed holding its own out to him.
+  const from = structuredClone(after);
+  const w0 = from.enemies.find(e => e.id === warden.id)!;
+  const o0 = from.enemies.find(e => e.id === offering.id)!;
+  w0.flags.sealed = true;
+  w0.last = null;
+  w0.intent = { ...describeAction("warden", w0.line, "Idle", usurp), target: o0.id, dir: "retreat" };
+  o0.alive = true;
+  o0.fate = undefined;
+  o0.hp = o0.maxHP;
+  o0.intent = describeAction("waxed", o0.line, "Cradle Flame", clutch);
+
+  const events: CombatEvent[] = [
+    { kind: "usurp", who: w.id, target: o.id },
+    { kind: "encased", who: o.id },
+    { kind: "flag", who: w.id, flag: "sealed", on: false },
+  ];
+  const view: Record<string, FighterView> = {};
+  const p = after.player;
+  view[p.id] = { hp: p.hp, fatigue: p.fatigue, death: p.death, staggered: p.staggered, alive: p.hp > 0, waxed: p.waxed, encased: !!p.encased };
+  for (const e of after.enemies) view[e.id] = { hp: e.hp, fatigue: e.fatigue, death: e.death, staggered: e.staggered, alive: e.hp > 0, line: e.line, waxed: e.waxed, fate: e.fate };
+  return { state: after, opening: { from, steps: [{ events, after: view }] } };
 }
 
 export function createCombat(
@@ -970,6 +1038,8 @@ export const ENCOUNTERS: Encounter[] = [
       { kind: "waxed", name: "Waxed A", line: "front" },
       { kind: "warden", name: "Penitent Warden" },
       { kind: "waxed", name: "Waxed B", line: "front" },
+      // The opening scene: he takes this one's flame before the fight begins.
+      { kind: "waxed", name: "Waxed C", offering: true },
     ],
   },
 ];

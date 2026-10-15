@@ -5,6 +5,8 @@ import {
   ENEMY_KINDS,
   WEAPONS,
   createCombat,
+  openingOf,
+  type Opening,
   describeAction,
   forcedAction,
   resolveTurn,
@@ -14,7 +16,6 @@ import {
   type Enemy,
   type PlayerAction,
   type Step,
-  type Tier,
   type WeaponTier,
 } from "./combat";
 import { HealthBar, IGNITE, Scene, StickFigure, actionPose, asPose, downPoseOf, flinchPoseOf, figureBox, idlePoseOf, poseForIntent, strikePose, windUpPose, shotCamera, type BarValues, type PoseName, type Projectile, type SceneFigure, type SceneShot, type ShotCamera } from "./render";
@@ -137,22 +138,24 @@ interface Setup {
 const PLAYER_MAX_HP = 20;
 const REVIVE_CHARGES = 2;
 
-function startFight(setup: Setup): CombatState {
+function startFight(setup: Setup): { state: CombatState; opening?: Opening } {
   const encounter = ENCOUNTERS.find(e => e.id === setup.encounterId)!;
-  return createCombat(
+  const state = createCombat(
     { maxHP: PLAYER_MAX_HP, weapon: setup.weapon, armor: setup.armor, charges: encounter.charges ?? REVIVE_CHARGES },
     encounter.enemies,
   );
+  // Some fights open with a scene (the Warden taking a waxed's flame).
+  return openingOf(state, encounter.enemies);
 }
 
 function TestCombat({ onExit }: { onExit: () => void }) {
   const [setup, setSetup] = useState<Setup>({ weapon: "normal", armor: "normal", encounterId: "one" });
   // `id` gives every new fight a fresh screen state.
-  const [run, setRun] = useState<{ id: number; state: CombatState } | null>(null);
-  const start = () => setRun(r => ({ id: (r?.id ?? 0) + 1, state: startFight(setup) }));
+  const [run, setRun] = useState<{ id: number; state: CombatState; opening?: Opening } | null>(null);
+  const start = () => setRun(r => ({ id: (r?.id ?? 0) + 1, ...startFight(setup) }));
 
   if (!run) return <SetupScreen setup={setup} onChange={setSetup} onStart={start} onExit={onExit} />;
-  return <CombatScreen key={run.id} initial={run.state} onRetry={start} onChangeLoadout={() => setRun(null)} onExit={onExit} />;
+  return <CombatScreen key={run.id} initial={run.state} opening={run.opening} onRetry={start} onChangeLoadout={() => setRun(null)} onExit={onExit} />;
 }
 
 /* ============================================================
@@ -422,37 +425,58 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
  * you're back where you stood with it gone; fall and you wake again at the start.
  * ============================================================ */
 
-/** What you carry on the map. */
-const MAP_LOADOUT = { weapon: "normal" as Tier, armor: "light" as ArmorTier };
+/** What you carry on the map, until you pick. */
+const MAP_LOADOUT: Setup = { weapon: "normal", armor: "light", encounterId: "one" };
 
-function mapFight(enemies: EnemySetup[]): CombatState {
-  return createCombat(
-    { maxHP: PLAYER_MAX_HP, weapon: MAP_LOADOUT.weapon, armor: MAP_LOADOUT.armor, charges: REVIVE_CHARGES },
+/** A fight started on the map (with its opening scene, if it has one: the Warden's). */
+function mapFight(enemies: EnemySetup[], loadout: Setup): { state: CombatState; opening?: Opening } {
+  const state = createCombat(
+    { maxHP: PLAYER_MAX_HP, weapon: loadout.weapon, armor: loadout.armor, charges: REVIVE_CHARGES },
     enemies,
   );
+  return openingOf(state, enemies);
 }
 
 function Journeying({ onExit }: { onExit: () => void }) {
+  // First, what you set out with.
+  const [loadout, setLoadout] = useState<Setup>(MAP_LOADOUT);
+  const [setOut, setSetOut] = useState(false);
   const [journey, setJourney] = useState<Journey>({ defeated: [] });
   // `id` gives every fight (and every return to the map) a fresh screen.
   // `foes`: the enemy that reached you plus everyone chasing you who piled in.
-  const [fight, setFight] = useState<{ id: number; foes: MapFoe[]; state: CombatState; backTo: Journey } | null>(null);
+  const [fight, setFight] = useState<{ id: number; foes: MapFoe[]; state: CombatState; opening?: Opening; backTo: Journey } | null>(null);
   const enemiesOf = (foes: MapFoe[]) => foes.flatMap(f => f.fight);
   const [visit, setVisit] = useState(0);
+
+  if (!setOut) {
+    return (
+      <SetupScreen
+        setup={loadout}
+        onChange={setLoadout}
+        onStart={() => setSetOut(true)}
+        onExit={onExit}
+        title="Exploration"
+        startLabel="Set out"
+        loadoutOnly
+      />
+    );
+  }
 
   if (fight) {
     return (
       <CombatScreen
         key={fight.id}
         initial={fight.state}
-        onRetry={() => setFight(f => f && { ...f, id: f.id + 1, state: mapFight(enemiesOf(f.foes)) })}
+        opening={fight.opening}
+        onRetry={() => setFight(f => f && { ...f, id: f.id + 1, ...mapFight(enemiesOf(f.foes), loadout) })}
         onChangeLoadout={() => {}}
         onExit={onExit}
         onDone={won => {
-          // Won: back where you stood, the enemy gone. Lost: wake at the start; your progress stays.
+          // Won: back where you stood, the enemy gone. Lost: wake by the keeper you last rested
+          // by (or at the start); your progress stays.
           setJourney(won
             ? { ...fight.backTo, defeated: [...fight.backTo.defeated, ...fight.foes.map(f => f.id)] }
-            : { defeated: fight.backTo.defeated });
+            : { defeated: fight.backTo.defeated, rested: fight.backTo.rested });
           setFight(null);
           setVisit(v => v + 1);
         }}
@@ -463,7 +487,7 @@ function Journeying({ onExit }: { onExit: () => void }) {
     <Exploration
       key={visit}
       journey={journey}
-      onEncounter={(foes, backTo) => setFight(f => ({ id: (f?.id ?? 0) + 1, foes, state: mapFight(enemiesOf(foes)), backTo }))}
+      onEncounter={(foes, backTo) => setFight(f => ({ id: (f?.id ?? 0) + 1, foes, ...mapFight(enemiesOf(foes), loadout), backTo }))}
       onExit={onExit}
     />
   );
@@ -475,13 +499,17 @@ const TIER_LABELS: Record<string, string> = { baseline: "None" };
 const ARMOR_KEYS = Object.keys(ARMOR) as ArmorTier[];
 
 /** W/S pick a row, A/D change the value in it, E starts, Q goes back to the menu. */
-function SetupScreen({ setup, onChange, onStart, onExit }: {
+function SetupScreen({ setup, onChange, onStart, onExit, title = "Test combat", startLabel = "Fight", loadoutOnly }: {
   setup: Setup;
   onChange: (s: Setup) => void;
   onStart: () => void;
   onExit: () => void;
+  title?: string;
+  startLabel?: string;
+  /** Only the weapon and armor (exploration has no encounter to pick). */
+  loadoutOnly?: boolean;
 }) {
-  const rows = [
+  const allRows = [
     { label: "Weapon", field: "weapon", options: TIER_KEYS, labels: TIER_LABELS },
     { label: "Armor", field: "armor", options: ARMOR_KEYS, labels: undefined },
     {
@@ -491,6 +519,7 @@ function SetupScreen({ setup, onChange, onStart, onExit }: {
       labels: Object.fromEntries(ENCOUNTERS.map(e => [e.id, e.label])),
     },
   ] as const;
+  const rows = loadoutOnly ? allRows.slice(0, 2) : allRows;
   const [row, setRow] = useState(0);
 
   useKeys(key => {
@@ -508,7 +537,7 @@ function SetupScreen({ setup, onChange, onStart, onExit }: {
 
   return (
     <main className="setup">
-      <h2 className="setup-title">Test combat</h2>
+      <h2 className="setup-title">{title}</h2>
       {rows.map((r, i) => (
         <Picker
           key={r.field}
@@ -524,11 +553,11 @@ function SetupScreen({ setup, onChange, onStart, onExit }: {
         <StickFigure view="back" pose="idle" weapon={setup.weapon} armor={setup.armor} title="Your loadout" />
       </div>
       <p className="hint">
-        <kbd>W</kbd><kbd>S</kbd> choose · <kbd>A</kbd><kbd>D</kbd> change · <kbd>E</kbd> fight · <kbd>Q</kbd> menu
+        <kbd>W</kbd><kbd>S</kbd> choose · <kbd>A</kbd><kbd>D</kbd> change · <kbd>E</kbd> {startLabel.toLowerCase()} · <kbd>Q</kbd> menu
       </p>
       <div className="setup-buttons">
         <button className="hud-button" onClick={onExit}>Menu</button>
-        <button className="commit" onClick={onStart}>Fight</button>
+        <button className="commit" onClick={onStart}>{startLabel}</button>
       </div>
     </main>
   );
@@ -608,6 +637,8 @@ interface Playback {
    *  Warden's phase-two scene (see IGNITE). */
   phase: "approach" | "impact" | "usurp" | "ignite";
   playerPose: PoseName;
+  /** A pause before its first step plays (the opening scene lets you take in the arena first), in ms. */
+  leadIn?: number;
   /** What you did this turn (null for a forced turn). */
   action: PlayerAction | null;
 }
@@ -624,6 +655,8 @@ const phaseFor = (st: Step | undefined): Playback["phase"] => (phaseTwoOf(st) ? 
  * returns on him standing in Idle, the flame streaming from the target over him into his hand.
  * When each stage starts, in ms.
  */
+/** How long the arena shows before a fight's opening scene starts, in ms. */
+const OPENING_LEAD_IN = 1200;
 const USURP_STAGES = { focus: 0, dash: 900, black: 1500, reveal: 2000, done: 3000 } as const;
 type UsurpStage = Exclude<keyof typeof USURP_STAGES, "done">;
 
@@ -713,8 +746,10 @@ function roman(n: number): string {
 
 const barValues = (f: { hp: number; fatigue: number; death: number }): BarValues => ({ hp: f.hp, fatigue: f.fatigue, death: f.death });
 
-function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, changeLabel, onTurnPlayed }: {
+function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, changeLabel, onTurnPlayed }: {
   initial: CombatState;
+  /** A scene to play before the first turn (it leaves the fight as `initial`). */
+  opening?: Opening;
   /** The model viewer: rewrites the fight before it's shown or played (the enemy's pose and action). */
   override?: (s: CombatState) => CombatState;
   /** Extra controls drawn over the fight (the model viewer's). */
@@ -735,7 +770,11 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
 }) {
   const [fightRaw, setFight] = useState(initial);
   const fight = useMemo(() => (override ? override(fightRaw) : fightRaw), [fightRaw, override]);
-  const [playback, setPlayback] = useState<Playback | null>(null);
+  const [playback, setPlayback] = useState<Playback | null>(() =>
+    opening?.steps.length
+      ? { from: opening.from, steps: opening.steps, index: 0, phase: phaseFor(opening.steps[0]), playerPose: "idle", action: null, leadIn: OPENING_LEAD_IN }
+      : null,
+  );
   const [selection, setSelection] = useState<Selection>(() => defaultSelection(initial));
   const [wheelOpen, setWheelOpen] = useState(false);
   const [highlight, setHighlight] = useState<Dir | null>(null);
@@ -845,7 +884,8 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
   };
 
   const [shot, setShot] = useState<SceneShot>(() => {
-    const { front, back } = linesOf(initial);
+    // Laid out as the fight stands when the screen opens (before its opening scene, if any).
+    const { front, back } = linesOf(opening?.from ?? initial);
     const pos = { ...Object.fromEntries(formation({ x: 0, z: 0 }, 0, front, back)), player: { x: 0, z: 0 } };
     world.current.pos = pos;
     return { positions: pos, camera: { follow: "player", yaw: 0 }, ms: 0, version: 0 };
@@ -1059,9 +1099,9 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
     const pb = playback;
     const timers = (Object.keys(USURP_STAGES) as (keyof typeof USURP_STAGES)[]).map(k =>
       window.setTimeout(() => {
-        if (k === "done") { setUsurpStage(null); setPlayback({ ...pb, phase: "impact" }); }
+        if (k === "done") { setUsurpStage(null); setPlayback({ ...pb, phase: "impact", leadIn: undefined }); }
         else setUsurpStage(k);
-      }, USURP_STAGES[k]),
+      }, USURP_STAGES[k] + (pb.index === 0 ? pb.leadIn ?? 0 : 0)),
     );
     return () => timers.forEach(t => window.clearTimeout(t));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1334,6 +1374,8 @@ function CombatScreen({ initial, onRetry, onChangeLoadout, onExit, onDone, overr
     const u = usurpStep(e.id);
     if (playback && u >= 0 && playback.index >= u) {
       if (playback.index === u && playback.phase === "usurp") {
+        // (Before it starts, as an opening scene's arena shows, he just stands in his stance.)
+        if (!usurpStage) return poseForIntent(e);
         if (usurpStage === "reveal") return "wd-idle";
         if (usurpStage === "dash" || usurpStage === "black") return "wd-usurp-dash";
         return "wd-usurp";

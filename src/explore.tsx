@@ -25,56 +25,264 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { EnemySetup } from "./combat";
+import { ENCOUNTERS, type EnemySetup } from "./combat";
 
 /* ============================================================
  * Map
  * ============================================================ */
 
 const LEVEL_PLANS: string[][] = [
-  // Level 0: the ground floor, carved from rock.
+  // Level 0: the crypt, two floors down.
   [
-    "                               ",
-    "  ......    ............       ",
-    "  ......    ............       ",
-    "  ..@...................       ",
-    "  ......    ............       ",
-    "  ......    .........>>>>      ",
-    "  ......    ............       ",
-    "    .       ............       ",
-    "    .       .....H......       ",
-    "    .    ^  ............       ",
-    "    .    ^  ............       ",
-    "    ......  ............   ^   ",
-    "            ............   ^   ",
-    "                  .        .   ",
-    "                  .      ..... ",
-    "                  ............ ",
-    "                         ..... ",
-    "                         ..... ",
-    "                               ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                  .................                          ",
+    "                                  .................                          ",
+    "                                  ...#...#...#...#.                          ",
+    "                                  .................                          ",
+    "                                  ......#######....                          ",
+    "                               <<<......#     #....                          ",
+    "                                  ......#######....                          ",
+    "                                  .................                          ",
+    "                                  ...#...#...#...#.                          ",
+    "                                  .................                          ",
+    "                                  .................                          ",
+    "                                                                             ",
   ],
-  // Level 1: a landing, a bridge across the hall, and a room on the far side.
+  // Level 1: the cellar, under the ground floor.
   [
-    "                               ",
-    "                               ",
-    "                               ",
-    "                               ",
-    "                         ..... ",
-    "                         ..... ",
-    "        ...              ..... ",
-    "        ...................... ",
-    "        ...              ..... ",
-    "                         ..... ",
-    "                         ..... ",
-    "                               ",
-    "                               ",
-    "                               ",
-    "                               ",
-    "                               ",
-    "                               ",
-    "                               ",
-    "                               ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "       ^                                                                     ",
+    "       ^                                                                     ",
+    "       ^                                                                     ",
+    "   ...........                                                               ",
+    "   ...........     ...........                                               ",
+    "   ...#...#...     ...........                                               ",
+    "   ...................#...#...                                               ",
+    "   ...#...#...     ...........                                               ",
+    "   ...........     ............                                              ",
+    "                   ...........                                               ",
+    "                   ...#...#...                                               ",
+    "                   ...........                                               ",
+    "                   ...........                                               ",
+    "                                                                             ",
+    "                                                                             ",
+  ],
+  // Level 2: the ground floor, carved from rock. You start here.
+  [
+    "                                                                             ",
+    "  ......    ............                                                     ",
+    "  ......    ............                                                     ",
+    "  ..@...................                                                     ",
+    "  ......    ............                                                     ",
+    "  ......    .........>>>>                                                    ",
+    "  ......    ............                                                     ",
+    "    .       ............                                                     ",
+    "    .       .....H......                                                     ",
+    "    .    ^  ............                                                     ",
+    "    .    ^  ............                                                     ",
+    "    ......  ............   ^                                                 ",
+    "       .    ............   ^                                                 ",
+    "       .          .        .                                                 ",
+    "       .          .      .....                                               ",
+    "       .          ............                                               ",
+    "       .                 .....                                               ",
+    "       .                 .....                                               ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+  ],
+  // Level 3: a landing, a bridge across the hall, and a room on the far side.
+  [
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                         .....                                               ",
+    "                         .....                                               ",
+    "        ...              .....                                               ",
+    "        ......................>>>                                            ",
+    "        ...              .....                                               ",
+    "                         .....                                               ",
+    "                         .....                                               ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+  ],
+  // Level 4: the gallery.
+  [
+    "                                                                             ",
+    "                                                                             ",
+    "                                      ..............                         ",
+    "                                      ..............                         ",
+    "                                      ...#...#...#..                         ",
+    "                                 ...................                         ",
+    "                                 ...................                         ",
+    "                                 ...................                         ",
+    "                                 ...................                         ",
+    "                                 ...................                         ",
+    "                                      ...#...#...#..                         ",
+    "                                      ..............                         ",
+    "                                      ....................                   ",
+    "                                                         .                   ",
+    "                                                         .                   ",
+    "                                                         v                   ",
+    "                                                         v                   ",
+    "                                                         v                   ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+  ],
+  // Level 5: the belfry.
+  [
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                      ^      ",
+    "                                                                      ^      ",
+    "                                                                      ^      ",
+    "                                                       ......   ............ ",
+    "                                                       ......   ............ ",
+    "                                                       ......   ............ ",
+    "                                                       ............#....#... ",
+    "                                                       ......   ............ ",
+    "                                                       ......   ............ ",
+    "                                                                ............ ",
+    "                                                                ............ ",
+    "                                                                ............ ",
+    "                                                                ...#....#... ",
+    "                                                                ............ ",
+    "                                                                ............ ",
+    "                                                                ............ ",
+    "                                                                             ",
+    "                                                                             ",
+  ],
+  // Level 6: the sanctum, where the Warden waits.
+  [
+    "                                                                             ",
+    "                                                                ...........  ",
+    "                                                               ............. ",
+    "                                                              ...............",
+    "                                                              ...............",
+    "                                                              ...............",
+    "                                                              ...............",
+    "                                                              ...............",
+    "                                                               ............. ",
+    "                                                                ...........  ",
+    "                                                                      .      ",
+    "                                                                   .......   ",
+    "                                                                   .......   ",
+    "                                                                   .......   ",
+    "                                                                   .......   ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
+    "                                                                             ",
   ],
 ];
 
@@ -266,19 +474,35 @@ const makeCanvas = (w: number, h: number) => {
   return c;
 };
 
+/** Levels are painted in square chunks of this many tiles, as they come into view. */
+const CHUNK = 8;
+/** Extra rows a chunk's surface keeps above it (stairs rise over the row behind them). */
+const CHUNK_PAD_TOP = 1;
+/** Extra rows a chunk's faces keep below it (a ledge's face drops as far as the floor it overlooks). */
+const CHUNK_PAD_BOTTOM = Math.ceil(LEVELS * RISE) + 1;
+
 /**
- * Paints one level at `T` pixels per tile, in that level's own coordinates (it is shifted up
- * by its height when drawn). Two layers: the surfaces, and the cliff faces under ledges. Each
- * face is stored in the row of the tile it hangs from, so splitting by rows keeps it together.
+ * Paints a CHUNK × CHUNK block of one level, at `T` pixels per tile, in that level's own
+ * coordinates (it is shifted up by its height when drawn). Two layers: the surfaces, and the
+ * cliff faces under ledges. Each face is stored in the row of the tile it hangs from, so
+ * splitting by rows keeps it together. The surface layer starts CHUNK_PAD_TOP rows above the
+ * block (for stairs rising into the row behind), the faces layer at the block's top row and runs
+ * on below it (for tall drops). Null if the block has nothing to paint.
  */
-function paintLevel(z: number, T: number) {
-  const W = WORLD.w * T, H = WORLD.h * T;
-  const surface = makeCanvas(W, H), faces = makeCanvas(W, H);
+function paintChunk(z: number, T: number, cx: number, cy: number) {
+  const x0 = cx * CHUNK, y0 = cy * CHUNK;
+  let any = false;
+  for (let y = y0; y < y0 + CHUNK && !any; y++) for (let x = x0; x < x0 + CHUNK; x++) if (tileAt(z, x, y) !== VOID) { any = true; break; }
+  if (!any) return null;
+  const surface = makeCanvas(CHUNK * T, (CHUNK + CHUNK_PAD_TOP) * T);
+  const faces = makeCanvas(CHUNK * T, (CHUNK + CHUNK_PAD_BOTTOM) * T);
   const g = surface.getContext("2d")!, f = faces.getContext("2d")!;
+  g.translate(-x0 * T, -(y0 - CHUNK_PAD_TOP) * T);
+  f.translate(-x0 * T, -y0 * T);
   const grout = Math.max(1, Math.round(T / 24));
   const rise = RISE * T;
 
-  for (let y = 0; y < WORLD.h; y++) for (let x = 0; x < WORLD.w; x++) {
+  for (let y = y0; y < y0 + CHUNK; y++) for (let x = x0; x < x0 + CHUNK; x++) {
     const t = tileAt(z, x, y), px = x * T, py = y * T;
     if (t === FLOOR) {
       g.fillStyle = COLORS.floorGrout;
@@ -326,7 +550,7 @@ function paintLevel(z: number, T: number) {
   }
 
   // Ramps go last, north to south, since each one rises over the row behind it.
-  for (let y = 0; y < WORLD.h; y++) for (let x = 0; x < WORLD.w; x++) {
+  for (let y = y0; y < y0 + CHUNK; y++) for (let x = x0; x < x0 + CHUNK; x++) {
     const t = tileAt(z, x, y);
     const r = isRamp(t) ? rampAt(z, x, y) : undefined;
     if (r) paintRamp(g, z, x, y, r, t === LADDER, T, grout);
@@ -514,6 +738,89 @@ function drawKneeler(
     line(0.02, neck + 0.05, 0.15, foot + lift(1));
     head(0, neck - 0.13);
   }
+}
+
+/**
+ * The Warden on the map: a head taller than anyone, a long cloak and a peaked hood with a wax
+ * beak, his wax arm hanging huge at one side, the flail at the other. His flame is out.
+ */
+function drawWardenMap(g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir) {
+  const k = 1.45;
+  const X = (u: number) => x + u * T * k, Y = (v: number) => y + (v * k + 0.36 * (1 - k)) * T;
+  const m = facing === "left" ? -1 : 1;
+  g.fillStyle = COLORS.shadow;
+  g.beginPath(); g.ellipse(X(0), Y(0.37), 0.26 * T * k, 0.08 * T * k, 0, 0, Math.PI * 2); g.fill();
+  // The flail, hanging from his hand, its waxed head on the floor.
+  g.strokeStyle = "#9a9db0"; g.lineWidth = Math.max(1, 0.02 * T * k);
+  g.beginPath(); g.moveTo(X(-0.2 * m), Y(0.02)); g.lineTo(X(-0.26 * m), Y(0.3)); g.stroke();
+  g.fillStyle = "#b9a14e";
+  g.beginPath(); g.arc(X(-0.27 * m), Y(0.32), 0.06 * T * k, 0, Math.PI * 2); g.fill();
+  // Cloak.
+  g.fillStyle = "#5c5866";
+  g.beginPath();
+  g.moveTo(X(-0.13), Y(-0.24)); g.lineTo(X(0.13), Y(-0.24));
+  g.lineTo(X(0.22), Y(0.36)); g.lineTo(X(-0.22), Y(0.36)); g.closePath(); g.fill();
+  g.fillStyle = "#b9a14e";
+  g.fillRect(X(-0.015), Y(-0.2), Math.max(1, 0.03 * T * k), 0.56 * T * k);
+  // The wax arm, swollen toward the hand.
+  g.strokeStyle = "#b9a14e"; g.lineCap = "round";
+  g.lineWidth = 0.09 * T * k;
+  g.beginPath(); g.moveTo(X(0.12 * m), Y(-0.2)); g.lineTo(X(0.2 * m), Y(0.02)); g.stroke();
+  g.fillStyle = "#b9a14e";
+  g.beginPath(); g.arc(X(0.21 * m), Y(0.06), 0.065 * T * k, 0, Math.PI * 2); g.fill();
+  // The flail arm.
+  g.strokeStyle = "#ece9f4"; g.lineWidth = Math.max(2, 0.06 * T * k);
+  g.beginPath(); g.moveTo(X(-0.12 * m), Y(-0.2)); g.lineTo(X(-0.2 * m), Y(0.02)); g.stroke();
+  // Hood and beak.
+  g.fillStyle = "#6a6574";
+  g.beginPath();
+  g.moveTo(X(0.02 * m), Y(-0.66)); g.quadraticCurveTo(X(0.2), Y(-0.42), X(0.15), Y(-0.2));
+  g.lineTo(X(-0.15), Y(-0.2)); g.quadraticCurveTo(X(-0.2), Y(-0.42), X(0.02 * m), Y(-0.66)); g.fill();
+  g.fillStyle = "#121117";
+  g.beginPath(); g.ellipse(X(0), Y(-0.36), 0.08 * T * k, 0.1 * T * k, 0, 0, Math.PI * 2); g.fill();
+  if (facing !== "up") {
+    g.fillStyle = "#b9a14e";
+    const dir = facing === "down" ? 0 : m;
+    g.beginPath();
+    g.moveTo(X(-0.035 + dir * 0.02), Y(-0.38)); g.lineTo(X(0.035 + dir * 0.02), Y(-0.38));
+    g.lineTo(X(dir * 0.14), Y(-0.22)); g.closePath(); g.fill();
+  }
+}
+
+/**
+ * A hooded keeper on the map: a tall robe and a deep hood, a small candle held before it. The
+ * candle burns where you last rested.
+ */
+function drawKeeper(g: CanvasRenderingContext2D, x: number, y: number, T: number, lit: boolean, t: number) {
+  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
+  g.fillStyle = COLORS.shadow;
+  g.beginPath(); g.ellipse(X(0), Y(0.37), 0.24 * T, 0.08 * T, 0, 0, Math.PI * 2); g.fill();
+  // The robe, flaring to the floor.
+  g.fillStyle = "#4b4656";
+  g.beginPath();
+  g.moveTo(X(-0.11), Y(-0.22)); g.lineTo(X(0.11), Y(-0.22));
+  g.lineTo(X(0.2), Y(0.36)); g.lineTo(X(-0.2), Y(0.36)); g.closePath(); g.fill();
+  g.fillStyle = "#3d3946";
+  g.fillRect(X(-0.012), Y(-0.05), Math.max(1, 0.024 * T), 0.4 * T);
+  // The hood, peaked, its opening dark.
+  g.fillStyle = "#544e60";
+  g.beginPath();
+  g.moveTo(X(0), Y(-0.6)); g.quadraticCurveTo(X(0.19), Y(-0.38), X(0.15), Y(-0.17));
+  g.lineTo(X(-0.15), Y(-0.17)); g.quadraticCurveTo(X(-0.19), Y(-0.38), X(0), Y(-0.6)); g.fill();
+  g.fillStyle = "#121117";
+  g.beginPath(); g.ellipse(X(0), Y(-0.32), 0.075 * T, 0.1 * T, 0, 0, Math.PI * 2); g.fill();
+  // Hands together before it, a candle in them.
+  g.fillStyle = "#c9c2b0";
+  g.fillRect(X(-0.018), Y(-0.08), Math.max(2, 0.036 * T), 0.09 * T);
+  if (!lit) return;
+  const flick = 1 + Math.sin(t / 90) * 0.08 + Math.sin(t / 37) * 0.05;
+  const glow = g.createRadialGradient(X(0), Y(-0.12), 0, X(0), Y(-0.12), 0.45 * T);
+  glow.addColorStop(0, "rgb(255 190 110 / 0.35)");
+  glow.addColorStop(1, "rgb(255 190 110 / 0)");
+  g.fillStyle = glow;
+  g.beginPath(); g.arc(X(0), Y(-0.12), 0.45 * T, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#f2b45c";
+  g.beginPath(); g.ellipse(X(0), Y(-0.13), 0.022 * T, 0.045 * T * flick, 0, 0, Math.PI * 2); g.fill();
 }
 
 /* ============================================================
@@ -706,7 +1013,7 @@ function sight(px: number, py: number, alt: number) {
  * never as fast as you walk. Touching one starts its fight.
  * ============================================================ */
 
-export type FoeKind = "waxed" | "sleepwalker";
+export type FoeKind = "waxed" | "sleepwalker" | "warden";
 
 /** An enemy waiting somewhere on the map, and the fight it starts when it reaches you. */
 export interface MapFoe {
@@ -718,20 +1025,48 @@ export interface MapFoe {
   fight: EnemySetup[];
 }
 
-/** The tutorial, roughly in the order you'll meet it. */
+/** The Warden's fight, as Test combat has it (his escorts, and the waxed whose flame he takes first). */
+const WARDEN_FIGHT = ENCOUNTERS.find(e => e.id === "warden")!.enemies;
+
+/** The tutorial, roughly in the order you'll meet it. Levels: 0-1 below ground, 2 ground, 3-6 above. */
 export const MAP_FOES: MapFoe[] = [
-  // In the hall: a lone waxed, then a pair further in.
-  { id: "hall-waxed", kind: "waxed", home: { x: 17.5, y: 4.5, z: 0 }, fight: [{ kind: "waxed" }] },
-  { id: "hall-pair", kind: "waxed", home: { x: 21.5, y: 11.5, z: 0 }, fight: [{ kind: "waxed" }, { kind: "waxed" }] },
+  // Ground floor. In the hall: a lone waxed, then a pair further in.
+  { id: "hall-waxed", kind: "waxed", home: { x: 17.5, y: 4.5, z: 2 }, fight: [{ kind: "waxed" }] },
+  { id: "hall-pair", kind: "waxed", home: { x: 21.5, y: 11.5, z: 2 }, fight: [{ kind: "waxed" }, { kind: "waxed" }] },
   // One left standing in the middle of the bridge.
-  { id: "bridge-waxed", kind: "waxed", home: { x: 20.5, y: 8.5, z: 1 }, fight: [{ kind: "waxed" }] },
+  { id: "bridge-waxed", kind: "waxed", home: { x: 20.5, y: 8.5, z: 3 }, fight: [{ kind: "waxed" }] },
   // The first sleepwalker, in the room below the east stairs: your first read of its stances.
-  { id: "low-sleeper", kind: "sleepwalker", home: { x: 27.5, y: 16.6, z: 0 }, fight: [{ kind: "sleepwalker" }] },
+  { id: "low-sleeper", kind: "sleepwalker", home: { x: 27.5, y: 16.6, z: 2 }, fight: [{ kind: "sleepwalker" }] },
   // Up in the far room: a sleepwalker with a waxed at its side.
   {
-    id: "far-room", kind: "sleepwalker", home: { x: 28.5, y: 7.6, z: 1 },
+    id: "far-room", kind: "sleepwalker", home: { x: 28.5, y: 7.6, z: 3 },
     fight: [{ kind: "sleepwalker", line: "front" }, { kind: "waxed" }],
   },
+
+  // Below: the cellar, then the crypt under it (off the way up, for those who look).
+  { id: "cold-pair", kind: "waxed", home: { x: 11.5, y: 25.5, z: 1 }, fight: [{ kind: "waxed" }, { kind: "waxed" }] },
+  {
+    id: "ossuary", kind: "sleepwalker", home: { x: 25.5, y: 30.5, z: 1 },
+    fight: [{ kind: "sleepwalker", line: "front" }, { kind: "waxed" }],
+  },
+  { id: "crypt-waxed", kind: "waxed", home: { x: 49.5, y: 23.5, z: 0 }, fight: [{ kind: "waxed" }] },
+  {
+    id: "crypt-pair", kind: "sleepwalker", home: { x: 43.5, y: 30.5, z: 0 },
+    fight: [{ kind: "sleepwalker", line: "front" }, { kind: "sleepwalker" }],
+  },
+
+  // Above: the gallery, the belfry, then the Warden.
+  { id: "gallery-waxed", kind: "waxed", home: { x: 41.5, y: 8.5, z: 4 }, fight: [{ kind: "waxed" }, { kind: "waxed" }] },
+  {
+    id: "gallery-pair", kind: "sleepwalker", home: { x: 48.5, y: 7.6, z: 4 },
+    fight: [{ kind: "sleepwalker", line: "front" }, { kind: "sleepwalker" }],
+  },
+  { id: "belfry-sleeper", kind: "sleepwalker", home: { x: 59.5, y: 22.5, z: 5 }, fight: [{ kind: "sleepwalker" }] },
+  {
+    id: "bell-hall", kind: "sleepwalker", home: { x: 70.5, y: 25.6, z: 5 },
+    fight: [{ kind: "sleepwalker", line: "front" }, { kind: "waxed" }, { kind: "waxed" }],
+  },
+  { id: "warden", kind: "warden", home: { x: 70.5, y: 5.5, z: 6 }, fight: WARDEN_FIGHT },
 ];
 
 interface FoeTuning {
@@ -747,6 +1082,8 @@ interface FoeTuning {
 const FOE_TUNING: Record<FoeKind, FoeTuning> = {
   waxed: { notice: 3.2, chase: 0.85, walk: 0.6, wander: 0 },
   sleepwalker: { notice: 4.5, chase: 2.0, walk: 0.8, wander: 1.8 },
+  // He waits in the middle of his arena, and only comes for you once you're well inside it.
+  warden: { notice: 3.5, chase: 1.1, walk: 0.7, wander: 0 },
 };
 
 /** How a member of a fight looks on the map, by its kind. */
@@ -849,14 +1186,44 @@ interface Foe extends Walker {
 
 /** Where to draw each member of a group of `n`, around the group's position (tiles). */
 const huddle = (n: number): [number, number][] =>
-  n <= 1 ? [[0, 0]] : n === 2 ? [[-0.2, -0.1], [0.22, 0.06]] : [[-0.25, -0.1], [0.25, -0.08], [0, 0.12]];
+  n <= 1 ? [[0, 0]] : n === 2 ? [[-0.2, -0.1], [0.22, 0.06]] : n === 3 ? [[-0.25, -0.1], [0.25, -0.08], [0, 0.12]]
+    // The Warden's fight: him in the middle, a waxed either side, the one whose flame he'll take behind.
+    : [[-0.42, 0.14], [0, -0.05], [0.42, 0.14], [0.36, -0.3]];
+
+/* ============================================================
+ * Keepers: hooded figures you can rest by. The last one you rested by is where you wake after
+ * falling in a fight.
+ * ============================================================ */
+
+export interface Keeper {
+  id: string;
+  /** Where it stands (feet, in tiles on the world grid). You wake just in front of it. */
+  at: { x: number; y: number; z: number };
+}
+
+export const KEEPERS: Keeper[] = [
+  // Beside where you first wake.
+  { id: "start", at: { x: 7.5, y: 2.6, z: 2 } },
+  // Down in the cellar's cold room.
+  { id: "cellar", at: { x: 5.5, y: 23.6, z: 1 } },
+  // At the top of the stairs into the gallery, halfway up.
+  { id: "gallery", at: { x: 37.5, y: 6.6, z: 4 } },
+  // In the antechamber, right before the Warden.
+  { id: "sanctum", at: { x: 69.5, y: 13.6, z: 6 } },
+];
+/** How close you must stand to a keeper to rest by it, in tiles. */
+const KEEPER_REACH = 1.1;
+/** How long the line after resting stays up. */
+const REST_NOTE_MS = 2600;
 
 /** Your progress on the map, kept while you're away fighting. */
 export interface Journey {
-  /** Where you are; missing means back at the start. */
+  /** Where you are; missing means where you wake: by the keeper you last rested by, or the start. */
   at?: { x: number; y: number; alt: number; facing: Dir };
   /** Enemies already beaten (they stay gone). */
   defeated: string[];
+  /** The keeper you last rested by (a keeper's id). */
+  rested?: string;
 }
 
 /* ============================================================
@@ -883,6 +1250,19 @@ export function Exploration({ journey, onEncounter, onExit }: {
   const pausedRef = useRef(false);
   pausedRef.current = paused;
   const held = useRef<Dir[]>([]);
+  // The keeper you last rested by, and the one you're standing by now (if any).
+  const restedAt = useRef<string | undefined>(journey.rested);
+  const nearRef = useRef<string | null>(null);
+  const [near, setNear] = useState<string | null>(null);
+  const [note, setNote] = useState<{ text: string; id: number } | null>(null);
+  const rest = () => {
+    const id = nearRef.current;
+    if (!id) return;
+    restedAt.current = id;
+    const n = { text: "You rest by the hooded figure. Should you fall, you will wake here.", id: Date.now() };
+    setNote(n);
+    window.setTimeout(() => setNote(cur => (cur?.id === n.id ? null : cur)), REST_NOTE_MS);
+  };
 
   const pauseOptions = [
     { label: "Resume", run: () => setPaused(false) },
@@ -920,6 +1300,11 @@ export function Exploration({ journey, onEncounter, onExit }: {
     if (dir) {
       e.preventDefault();
       if (!e.repeat) held.current = [...held.current.filter(d => d !== dir), dir];
+      return;
+    }
+    if ((key === "e" || key === "enter") && !e.repeat && nearRef.current) {
+      e.preventDefault();
+      rest();
     }
   };
 
@@ -942,7 +1327,12 @@ export function Exploration({ journey, onEncounter, onExit }: {
     const g = canvas.getContext("2d")!;
     const { start } = WORLD;
     const { journey: begin } = latest.current;
-    const at = begin.at ?? { x: start.x + 0.5, y: start.y + 0.6, alt: start.z, facing: "down" as Dir };
+    // Coming back from a fight: where you were. Otherwise you wake by the keeper you last
+    // rested by, or, the very first time, at the start.
+    const keeper = KEEPERS.find(k => k.id === begin.rested);
+    const at = begin.at ?? (keeper
+      ? { x: keeper.at.x, y: keeper.at.y + 0.9, alt: keeper.at.z, facing: "up" as Dir }
+      : { x: start.x + 0.5, y: start.y + 0.6, alt: start.z, facing: "down" as Dir });
     const me: Walker = {
       x: at.x, y: at.y, alt: at.alt, vx: 0, vy: 0,
       facing: at.facing, walked: 0, climbing: false, fall: 0, ground: at.alt,
@@ -968,7 +1358,26 @@ export function Exploration({ journey, onEncounter, onExit }: {
     // The camera follows where you appear on screen: your height lifts you up the screen.
     const cam = { x: me.x, y: me.y - me.alt * RISE };
     let T = 0;
-    let painted: { surface: HTMLCanvasElement; faces: HTMLCanvasElement }[] = [];
+    // Painted chunks of each level, as they've come into view (dropped once long out of view).
+    type Chunk = { surface: HTMLCanvasElement; faces: HTMLCanvasElement; used: number } | null;
+    const chunks = new Map<string, Chunk>();
+    let frameNo = 0;
+    const chunkAt = (z: number, cx: number, cy: number): Chunk => {
+      const key = `${z},${cx},${cy}`;
+      let c = chunks.get(key);
+      if (c === undefined) {
+        const p = paintChunk(z, T, cx, cy);
+        c = p && { ...p, used: frameNo };
+        chunks.set(key, c);
+      }
+      if (c) c.used = frameNo;
+      return c;
+    };
+    /** Keeps the cache small: chunks not drawn for a while go (they're repainted if needed). */
+    const evictChunks = () => {
+      if (chunks.size < 240) return;
+      for (const [k, c] of chunks) if (!c || frameNo - c.used > 120) chunks.delete(k);
+    };
     // The world is composed here, level by level, before going on screen.
     const scene = makeCanvas(1, 1);
     const sg = scene.getContext("2d")!;
@@ -996,7 +1405,7 @@ export function Exploration({ journey, onEncounter, onExit }: {
       const next = Math.max(8, Math.round(Math.min(canvas.height / TILES_TALL, canvas.width / 13)));
       if (next !== T) {
         T = next;
-        painted = WORLD.levels.map((_, z) => paintLevel(z, T));
+        chunks.clear();
       }
     };
     fit();
@@ -1077,6 +1486,10 @@ export function Exploration({ journey, onEncounter, onExit }: {
 
       grace = Math.max(0, grace - dtMs);
       for (const f of foes) updateFoe(f, dt);
+
+      // Standing by a keeper, on its level: you can rest there.
+      const by = KEEPERS.find(k => Math.abs(k.at.z - me.alt) < 0.2 && Math.hypot(k.at.x - me.x, k.at.y - me.y) < KEEPER_REACH)?.id ?? null;
+      if (by !== nearRef.current) { nearRef.current = by; setNear(by); }
     };
 
     const updateFoe = (f: Foe, dt: number) => {
@@ -1167,6 +1580,7 @@ export function Exploration({ journey, onEncounter, onExit }: {
         const backTo: Journey = {
           at: { x: me.x, y: me.y, alt: me.alt, facing: me.facing },
           defeated: latest.current.journey.defeated,
+          rested: restedAt.current,
         };
         const joining = [f.def, ...pursuers(f)];
         fadeTimer = window.setTimeout(() => latest.current.onEncounter(joining, backTo), ENCOUNTER_FADE_MS);
@@ -1191,20 +1605,35 @@ export function Exploration({ journey, onEncounter, onExit }: {
       return out;
     };
 
-    /** Draws enemies on level z that pass `test`, as seen from the camera at (ox, oy). */
-    const drawFoes = (ctx: CanvasRenderingContext2D, z: number, ox: number, oy: number, test: (f: Foe) => boolean) => {
-      const list = foes.filter(f => Math.round(f.alt) === z && test(f)).sort((a, b) => a.y - b.y);
-      for (const f of list) {
-        const phase = Math.floor(f.walked / STRIDE) % 4;
-        const frame: Frame = f.walked <= 0 ? "stand" : phase === 0 ? "stepR" : phase === 2 ? "stepL" : "stand";
-        // Each member of the group drawn as what it is, back ones first.
-        const spots = huddle(f.def.fight.length);
-        const members = f.def.fight.map((m, i) => ({ look: lookOf(m.kind), at: spots[i] })).sort((a, b) => a.at[1] - b.at[1]);
-        for (const { look, at: [dx, dy] } of members) {
-          const px = ox + (f.x + dx) * T, py = oy + (f.y + dy - f.alt * RISE - BODY_ABOVE_FEET) * T;
-          drawWalker(ctx, px, py, T, f.facing, frame, true, 0, look);
-        }
+    /**
+     * Draws the enemies and keepers on level z whose feet are on a row that passes `test`, as
+     * seen from the camera at (ox, oy), back ones first.
+     */
+    const drawFoes = (ctx: CanvasRenderingContext2D, z: number, ox: number, oy: number, test: (y: number) => boolean) => {
+      const list: { y: number; draw: () => void }[] = [];
+      for (const f of foes) {
+        if (Math.round(f.alt) !== z || !test(f.y)) continue;
+        list.push({ y: f.y, draw: () => {
+          const phase = Math.floor(f.walked / STRIDE) % 4;
+          const frame: Frame = f.walked <= 0 ? "stand" : phase === 0 ? "stepR" : phase === 2 ? "stepL" : "stand";
+          // Each member of the group drawn as what it is, back ones first.
+          const spots = huddle(f.def.fight.length);
+          const members = f.def.fight.map((m, i) => ({ kind: m.kind, look: lookOf(m.kind), at: spots[i] })).sort((a, b) => a.at[1] - b.at[1]);
+          for (const { kind, look, at: [dx, dy] } of members) {
+            const px = ox + (f.x + dx) * T, py = oy + (f.y + dy - f.alt * RISE - BODY_ABOVE_FEET) * T;
+            if (kind === "warden") drawWardenMap(ctx, px, py, T, f.facing);
+            else drawWalker(ctx, px, py, T, f.facing, frame, true, 0, look);
+          }
+        } });
       }
+      for (const k of KEEPERS) {
+        if (k.at.z !== z || !test(k.at.y)) continue;
+        list.push({ y: k.at.y, draw: () => {
+          const px = ox + k.at.x * T, py = oy + (k.at.y - k.at.z * RISE - BODY_ABOVE_FEET) * T;
+          drawKeeper(ctx, px, py, T, (restedAt.current ?? "start") === k.id, performance.now());
+        } });
+      }
+      list.sort((a, b) => a.y - b.y).forEach(d => d.draw());
     };
 
     const draw = (dtMs: number) => {
@@ -1232,14 +1661,18 @@ export function Exploration({ journey, onEncounter, onExit }: {
        * Paints into `lights[z]` what you see of a level, judged by sight `left` on level gz's
        * tiles, placed with its top row at `top`. `shown` holds the eased brightness per tile.
        */
-      const paintSight = (z: number, gz: number, left: Float32Array, top: number, shown: Float32Array) => {
+      const paintSight = (z: number, gz: number, left: Float32Array, top: number, shown: Float32Array): boolean => {
+        let any = false;
         // Ease each tile's brightness toward what you see now, so sight fades in and out.
         for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
           const i = y * MW + x;
           const target = seeThrough(gz, x, y) && left[i] >= 0 ? Math.min(1, left[i] / fadeOver) : 0;
           shown[i] += (target - shown[i]) * ease;
           if (shown[i] < 0.002) shown[i] = 0;
+          else any = true;
         }
+        // Nothing of this level in sight: nothing to paint.
+        if (!any) return false;
         const lit = (x: number, y: number) =>
           x >= 0 && y >= 0 && x < MW && y < MH && seeThrough(gz, x, y) ? shown[y * MW + x] : 0;
         // Tiles with light, or right next to some: the soft brightness below fades out across
@@ -1287,36 +1720,67 @@ export function Exploration({ journey, onEncounter, onExit }: {
         mg.drawImage(softCanvas, ox, top, MW * T, MH * T);
         const lg = lights[z].getContext("2d")!;
         lg.drawImage(maskCanvas, 0, 0);
+        return true;
       };
 
+      // Levels with nothing in sight are skipped altogether below.
+      const inSight: boolean[] = [];
+      frameNo++;
       for (let z = 0; z < LEVELS; z++) {
         lights[z].getContext("2d")!.clearRect(0, 0, W, H);
         // What sight reaches of this level, pinned to the level's own height.
-        paintSight(z, z, seenAll[z], levelY(z), glow[z]);
+        inSight[z] = paintSight(z, z, seenAll[z], levelY(z), glow[z]);
         // Levels above you are also glimpsed through your own level's sight, held at your eye
         // height: from below you catch their near edge, and more as you climb toward them.
-        if (z > me.alt + 1e-3) paintSight(z, ownLevel, seenAll[ownLevel], oy - me.alt * RISE * T, glowAbove[z]);
+        if (z > me.alt + 1e-3 && paintSight(z, ownLevel, seenAll[ownLevel], oy - me.alt * RISE * T, glowAbove[z])) inSight[z] = true;
       }
 
       /**
        * Draws rows r0..r1 of level z, with the enemies standing in them that pass `test`,
        * cut down to what you can see of that level.
        */
-      const rows = (z: number, r0: number, r1: number, test: (f: Foe) => boolean = () => true) => {
+      const rows = (z: number, r0: number, r1: number, test: (y: number) => boolean = () => true) => {
         if (r1 <= r0) return;
-        const { surface, faces } = painted[z];
-        const sw = WORLD.w * T, sy = r0 * T, sh = (r1 - r0) * T, dy = levelY(z) + sy;
         yg.globalCompositeOperation = "source-over";
         yg.clearRect(0, 0, W, H);
-        yg.drawImage(surface, 0, sy, sw, sh, ox, dy, sw, sh);
-        yg.drawImage(faces, 0, sy, sw, sh, ox, dy + T, sw, sh);
-        drawFoes(yg, z, ox, oy, f => f.y >= r0 && f.y < r1 && test(f));
+        // Only the chunks on screen, and only the slice of rows asked for.
+        const top = levelY(z);
+        const vr0 = Math.max(r0, Math.floor(-top / T) - 1), vr1 = Math.min(r1, Math.ceil((H - top) / T) + 1);
+        const cx0 = Math.max(0, Math.floor(-ox / T / CHUNK)), cx1 = Math.min(Math.ceil(WORLD.w / CHUNK) - 1, Math.floor((W - ox) / T / CHUNK));
+        const cyMax = Math.ceil(WORLD.h / CHUNK) - 1;
+        const piece = (img: HTMLCanvasElement, cx: number, from: number, a: number, b: number, shift: number) => {
+          // Rows a..b of a chunk layer whose first row is `from`.
+          if (b <= a) return;
+          const sx = 0, sy = (a - from) * T, sw = CHUNK * T, sh = (b - a) * T;
+          yg.drawImage(img, sx, sy, sw, sh, ox + cx * CHUNK * T, top + a * T + shift, sw, sh);
+        };
+        if (vr1 > vr0) {
+          // Surfaces, north to south (each chunk's top pad holds stairs rising into the row above).
+          for (let cy = Math.max(0, Math.floor(vr0 / CHUNK)); cy <= Math.min(cyMax, Math.floor(vr1 / CHUNK) + 1); cy++) {
+            for (let cx = cx0; cx <= cx1; cx++) {
+              const c = chunkAt(z, cx, cy);
+              if (!c) continue;
+              const from = cy * CHUNK - CHUNK_PAD_TOP;
+              piece(c.surface, cx, from, Math.max(vr0, from), Math.min(vr1, cy * CHUNK + CHUNK), 0);
+            }
+          }
+          // Then the cliff faces (each hangs one row below the tile it belongs to, and may run on).
+          for (let cy = Math.max(0, Math.floor((vr0 - CHUNK_PAD_BOTTOM) / CHUNK)); cy <= Math.min(cyMax, Math.floor(vr1 / CHUNK)); cy++) {
+            for (let cx = cx0; cx <= cx1; cx++) {
+              const c = chunkAt(z, cx, cy);
+              if (!c) continue;
+              const from = cy * CHUNK;
+              piece(c.faces, cx, from, Math.max(vr0, from), Math.min(vr1, from + CHUNK + CHUNK_PAD_BOTTOM), T);
+            }
+          }
+        }
+        drawFoes(yg, z, ox, oy, y => y >= r0 && y < r1 && test(y));
         yg.globalCompositeOperation = "destination-in";
         yg.drawImage(lights[z], 0, 0);
         sg.drawImage(layer, 0, 0);
       };
       /** Enemies alone on level z, cut down to what you can see of it (those in front of you). */
-      const foesOnly = (z: number, test: (f: Foe) => boolean) => {
+      const foesOnly = (z: number, test: (y: number) => boolean) => {
         yg.globalCompositeOperation = "source-over";
         yg.clearRect(0, 0, W, H);
         drawFoes(yg, z, ox, oy, test);
@@ -1336,7 +1800,7 @@ export function Exploration({ journey, onEncounter, onExit }: {
       const split = Math.max(0, Math.min(WORLD.h, Math.floor(me.y)));
       // On your own level, enemies further down the screen than you go in front of you.
       for (let z = 0; z < LEVELS; z++) {
-        rows(z, 0, z <= base ? WORLD.h : split, f => z !== base || f.y <= me.y);
+        if (inSight[z]) rows(z, 0, z <= base ? WORLD.h : split, y => z !== base || y <= me.y);
         // Whatever lies below you is dimmed, more so the further down: it reads as depth.
         const below = Math.min(1, Math.max(0, me.alt - z));
         if (below > 0 && z < LEVELS - 1) {
@@ -1345,8 +1809,9 @@ export function Exploration({ journey, onEncounter, onExit }: {
         }
       }
       drawWalker(sg, fx, fy - BODY_ABOVE_FEET * T, T, me.facing, frame, true, (me.alt - me.ground) * RISE);
-      if (base < LEVELS) foesOnly(base, f => f.y > me.y);
-      for (let z = base + 1; z < LEVELS; z++) rows(z, split, WORLD.h);
+      if (base < LEVELS && inSight[base]) foesOnly(base, y => y > me.y);
+      for (let z = base + 1; z < LEVELS; z++) if (inSight[z]) rows(z, split, WORLD.h);
+      evictChunks();
 
       g.fillStyle = COLORS.void;
       g.fillRect(0, 0, W, H);
@@ -1373,6 +1838,10 @@ export function Exploration({ journey, onEncounter, onExit }: {
   return (
     <div className="explore">
       <canvas ref={canvasRef} className="explore-canvas" />
+      {near && !paused && !entering && (
+        <div className="explore-prompt"><kbd>E</kbd> Rest</div>
+      )}
+      {note && <div key={note.id} className="explore-note">{note.text}</div>}
       {entering && <div className="explore-fade" />}
       {paused && (
         <div className="result" role="dialog" aria-label="Paused">
