@@ -5,9 +5,8 @@
  * Enemies may pick any action, even one that will stagger them (an attack they can't afford).
  * Only a kind written with an explicit condition avoids that.
  */
-
-import type { ArmorTier, CombatState, Enemy, Rng, TurnReport, WeaponTier } from "./combat";
 import { parsePattern, type Pattern } from "./patterns";
+import type { ArmorTier, CombatState, Enemy, Rng, TurnReport, WeaponTier } from "./types";
 
 export interface EnemyKind {
   name: string;

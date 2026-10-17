@@ -1,12 +1,12 @@
 /**
- * The Warden's arena: sleepwalkers sealed into the floor and into wax walls around it, each
+ * arena.tsx — the Warden's arena: sleepwalkers sealed into the floor and into wax walls around it, each
  * with a candle stub on its head. Unlit at first; once the Warden's flame breaks free (phase
  * two) they burn for the rest of the fight. Drawn like figures: in a 100 × 120 box, feet (the
  * base) on y = 114.
  */
-import type { Vec } from "./scene";
+import type { Vec } from "../render/camera";
+import type { Pt } from "../render/geom";
 
-type Pt = readonly [number, number];
 
 interface ArenaProp {
   id: string;
@@ -18,6 +18,7 @@ interface ArenaProp {
 
 /** Where the arena is centered (the fight starts with you at the origin, facing +z). */
 const CENTER: Vec = { x: 3, z: 3 };
+
 const around = (r: number, deg: number): Vec => ({
   x: CENTER.x + Math.sin((deg * Math.PI) / 180) * r,
   z: CENTER.z + Math.cos((deg * Math.PI) / 180) * r,

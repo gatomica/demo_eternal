@@ -39,14 +39,15 @@
  * 3. Safety net: if none of the stance's actions are available, the enemy acts as if it just
  *    Recovered and picks again from the Recover stances.
  */
-
-import type { ActionType, WeaponTier } from "./combat";
+import type { ActionType, WeaponTier } from "./types";
 
 export const ACTION_KINDS: ActionType[] = ["attack", "block", "maneuver", "rest"];
+
 /** Which kind of action counts as which: Attack, Defense (Block and Maneuver) or Rest. */
 export const KIND_GROUP: Record<ActionType, "attack" | "defense" | "rest"> = {
   attack: "attack", block: "defense", maneuver: "defense", rest: "rest",
 };
+
 const WEIGHTS: WeaponTier[] = ["baseline", "light", "normal", "heavy"];
 
 export interface ActionDef {

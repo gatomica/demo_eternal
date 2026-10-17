@@ -1,5 +1,5 @@
 /**
- * scene.ts — the battlefield's floor plan and camera. Pure math, no React, no rules.
+ * camera.ts — the battlefield's floor plan and camera. Pure math, no React, no rules.
  *
  * Everyone stands somewhere on a flat floor, measured in meters: `x` to the side, `z` ahead.
  * A camera stands on that floor too, at a fixed eye height, looking in a direction (`yaw`).
@@ -24,21 +24,31 @@ export interface Cam { x: number; z: number; yaw: number }
 
 /** Focal length, as a multiple of screen height. Larger = flatter perspective. */
 const FOCAL = 1.1;
+
 /** Eye height of the camera, in meters. */
 const EYE_HEIGHT = 1.26;
+
 /** Where the horizon sits, as a share of screen height from the top. */
 export const HORIZON = 0.507;
+
 /** Anything closer to the camera than this (meters) isn't drawn. */
 export const NEAR = 0.5;
+
 /** How tall a standing figure is, in meters. */
 export const FIGURE_HEIGHT = 1.8;
 
 const forward = (yaw: number): Vec => ({ x: Math.sin(yaw), z: Math.cos(yaw) });
+
 export const right = (yaw: number): Vec => ({ x: Math.cos(yaw), z: -Math.sin(yaw) });
+
 const add = (a: Vec, b: Vec, k = 1): Vec => ({ x: a.x + b.x * k, z: a.z + b.z * k });
+
 export const sub = (a: Vec, b: Vec): Vec => ({ x: a.x - b.x, z: a.z - b.z });
+
 const dot = (a: Vec, b: Vec) => a.x * b.x + a.z * b.z;
+
 const dist = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.z - b.z);
+
 /** The yaw that faces along a direction. */
 export const yawOf = (d: Vec) => Math.atan2(d.x, d.z);
 
@@ -78,6 +88,7 @@ export function project(cam: Cam, p: Vec, w: number, h: number): Projected {
 
 /** The planning camera relative to the player: this far behind them, and this far to their right. */
 const CAMERA_BEHIND = 3.0;
+
 const CAMERA_SIDE = 1.4;
 
 /** Where the two lines stand relative to the player: sideways and ahead (meters), and spacing within a line. */
@@ -169,3 +180,44 @@ export const lerpCam = (a: Cam, b: Cam, t: number): Cam => ({
   z: a.z + (b.z - a.z) * t,
   yaw: lerpAngle(a.yaw, b.yaw, t),
 });
+
+/* ============================================================
+ * Figures on screen, and the shots the scene moves between
+ * ============================================================ */
+
+/** The figure's drawing (100 × 120 box) spans this many units from head to feet. */
+const FIGURE_UNITS = 102;
+
+const FEET_Y = 114;
+
+/**
+ * Where a figure standing at `p` appears on screen: its 100 × 120 drawing box, and its depth.
+ * `scale`: how much bigger than a normal figure (the Warden towers over everyone).
+ */
+export function figureBox(cam: Cam, p: Vec, w: number, h: number, scale = 1) {
+  const { sx, sy, ppm, depth } = project(cam, p, w, h);
+  const unit = (ppm * FIGURE_HEIGHT * scale) / FIGURE_UNITS;
+  return { x: sx - 50 * unit, y: sy - FEET_Y * unit, w: 100 * unit, h: 120 * unit, depth };
+}
+
+/**
+ * How the camera is placed: a fixed spot, or riding along behind someone's shoulder (the planning
+ * shot), facing `yaw`. A riding camera stays locked to its figure while it moves, so the figure
+ * holds still on screen and the world turns around it.
+ */
+export type ShotCamera = Cam | { follow: string; yaw: number };
+
+/** Where everyone should be and where the camera should look, and how long to take getting there. */
+export interface SceneShot {
+  positions: Record<string, Vec>;
+  camera: ShotCamera;
+  ms: number;
+  /** Bumped on every new shot, so the scene knows to start moving. */
+  version: number;
+}
+
+/** The camera a shot ends on. */
+export function shotCamera(shot: SceneShot): Cam {
+  const c = shot.camera;
+  return "follow" in c ? planningCamera(shot.positions[c.follow], c.yaw) : c;
+}
