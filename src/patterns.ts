@@ -75,6 +75,8 @@ export interface Pattern {
   label: string;
   actions: Map<string, ActionDef>;
   stances: StanceDef[];
+  /** The stances that can follow each action ("recover" included), worked out once. */
+  after: Map<string, StanceDef[]>;
 }
 
 export class PatternError extends Error {}
@@ -155,7 +157,13 @@ export function parsePattern(label: string, src: string): Pattern {
   }
   if (new Set(stances.map(s => s.name.toLowerCase())).size !== stances.length) fail(`a stance name is used twice`);
 
-  return { label, actions, stances };
+  // What can follow each action, looked up every time an enemy picks.
+  const after = new Map<string, StanceDef[]>();
+  for (const key of ["recover", "second phase", ...actions.keys()]) {
+    const next = stances.filter(s => s.from === "all" || s.from.has(key));
+    if (next.length) after.set(key, next);
+  }
+  return { label, actions, stances, after };
 }
 
 /** What happened with the last action, as far as picking the next stance is concerned. */
@@ -170,8 +178,11 @@ const pick = <T>(items: readonly T[], rng: () => number): T => items[Math.floor(
 /** The stances that can follow the last action (or the Recover stances at the start of a fight). */
 export function nextStances(p: Pattern, last: PatternMemory | null): StanceDef[] {
   const key = last && last.outcome === "done" && last.action ? last.action.toLowerCase() : "recover";
-  const out = p.stances.filter(s => s.from === "all" || s.from.has(key));
-  return out.length ? out : nextStances(p, null);
+  const known = p.after.get(key);
+  if (known) return known;
+  // Not an action of its own (or one nothing follows): only the "All >" stances, or else Recover's.
+  const any = p.stances.filter(s => s.from === "all");
+  return any.length ? any : p.after.get("recover")!;
 }
 
 /** Within a stance: a kind evenly among the available ones, then an action of that kind evenly. */

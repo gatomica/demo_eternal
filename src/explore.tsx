@@ -925,7 +925,15 @@ function cornerNudge(me: Walker, axis: "x" | "y", dir: number, step: number): nu
  * ============================================================ */
 
 /** Tiles sight travels over on level z: walkable ones, plus the space above stairs from below. */
-const seeThrough = (z: number, x: number, y: number) => walkable(tileAt(z, x, y)) || isRamp(tileAt(z - 1, x, y));
+const seesThrough = (z: number, x: number, y: number) => walkable(tileAt(z, x, y)) || isRamp(tileAt(z - 1, x, y));
+/** The same, worked out once per tile when the map loads (sight asks it many times a frame). */
+const SEE = WORLD.levels.map((_, z) => {
+  const out = new Uint8Array(WORLD.w * WORLD.h);
+  for (let y = 0; y < WORLD.h; y++) for (let x = 0; x < WORLD.w; x++) if (seesThrough(z, x, y)) out[y * WORLD.w + x] = 1;
+  return out;
+});
+const seeThrough = (z: number, x: number, y: number) =>
+  z >= 0 && z < LEVELS && inside(x, y) ? SEE[z][y * WORLD.w + x] === 1 : seesThrough(z, x, y);
 
 /**
  * Per level, 1 for tiles in a narrow passage. A tile is open space if it's part of some 2x2
@@ -948,10 +956,11 @@ const NARROW = WORLD.levels.map((_, z) => {
  * negative where you can't see at all, counting down from VISION_RADIUS with distance.
  * Sight spreads across your own level and, over the edge of a ledge, drops down onto the floor
  * below, carrying only GAP_PEEK further (you glimpse what's down there, like around a corner).
+ * Worked out into `left` (one array per level), if given.
  */
-function sight(px: number, py: number, alt: number) {
+function sight(px: number, py: number, alt: number, left = WORLD.levels.map(() => new Float32Array(WORLD.w * WORLD.h))) {
   const { w, h } = WORLD, N = w * h;
-  const left = WORLD.levels.map(() => new Float32Array(N).fill(-1));
+  for (const l of left) l.fill(-1);
   const sx = Math.floor(px), sy = Math.floor(py);
   const queue: number[] = [];
   const relax = (z: number, i: number, v: number) => {
@@ -1255,13 +1264,16 @@ export function Exploration({ journey, onEncounter, onExit }: {
   const nearRef = useRef<string | null>(null);
   const [near, setNear] = useState<string | null>(null);
   const [note, setNote] = useState<{ text: string; id: number } | null>(null);
+  useEffect(() => {
+    if (!note) return;
+    const t = window.setTimeout(() => setNote(cur => (cur?.id === note.id ? null : cur)), REST_NOTE_MS);
+    return () => window.clearTimeout(t);
+  }, [note]);
   const rest = () => {
     const id = nearRef.current;
     if (!id) return;
     restedAt.current = id;
-    const n = { text: "You rest by the hooded figure. Should you fall, you will wake here.", id: Date.now() };
-    setNote(n);
-    window.setTimeout(() => setNote(cur => (cur?.id === n.id ? null : cur)), REST_NOTE_MS);
+    setNote({ text: "You rest by the hooded figure. Should you fall, you will wake here.", id: Date.now() });
   };
 
   const pauseOptions = [
@@ -1347,6 +1359,9 @@ export function Exploration({ journey, onEncounter, onExit }: {
     let fadeTimer = 0;
     // What you could see last frame; enemies see you exactly where you see them.
     let seenLast: Float32Array[] | null = null;
+    // Sight only changes when you move: worked out again then, into the same arrays.
+    const seen = WORLD.levels.map(() => new Float32Array(WORLD.w * WORLD.h));
+    let seenFrom = "";
     // Step counts toward you, redone whenever you step onto a new tile.
     let toYou: { key: string; steps: Int16Array | null } = { key: "", steps: null };
     const stepsToYou = () => {
@@ -1399,8 +1414,10 @@ export function Exploration({ journey, onEncounter, onExit }: {
 
     const fit = () => {
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.round(canvas.clientWidth * dpr);
-      canvas.height = Math.round(canvas.clientHeight * dpr);
+      const width = Math.round(canvas.clientWidth * dpr), height = Math.round(canvas.clientHeight * dpr);
+      if (width === canvas.width && height === canvas.height && T) return;
+      canvas.width = width;
+      canvas.height = height;
       for (const c of [scene, layer, maskCanvas, ...lights]) { c.width = canvas.width; c.height = canvas.height; }
       const next = Math.max(8, Math.round(Math.min(canvas.height / TILES_TALL, canvas.width / 13)));
       if (next !== T) {
@@ -1651,7 +1668,12 @@ export function Exploration({ journey, onEncounter, onExit }: {
       // - Levels above you: seen only through your own level's sight, held at your own eye
       //   height. From below you only glimpse their near edge, and more of them comes into view
       //   as you climb toward them.
-      const seenAll = sight(me.x, me.y, me.alt);
+      const from = `${me.x},${me.y},${me.alt}`;
+      if (from !== seenFrom) {
+        sight(me.x, me.y, me.alt, seen);
+        seenFrom = from;
+      }
+      const seenAll = seen;
       seenLast = seenAll;
       const ownLevel = Math.max(0, Math.min(LEVELS - 1, Math.round(me.alt)));
       const strip = Math.ceil(T / 12) + 1, rise = RISE * T, fadeOver = VISION_RADIUS * (1 - VISION_FULL);

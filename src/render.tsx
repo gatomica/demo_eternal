@@ -10,7 +10,7 @@
  *  - An enemy's weapon arm is the near arm, so it's drawn in front, and the figure is mirrored.
  * Gear attaches to joints: the weapon to the weapon hand, armor to the torso, shoulders and head.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { ArmorTier, Enemy, Fighter, WeaponTier } from "./combat";
 import { ENEMY_KINDS } from "./bestiary";
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "./arena";
@@ -498,7 +498,8 @@ function Prop({ prop }: { prop: NonNullable<Skeleton["prop"]> }) {
   );
 }
 
-export function StickFigure({ view, pose, weapon, armor, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, encased }: StickFigureProps) {
+/** A figure, redrawn only when something about its look changes (the scene redraws every frame). */
+export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, encased }: StickFigureProps) {
   const s = ALL_POSES[pose];
   const front = view === "front";
   if (variant === "warden" && "ball" in s) {
@@ -570,7 +571,7 @@ export function StickFigure({ view, pose, weapon, armor, title, variant, arm, li
       </g>
     </svg>
   );
-}
+});
 
 /* ============================================================
  * Health bar
@@ -655,8 +656,8 @@ export function HealthBar({ fighter, before, className, mirrored }: {
       {/* The trail only shows health that was just lost, in a light red, sliding away. */}
       <span className="bar-layer bar-trail"><i className="bar-lost" style={{ width: barPct(trail.hp, maxHP) }} /></span>
       <span className="bar-layer bar-now"><Segments v={now} maxHP={maxHP} /></span>
-      {flash > 0 && <span key={flash} className="bar-flash" />}
-      {shatter > 0 && <Shards key={shatter} count={8} small />}
+      {flash > 0 && <span key={`flash-${flash}`} className="bar-flash" />}
+      {shatter > 0 && <Shards key={`shatter-${shatter}`} count={8} small />}
     </div>
   );
 }
@@ -767,19 +768,12 @@ export interface Projectile {
   origin?: readonly [number, number];
 }
 
-/** The thrown thing itself, drawn pointing right (the scene rotates it to its flight). */
-function ProjectileShape({ kind }: { kind: Projectile["kind"] }) {
-  if (kind === "wax") {
-    return (
-      <svg viewBox="-10 -10 20 20" className="projectile-svg">
-        <circle cx={0} cy={0} r={6} className="fig-wax-head" />
-        <path d="M-6 0 Q-10 1 -9 4" className="fig-beard-strand" />
-      </svg>
-    );
-  }
-  // A fan of flame lying flat, like the swat's sweep: a wide, level crescent seen at an angle.
-  // It's headed a little toward the player as well as the camera, so its bow leans left and its
-  // right end dips. Flame tongues rise from its back edge.
+/**
+ * A fan of flame lying flat, like the swat's sweep: a wide, level crescent seen at an angle.
+ * It's headed a little toward the player as well as the camera, so its bow leans left and its
+ * right end dips. Flame tongues rise from its back edge.
+ */
+const FAN = (() => {
   const L: Pt = [-48, -1], R: Pt = [48, 5];
   const back: Pt = [-14, 8], front: Pt = [-14, 26];
   const at = (c: Pt, t: number): Pt => [
@@ -793,10 +787,23 @@ function ProjectileShape({ kind }: { kind: Projectile["kind"] }) {
     return `M${a[0]} ${a[1] + 3} Q${a[0] + 1} ${m[1] - h * 0.55} ${m[0] + 1.5} ${m[1] - h} Q${b[0] - 0.5} ${m[1] - h * 0.4} ${b[0]} ${b[1] + 3} Z`;
   });
   const band = (f: Pt, b: Pt) => `M${L[0]} ${L[1]} Q${f[0]} ${f[1]} ${R[0]} ${R[1]} Q${b[0]} ${b[1]} ${L[0]} ${L[1]} Z`;
+  return { tongues, band: band(front, back) };
+})();
+
+/** The thrown thing itself, drawn pointing right (the scene rotates it to its flight). */
+function ProjectileShape({ kind }: { kind: Projectile["kind"] }) {
+  if (kind === "wax") {
+    return (
+      <svg viewBox="-10 -10 20 20" className="projectile-svg">
+        <circle cx={0} cy={0} r={6} className="fig-wax-head" />
+        <path d="M-6 0 Q-10 1 -9 4" className="fig-beard-strand" />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="-50 -18 100 36" className="projectile-svg is-fan">
-      {tongues.map((d, i) => <path key={i} d={d} className="fig-burst-outer" />)}
-      <path d={band(front, back)} className="fig-burst-outer" />
+      {FAN.tongues.map((d, i) => <path key={i} d={d} className="fig-burst-outer" />)}
+      <path d={FAN.band} className="fig-burst-outer" />
       <path d={`M-38 3 Q-14 21 38 7 Q-14 12 -38 3 Z`} className="fig-burst-inner" />
     </svg>
   );
@@ -876,7 +883,9 @@ function Shockwave({ center, reach, toward, flame, proj, impact, full }: {
   const layers = new Map<number, typeof flames>();
   for (const f of flames) {
     const z = 1000 - Math.round(f.depth * 10);
-    layers.set(z, [...(layers.get(z) ?? []), f]);
+    const layer = layers.get(z);
+    if (layer) layer.push(f);
+    else layers.set(z, [f]);
   }
   return (
     <>
@@ -968,8 +977,11 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
   arena?: boolean;
   /** The sealed sleepwalkers' candles (and the waxed remains') burn. */
   arenaLit?: boolean;
-  /** The Warden's phase-two scene: who, how far in (ms), and a seed for its randomness. */
-  ignite?: { who: string; t: number; seed: number };
+  /**
+   * The Warden's phase-two scene: who, when it started (performance.now(); not yet, if unset),
+   * and a seed for its randomness.
+   */
+  ignite?: { who: string; start?: number; seed: number };
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -1036,6 +1048,21 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shot.version]);
 
+  // The phase-two scene animates every frame until it ends.
+  const igniteStart = ignite?.start;
+  useEffect(() => {
+    if (igniteStart === undefined) return;
+    let raf = 0;
+    const tick = () => {
+      setFrame(f => f + 1);
+      if (performance.now() - igniteStart < IGNITE.end) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [igniteStart]);
+  /** How far into the phase-two scene it is, in ms. */
+  const igniteT = igniteStart === undefined ? 0 : performance.now() - igniteStart;
+
   const { w, h } = size;
   const c = camNow();
   const placed = figures
@@ -1060,7 +1087,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
   const toScreen = (box: { x: number; y: number; w: number; h: number }, p: readonly [number, number], mirror: boolean): Pt =>
     [box.x + (box.w * (mirror ? 100 - p[0] : p[0])) / 100, box.y + (box.h * p[1]) / 120];
   // Lit for good once the arena is lit, or from the moment his flare relights them.
-  const propLit = !!arenaLit || (!!ignite && ignite.t >= IGNITE.flare);
+  const propLit = !!arenaLit || (!!ignite && igniteT >= IGNITE.flare);
   // Every flame the phase-two scene draws on, in screen space: the waxed, the sealed sleepwalkers,
   // and a ring of unseen ones beyond the edges of the screen.
   const igniter = ignite && placed.find(x => x.f.id === ignite.who);
@@ -1180,7 +1207,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
         );
       })()}
       {ignite && igniter && (() => {
-        const t = ignite.t;
+        const t = igniteT;
         const [hx, hy] = toScreen(igniter.box, WARDEN_POSES["wd-idle"].freeArm.hand, igniter.f.view === "front");
         const drawn = sources.filter(src => t >= src.draw).length / Math.max(1, sources.length);
         const flame = (key: string, at: Pt, sz: number, cls = "") => (

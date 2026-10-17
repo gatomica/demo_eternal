@@ -552,7 +552,8 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
   const problem = validateAction(prev, action);
   if (problem) throw new Error(problem);
 
-  const s: CombatState = structuredClone(prev);
+  // Only the fighters change during a turn (the last turn's steps are replaced at the end).
+  const s: CombatState = { ...prev, player: structuredClone(prev.player), enemies: structuredClone(prev.enemies), lastTurn: [] };
   const p = s.player;
   const cfg = s.config;
   const alive = s.enemies.filter(e => e.alive);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ARMOR,
   ENCOUNTERS,
@@ -312,7 +312,7 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
   const [playSignal, setPlaySignal] = useState(0);
   const initial = useMemo(() => viewerFight(kindName), [kindName]);
   const override = useCallback((s: CombatState) => applyShow(s, show), [show]);
-  const shown = applyShow(initial, show);
+  const shown = useMemo(() => applyShow(initial, show), [initial, show]);
   const toggles = [LINE_TOGGLE, ...(VIEWER_TOGGLES[kindName] ?? [])];
   const flip = (key: string) =>
     setShow(prev => {
@@ -650,6 +650,11 @@ const phaseFor = (st: Step | undefined): Playback["phase"] => (phaseTwoOf(st) ? 
 /** How long the arena shows before a fight's opening scene starts, in ms. */
 const OPENING_LEAD_IN = 1200;
 
+/** The phase-two scene's light starts dying this long in (a moment after it's shown, so it fades). */
+const IGNITE_DARK = 40;
+/** The moments of the phase-two scene that change the screen around it (see IGNITE). */
+const IGNITE_MARKS = [IGNITE_DARK, IGNITE.kindle, IGNITE.flare];
+
 /**
  * Usurp Flame's scene, before the step that takes the flame plays out: the light dies around the
  * two of them (only the target's flame still burning) as the camera settles between them; he
@@ -662,7 +667,8 @@ type UsurpStage = Exclude<keyof typeof USURP_STAGES, "done">;
 
 /** The fight as it stood after a given step: the turn's starting state with that step's bars and positions. */
 function viewAt(from: CombatState, after: Step["after"]): CombatState {
-  const v = structuredClone(from);
+  // Only the fighters' own numbers change: copy those, share the rest.
+  const v: CombatState = { ...from, player: { ...from.player }, enemies: from.enemies.map(e => ({ ...e })) };
   for (const f of [v.player, ...v.enemies]) {
     const a = after[f.id];
     if (!a) continue;
@@ -677,6 +683,63 @@ function viewAt(from: CombatState, after: Step["after"]): CombatState {
     if ("fate" in f && a.fate) f.fate = a.fate;
   }
   return v;
+}
+
+/** Where things happen in a turn's steps, by fighter id, looked up once per turn. */
+interface TurnIndex {
+  /** The step where its attack lands. */
+  strike: Map<string, number>;
+  /** The step where its Rest goes through (not cut short). */
+  rest: Map<string, number>;
+  /** The steps where it's attacked (whether the blow lands, is blocked or dodged). */
+  targeted: Map<string, number[]>;
+  /** The first step where it dodges an attack, or its own Maneuver happens. */
+  dodge: Map<string, number>;
+  /** The first step where a blow lands on it cleanly. */
+  hit: Map<string, number>;
+  /** Its Rest was broken by a blow. */
+  interrupted: Set<string>;
+  /** The step where it takes a flame (Usurp Flame). */
+  usurp: Map<string, number>;
+  /** The first step where it's back on its feet: its forced Rest recovers, or its revive lands. */
+  backUp: Map<string, number>;
+  /** The step where it enters phase two. */
+  phaseTwoBy: Map<string, number>;
+  /** The step where anyone enters phase two, or -1. */
+  phaseTwo: number;
+}
+
+function indexTurn(steps: Step[]): TurnIndex {
+  const ix: TurnIndex = {
+    strike: new Map(), rest: new Map(), targeted: new Map(), dodge: new Map(), hit: new Map(),
+    interrupted: new Set(), usurp: new Map(), backUp: new Map(), phaseTwoBy: new Map(), phaseTwo: -1,
+  };
+  const first = (m: Map<string, number>, id: string, i: number) => { if (!m.has(id)) m.set(id, i); };
+  steps.forEach((st, i) => {
+    for (const ev of st.events) {
+      if (ev.kind === "attack") {
+        first(ix.strike, ev.attacker, i);
+        const hits = ix.targeted.get(ev.target) ?? [];
+        if (hits[hits.length - 1] !== i) hits.push(i);
+        ix.targeted.set(ev.target, hits);
+        if (ev.result === "dodged") first(ix.dodge, ev.target, i);
+        if (ev.result === "hit") first(ix.hit, ev.target, i);
+      } else if (ev.kind === "maneuver") first(ix.dodge, ev.who, i);
+      else if (ev.kind === "rest") {
+        if (ev.result === "rested") first(ix.rest, ev.who, i);
+        if (ev.result === "interrupted") ix.interrupted.add(ev.who);
+        if (ev.result === "recovered") first(ix.backUp, ev.who, i);
+      } else if (ev.kind === "revive") first(ix.backUp, ev.who, i);
+    }
+    const usurp = usurpOf(st);
+    if (usurp) first(ix.usurp, usurp.who, i);
+    const p2 = phaseTwoOf(st);
+    if (p2) {
+      first(ix.phaseTwoBy, p2.who, i);
+      if (ix.phaseTwo < 0) ix.phaseTwo = i;
+    }
+  });
+  return ix;
 }
 
 interface Fx {
@@ -783,10 +846,12 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
   const [paused, setPaused] = useState(false);
   /** Usurp Flame's scene, while it plays (see USURP_STAGES). */
   const [usurpStage, setUsurpStage] = useState<UsurpStage | null>(null);
-  /** The Warden's phase-two scene, while it plays: who, when it started, and how far in it is. */
-  const [igniteState, setIgniteState] = useState<{ who: string; start: number; seed: number } | null>(null);
-  const setIgnite = (v: { who: string; start: number; seed: number } | null) => { setIgniteT(0); setIgniteState(v); };
-  const [igniteT, setIgniteT] = useState(0);
+  /**
+   * The Warden's phase-two scene, while it plays: who, when it started, and the last of its
+   * moments it has reached (see IGNITE_MARKS). The scene itself animates every frame on its own.
+   */
+  const [igniteState, setIgniteState] = useState<{ who: string; start: number; seed: number; at: number } | null>(null);
+  const setIgnite = (v: { who: string; start: number; seed: number } | null) => setIgniteState(v && { ...v, at: 0 });
   const [pauseIndex, setPauseIndex] = useState(0);
   const busy = playback !== null;
   const forced = forcedAction(fight);
@@ -797,8 +862,12 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
   const step = playback?.steps[playback.index];
   const impact = playback?.phase === "impact";
   // The fight just before this step, so a bar that appears mid-turn still animates from it.
-  const prevView = playback ? (playback.index > 0 ? viewAt(playback.from, playback.steps[playback.index - 1].after) : playback.from) : undefined;
-  const view = playback && step ? (impact ? viewAt(playback.from, step.after) : prevView!) : fight;
+  const prevView = useMemo(
+    () => (playback ? (playback.index > 0 ? viewAt(playback.from, playback.steps[playback.index - 1].after) : playback.from) : undefined),
+    [playback],
+  );
+  const stepView = useMemo(() => (playback?.phase === "impact" ? viewAt(playback.from, playback.steps[playback.index].after) : undefined), [playback]);
+  const view = playback && step ? (impact ? stepView! : prevView!) : fight;
   const fx = effectsOf(impact ? step : undefined, playback?.action?.type === "maneuver");
   const stepKey = playback ? `${playback.from.turn}-${playback.index}-${playback.phase}` : "rest";
   const p = view.player;
@@ -1040,15 +1109,18 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
 
   // The model viewer's Play: a turn where you only Rest, so the enemy's action plays on its own.
   // Against a Block or a Maneuver you attack instead, so there's something to block or dodge.
-  const lastSignal = useRef(playSignal);
-  useEffect(() => {
-    if (playSignal === lastSignal.current) return;
-    lastSignal.current = playSignal;
+  const playSignalled = useEffectEvent(() => {
     const foe = fight.enemies.find(e => e.alive);
     // (Not against a fixed rule like Usurp Flame: that plays on its own.)
     const fixedRule = !!foe && !!ENEMY_KINDS[foe.kind]?.fixedActions?.includes(foe.intent.action ?? "");
     if (playing && !busy) play(!fixedRule && (attackOnPlay || foe?.intent.type === "block" || foe?.intent.type === "maneuver") ? { type: "attack", target: foe!.id } : { type: "rest" });
   });
+  const lastSignal = useRef(playSignal);
+  useEffect(() => {
+    if (playSignal === lastSignal.current) return;
+    lastSignal.current = playSignal;
+    playSignalled();
+  }, [playSignal]);
 
   // The phase-two scene: started by the step where he enters phase two (or, in the model viewer,
   // by switching him to it), ticking until it ends.
@@ -1065,23 +1137,22 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
       if (!playback && was === false && now && e.kind === "warden") setIgnite({ who: e.id, start: performance.now(), seed: Math.random() * 100 });
       phaseTwoBefore.current[e.id] = now;
     }
-  });
+  }, [fight, playback]);
+  // The screen only changes at the scene's few moments (the dark falls, he stands, it flares), so
+  // it only updates then; at the end, the step itself plays.
+  const igniteStart = igniteState?.start;
   useEffect(() => {
-    if (!igniteState) return;
-    const ignite = igniteState;
-    let raf = 0;
-    const tick = () => {
-      const t = performance.now() - ignite.start;
-      setIgniteT(t);
-      if (t < IGNITE.end) raf = requestAnimationFrame(tick);
-      else {
-        setIgnite(null);
-        setPlayback(pb => (pb && pb.phase === "ignite" ? { ...pb, phase: "impact" } : pb));
-      }
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [igniteState]);
+    if (igniteStart === undefined) return;
+    const since = performance.now() - igniteStart;
+    const timers = IGNITE_MARKS.map(at =>
+      window.setTimeout(() => setIgniteState(s => s && s.start === igniteStart ? { ...s, at } : s), Math.max(0, at - since)),
+    );
+    timers.push(window.setTimeout(() => {
+      setIgniteState(null);
+      setPlayback(pb => (pb && pb.phase === "ignite" ? { ...pb, phase: "impact" } : pb));
+    }, IGNITE.end - since));
+    return () => timers.forEach(t => window.clearTimeout(t));
+  }, [igniteStart]);
   // Until the scene's state is set (an effect, a render late), it's already as good as started:
   // so his new form never shows for that one frame.
   const pendingWho = igniteState
@@ -1091,8 +1162,9 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
       : !playback
         ? fight.enemies.find(e => e.kind === "warden" && e.flags.phase2 && phaseTwoBefore.current[e.id] === false)?.id
         : undefined;
-  const ignite = igniteState ?? (pendingWho ? { who: pendingWho, start: 0, seed: 0 } : null);
-  const igniteNow = igniteState ? igniteT : 0;
+  const ignite = igniteState ?? (pendingWho ? { who: pendingWho, start: undefined, seed: 0 } : null);
+  /** How far into the scene it is, as the last of IGNITE_MARKS reached (0 before it starts). */
+  const igniteNow = igniteState ? igniteState.at : 0;
 
   // Usurp Flame's scene: its stages on a timer, then the step itself plays.
   useEffect(() => {
@@ -1118,11 +1190,8 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
         const index = pb.index + 1;
         if (index < pb.steps.length) return setPlayback({ ...pb, index, phase: phaseFor(pb.steps[index]) });
         // Anyone who dodged is still walking to their new spot: they keep their pose until there.
-        const walking = { ...dodgers.current };
-        if (Object.keys(walking).length) {
-          setWalkOff(walking);
-          window.setTimeout(() => setWalkOff(null), NUDGE_MS);
-        }
+        const walking = lastDodgers.current;
+        if (Object.keys(walking).length) setWalkOff(walking);
         onTurnPlayed?.(fightRaw); // same render as the playback ending, so nothing flickers
         setPlayback(null);
       },
@@ -1132,11 +1201,12 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
   }, [playback, paused]);
 
   // A stagger or a revive costs you the turn: show it, then play it out on its own.
+  const playForced = useEffectEvent(() => play({ type: "rest" }));
   useEffect(() => {
     if (!playing || !forced || busy || paused) return;
-    const timer = window.setTimeout(() => play({ type: "rest" }), FORCED_TURN_MS);
+    const timer = window.setTimeout(playForced, FORCED_TURN_MS);
     return () => window.clearTimeout(timer);
-  });
+  }, [playing, forced, busy, paused]);
 
   const pauseOptions: { label: string; run: () => void }[] = [
     { label: "Resume", run: () => setPaused(false) },
@@ -1188,8 +1258,13 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
    * step its attack lands, and a neutral stance after. Anyone staggered goes down (player kneels,
    * enemies fall to the ground).
    */
-  const strikeStep = (id: string) =>
-    playback ? playback.steps.findIndex(st => st.events.some(ev => ev.kind === "attack" && ev.attacker === id)) : -1;
+  const turnSteps = playback?.steps;
+  const turnIx = useMemo(() => (turnSteps ? indexTurn(turnSteps) : null), [turnSteps]);
+  const stepOf = (m: "strike" | "rest" | "dodge" | "usurp" | "backUp" | "phaseTwoBy", id: string) => turnIx?.[m].get(id) ?? -1;
+  /** This turn's step `i` has played: it's behind us, or it's showing and its blow has landed. */
+  const reached = (i: number) => !!playback && i >= 0 && (playback.index > i || (playback.index === i && impact));
+  /** The step where someone's attack lands, or -1. */
+  const strikeStep = (id: string) => stepOf("strike", id);
   // A Rest's own pose only lasts a moment; then it already settles into its next stance.
   const [restOver, setRestOver] = useState<string | null>(null);
   useEffect(() => {
@@ -1198,15 +1273,19 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
     return () => window.clearTimeout(t);
   }, [stepKey]);
   /** The step where someone's Rest actually happened (not cut short), or -1. */
-  const restStep = (id: string) =>
-    playback ? playback.steps.findIndex(st => st.events.some(ev => ev.kind === "rest" && ev.who === id && ev.result === "rested")) : -1;
+  const restStep = (id: string) => stepOf("rest", id);
   /** Who is Maneuvering this turn (and in what pose), so they keep it while they walk off after it. */
-  const dodgers = useRef<Record<string, PoseName>>({});
+  const dodgers: Record<string, PoseName> = {};
+  const lastDodgers = useRef(dodgers);
+  useEffect(() => { lastDodgers.current = dodgers; });
   const [walkOff, setWalkOff] = useState<Record<string, PoseName> | null>(null);
-  const dodgersOf = useRef<unknown>(null);
-  if (playback && dodgersOf.current !== playback.from) { dodgersOf.current = playback.from; dodgers.current = {}; }
+  useEffect(() => {
+    if (!walkOff) return;
+    const t = window.setTimeout(() => setWalkOff(null), NUDGE_MS);
+    return () => window.clearTimeout(t);
+  }, [walkOff]);
   const track = (id: string, pose: PoseName): PoseName => {
-    if (playback && maneuvering(id) && dodgedBefore(id)) dodgers.current[id] = pose;
+    if (playback && maneuvering(id) && dodgedBefore(id)) dodgers[id] = pose;
     return pose;
   };
   /** Someone chose to Maneuver this turn (and it hasn't been turned into a forced Rest). */
@@ -1217,11 +1296,9 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
    * this one once it lands), or their own move has happened. From then on they stay in its pose.
    * (A blow that hits them instead doesn't: they didn't get out of the way.)
    */
-  const dodgedBefore = (id: string) =>
-    !!playback && playback.steps.some((st, i) => (i < playback.index || (i === playback.index && impact)) && st.events.some(ev => (ev.kind === "attack" && ev.target === id && ev.result === "dodged") || (ev.kind === "maneuver" && ev.who === id)));
+  const dodgedBefore = (id: string) => reached(stepOf("dodge", id));
   /** The steps where someone is attacked (whether it lands, is blocked or dodged). */
-  const targetedSteps = (id: string) =>
-    playback ? playback.steps.flatMap((st, i) => (st.events.some(ev => ev.kind === "attack" && ev.target === id) ? [i] : [])) : [];
+  const targetedSteps = (id: string) => turnIx?.targeted.get(id) ?? [];
   interface Poses {
     telegraph: PoseName; down: PoseName; windUp: PoseName; strike: PoseName; idle: PoseName; rested?: PoseName;
     /** The strike pose hands off to the next stance a moment in (REST_POSE_MS), its trails still fading. */
@@ -1257,9 +1334,7 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
   };
   const punching = p.weapon === "baseline";
   /** Your forced Rest (or revive) has landed this turn: you're back on your feet. */
-  const playerBackUp = !!playback && playback.steps.some((st, i) =>
-    (i < playback.index || (i === playback.index && impact)) &&
-    st.events.some(ev => (ev.kind === "rest" && ev.who === "player" && ev.result === "recovered") || (ev.kind === "revive" && ev.who === "player")));
+  const playerBackUp = reached(stepOf("backUp", "player"));
   const playerPose: PoseName = !playback && walkOff?.player ? walkOff.player : playback
     ? playbackPose("player", p.staggered, {
         // A forced turn kneels until the Rest (or revive) brings you back; then you're up.
@@ -1301,16 +1376,16 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
    * Blast puts his flame out).
    */
   const shownFlags = (e: Enemy) => {
-    const rested = !!playback && restStep(e.id) >= 0 && playback.index >= restStep(e.id) && (restStep(e.id) < playback.index || restOver === stepKey);
-    const struck = playback ? strikeStep(e.id) : -1;
+    const rest = restStep(e.id);
+    const rested = !!playback && rest >= 0 && playback.index >= rest && (rest < playback.index || restOver === stepKey);
+    const struck = strikeStep(e.id);
     // (A strike that leaves him staggered plays out with the look he had; it only changes as he drops.)
     const attacked = !!playback && struck >= 0 && (playback.index > struck || (playback.index === struck && impact && handsOff(e) && restOver === stepKey && standingAfter(e)));
-    const u = usurpStep(e.id);
-    const usurped = !!playback && u >= 0 && (playback.index > u || (playback.index === u && (playback.phase === "impact" || usurpStage === "reveal")));
+    const usurped = flameTaken(e);
     // Until his phase-two scene plays, he keeps the look he started the turn with: whatever the turn
     // went on to do, his new form only shows once the scene reveals it.
-    const p2 = playback ? playback.steps.findIndex(st => !!phaseTwoOf(st)) : -1;
-    if (playback && p2 >= 0 && playback.index <= p2 && !(playback.index === p2 && playback.phase === "impact")) return e.flags;
+    const p2 = turnIx?.phaseTwo ?? -1;
+    if (p2 >= 0 && !reached(p2)) return e.flags;
     // Once it has played, he's in his new form for good.
     if (phaseTwoDone(e)) return fight.enemies.find(x => x.id === e.id)?.flags ?? e.flags;
     return ((rested || attacked || usurped) && fight.enemies.find(x => x.id === e.id)?.flags) || e.flags;
@@ -1320,8 +1395,7 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
     // (Until all is dark, he still looks as he did; then no flame until it flares.)
     if (ignite && ignite.who === e.id) return igniteNow >= IGNITE.flare ? "scorched" : "out";
     // Having taken a flame and the light is coming back.
-    const u = usurpStep(e.id);
-    const usurped = !!playback && u >= 0 && (playback.index > u || (playback.index === u && (playback.phase === "impact" || usurpStage === "reveal")));
+    const usurped = flameTaken(e);
     const f = shownFlags(e);
     // Having taken a flame, his candle burns again, whatever else the turn did.
     if (usurped) return f.phase2 ? "scorched" : "lit";
@@ -1331,42 +1405,46 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
     return f.phase2 ? "scorched" : f.sealed ? "out" : "lit";
   };
   /** The step where this enemy took a flame (Usurp Flame), or -1. */
-  const usurpStep = (id: string) => (playback ? playback.steps.findIndex(st => usurpOf(st)?.who === id) : -1);
+  const usurpStep = (id: string) => stepOf("usurp", id);
+  /** It has taken a flame this turn, and the light is coming back (or has). */
+  const flameTaken = (e: Enemy) => {
+    const u = usurpStep(e.id);
+    return !!playback && u >= 0 && (playback.index > u || (playback.index === u && (impact || usurpStage === "reveal")));
+  };
   /** When each Warden's flame was last put out (lit → out), while its smoke still shows. */
   const [smoke, setSmoke] = useState<Record<string, number>>({});
-  const armsNow = useRef<Record<string, CandleArm>>({});
+  /** Each Warden's candle arm as shown now (filled in as the figures are laid out below). */
+  const arms: Record<string, CandleArm> = {};
   const armsBefore = useRef<Record<string, CandleArm>>({});
+  // Each puff clears a second after it started.
   useEffect(() => {
-    const now = armsNow.current, before = armsBefore.current;
-    const out = Object.keys(now).filter(id => before[id] === "lit" && now[id] === "out");
-    armsBefore.current = { ...now };
-    if (!out.length) return;
-    const t = performance.now();
-    setSmoke(prev => ({ ...prev, ...Object.fromEntries(out.map(id => [id, t])) }));
-    window.setTimeout(() => setSmoke(prev => Object.fromEntries(Object.entries(prev).filter(([, at]) => at !== t))), 1000);
-  });
+    const times = Object.values(smoke);
+    if (!times.length) return;
+    const oldest = Math.min(...times);
+    const t = window.setTimeout(() => setSmoke(prev => Object.fromEntries(Object.entries(prev).filter(([, at]) => at !== oldest))), oldest + 1000 - performance.now());
+    return () => window.clearTimeout(t);
+  }, [smoke]);
   /** The step where a blow breaks someone's Rest (they flinch, to the end of the turn), or -1. */
   const flinchStep = (e: Enemy) => {
-    if (!playback || e.intent.type !== "rest" || e.intent.forced) return -1;
-    const broken = playback.steps.some(st => st.events.some(ev => ev.kind === "rest" && ev.who === e.id && ev.result === "interrupted"));
-    if (!broken) return -1;
-    return playback.steps.findIndex(st => st.events.some(ev => ev.kind === "attack" && ev.target === e.id && ev.result === "hit"));
+    if (!turnIx || e.intent.type !== "rest" || e.intent.forced || !turnIx.interrupted.has(e.id)) return -1;
+    return turnIx.hit.get(e.id) ?? -1;
   };
   /** His phase-two scene has played this turn (he entered it, and the scene is over). */
-  const phaseTwoDone = (e: Enemy) => {
-    if (!playback) return false;
-    const p2 = playback.steps.findIndex(st => phaseTwoOf(st)?.who === e.id);
-    return p2 >= 0 && (playback.index > p2 || (playback.index === p2 && playback.phase === "impact"));
-  };
+  const phaseTwoDone = (e: Enemy) => reached(stepOf("phaseTwoBy", e.id));
+  /** Each enemy's pose, worked out once per render. */
+  const posesNow = new Map<string, PoseName>();
   const enemyPose = (e: Enemy): PoseName => {
+    if (!posesNow.has(e.id)) posesNow.set(e.id, poseOfEnemy(e));
+    return posesNow.get(e.id)!;
+  };
+  const poseOfEnemy = (e: Enemy): PoseName => {
     // After his phase-two scene, he's already standing in his next stance (Idle).
     if (phaseTwoDone(e) && !ignite) return settledPose(e);
     // The phase-two scene: he stands in Idle, unseen in the dark until his flare.
     // While the light fades he's still down; once all is dark he's already standing in Idle.
     if (ignite && ignite.who === e.id) return igniteNow >= IGNITE.kindle ? "wd-idle" : downPoseOf(e);
     // A Rest broken by a blow: it flinches as the blow lands, and stays flinching.
-    const fl = flinchStep(e);
-    if (playback && fl >= 0 && !e.staggered && (playback.index > fl || (playback.index === fl && impact))) return flinchPoseOf(e);
+    if (!e.staggered && reached(flinchStep(e))) return flinchPoseOf(e);
     // Usurp Flame: crouched to spring, the dash, then standing in Idle as the light returns.
     const u = usurpStep(e.id);
     if (playback && u >= 0 && playback.index >= u) {
@@ -1428,12 +1506,12 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
 
   // Everyone on the field: you, enemies still standing, and any falling during this step.
   // Once his flame has broken free, the arena's candles (and the waxed remains) burn for good.
-  const phaseTwoStep = playback ? playback.steps.findIndex(st => !!phaseTwoOf(st)) : -1;
+  const phaseTwoStep = turnIx?.phaseTwo ?? -1;
   const arenaLit = ignite
     ? igniteNow >= IGNITE.flare
     : (playback
       ? phaseTwoStep >= 0
-        ? playback.index > phaseTwoStep || (playback.index === phaseTwoStep && playback.phase === "impact")
+        ? reached(phaseTwoStep)
         : playback.from.enemies.some(e => e.kind === "warden" && e.flags.phase2)
       : fight.enemies.some(e => e.kind === "warden" && e.flags.phase2));
   const playerSealed = (p.waxed || !!p.encased) && p.staggered;
@@ -1471,7 +1549,7 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
         armor: e.armor,
         variant: ENEMY_KINDS[e.kind]?.variant,
         scale: ENEMY_KINDS[e.kind]?.scale,
-        arm: e.kind === "warden" ? (armsNow.current[e.id] = candleArmOf(e)) : undefined,
+        arm: e.kind === "warden" ? (arms[e.id] = candleArmOf(e)) : undefined,
         // Phase two's look (black wax, burning inside) from the moment all is dark.
         phase2Look: !!ignite && ignite.who === e.id && igniteNow >= IGNITE.kindle,
         flailFire: e.kind === "warden" && !!shownFlags(e).flaming,
@@ -1490,14 +1568,26 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
       })),
   ];
 
+  // A flame just put out (lit → out) leaves a puff of smoke.
+  const armsSig = Object.entries(arms).join(";");
+  useEffect(() => {
+    const before = armsBefore.current;
+    const out = Object.keys(arms).filter(id => before[id] === "lit" && arms[id] === "out");
+    armsBefore.current = { ...arms };
+    if (!out.length) return;
+    const t = performance.now();
+    setSmoke(prev => ({ ...prev, ...Object.fromEntries(out.map(id => [id, t])) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [armsSig]);
+
   return (
     <div className={`hud ${busy ? "is-cinematic" : ""}`} ref={hudRef}>
       <section className="stage" aria-label="Battlefield">
         <Scene
           figures={figures} shot={shot} projectiles={projectiles} usurpTrail={usurpTrail} arenaLit={arenaLit}
           arena={fight.enemies.some(e => e.kind === "warden")}
-          dark={ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < 40 ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark}
-          ignite={ignite ? { who: ignite.who, t: igniteNow, seed: ignite.seed } : undefined}
+          dark={ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark}
+          ignite={ignite ? { who: ignite.who, start: ignite.start, seed: ignite.seed } : undefined}
         />
       </section>
 
