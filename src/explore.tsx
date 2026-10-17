@@ -1013,7 +1013,7 @@ function sight(px: number, py: number, alt: number) {
  * never as fast as you walk. Touching one starts its fight.
  * ============================================================ */
 
-export type FoeKind = "waxed" | "sleepwalker" | "warden";
+type FoeKind = "waxed" | "sleepwalker" | "warden";
 
 /** An enemy waiting somewhere on the map, and the fight it starts when it reaches you. */
 export interface MapFoe {
@@ -1029,7 +1029,7 @@ export interface MapFoe {
 const WARDEN_FIGHT = ENCOUNTERS.find(e => e.id === "warden")!.enemies;
 
 /** The tutorial, roughly in the order you'll meet it. Levels: 0-1 below ground, 2 ground, 3-6 above. */
-export const MAP_FOES: MapFoe[] = [
+const MAP_FOES: MapFoe[] = [
   // Ground floor. In the hall: a lone waxed, then a pair further in.
   { id: "hall-waxed", kind: "waxed", home: { x: 17.5, y: 4.5, z: 2 }, fight: [{ kind: "waxed" }] },
   { id: "hall-pair", kind: "waxed", home: { x: 21.5, y: 11.5, z: 2 }, fight: [{ kind: "waxed" }, { kind: "waxed" }] },
@@ -1195,13 +1195,13 @@ const huddle = (n: number): [number, number][] =>
  * falling in a fight.
  * ============================================================ */
 
-export interface Keeper {
+interface Keeper {
   id: string;
   /** Where it stands (feet, in tiles on the world grid). You wake just in front of it. */
   at: { x: number; y: number; z: number };
 }
 
-export const KEEPERS: Keeper[] = [
+const KEEPERS: Keeper[] = [
   // Beside where you first wake.
   { id: "start", at: { x: 7.5, y: 2.6, z: 2 } },
   // Down in the cellar's cold room.

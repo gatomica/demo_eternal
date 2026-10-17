@@ -8,7 +8,7 @@ import type { Vec } from "./scene";
 
 type Pt = readonly [number, number];
 
-export interface ArenaProp {
+interface ArenaProp {
   id: string;
   kind: "floor" | "wall";
   pos: Vec;

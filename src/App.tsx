@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import {
   ARMOR,
   ENCOUNTERS,
-  ENEMY_KINDS,
   WEAPONS,
   createCombat,
   openingOf,
@@ -18,6 +17,7 @@ import {
   type Step,
   type WeaponTier,
 } from "./combat";
+import { ENEMY_KINDS } from "./bestiary";
 import { HealthBar, IGNITE, Scene, StickFigure, actionPose, asPose, downPoseOf, flinchPoseOf, figureBox, idlePoseOf, poseForIntent, strikePose, windUpPose, shotCamera, type BarValues, type PoseName, type Projectile, type SceneFigure, type SceneShot, type ShotCamera } from "./render";
 import {
   actionCamera,
@@ -469,7 +469,6 @@ function Journeying({ onExit }: { onExit: () => void }) {
         initial={fight.state}
         opening={fight.opening}
         onRetry={() => setFight(f => f && { ...f, id: f.id + 1, ...mapFight(enemiesOf(f.foes), loadout) })}
-        onChangeLoadout={() => {}}
         onExit={onExit}
         onDone={won => {
           // Won: back where you stood, the enemy gone. Lost: wake by the keeper you last rested
@@ -648,6 +647,9 @@ const usurpOf = (st: Step | undefined) => st?.events.find((ev): ev is Extract<St
 const phaseTwoOf = (st: Step | undefined) => st?.events.find((ev): ev is Extract<Step["events"][number], { kind: "phase" }> => ev.kind === "phase" && ev.phase === 2);
 const phaseFor = (st: Step | undefined): Playback["phase"] => (phaseTwoOf(st) ? "ignite" : usurpOf(st) ? "usurp" : isAttackStep(st) ? "approach" : "impact");
 
+/** How long the arena shows before a fight's opening scene starts, in ms. */
+const OPENING_LEAD_IN = 1200;
+
 /**
  * Usurp Flame's scene, before the step that takes the flame plays out: the light dies around the
  * two of them (only the target's flame still burning) as the camera settles between them; he
@@ -655,8 +657,6 @@ const phaseFor = (st: Step | undefined): Playback["phase"] => (phaseTwoOf(st) ? 
  * returns on him standing in Idle, the flame streaming from the target over him into his hand.
  * When each stage starts, in ms.
  */
-/** How long the arena shows before a fight's opening scene starts, in ms. */
-const OPENING_LEAD_IN = 1200;
 const USURP_STAGES = { focus: 0, dash: 900, black: 1500, reveal: 2000, done: 3000 } as const;
 type UsurpStage = Exclude<keyof typeof USURP_STAGES, "done">;
 
@@ -763,7 +763,8 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
   /** Called as a turn finishes playing, with the fight as it now stands. */
   onTurnPlayed?: (s: CombatState) => void;
   onRetry: () => void;
-  onChangeLoadout: () => void;
+  /** Back to the setup screen (not offered when unset). */
+  onChangeLoadout?: () => void;
   onExit: () => void;
   /** Set for fights from the map: when it's over, carry on (won or not) instead of retrying. */
   onDone?: (won: boolean) => void;
@@ -1140,7 +1141,7 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
   const pauseOptions: { label: string; run: () => void }[] = [
     { label: "Resume", run: () => setPaused(false) },
     { label: "Restart fight", run: onRetry },
-    ...(onDone ? [] : [{ label: changeLabel ?? "Change loadout", run: onChangeLoadout }]),
+    ...(onChangeLoadout ? [{ label: changeLabel ?? "Change loadout", run: onChangeLoadout }] : []),
     { label: "Main menu", run: onExit },
   ];
   const finish = () => onDone?.(fight.status === "won");
@@ -1295,10 +1296,10 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
   const restJustOver = (e: Enemy) =>
     !!playback && !!e.intent.restPose && restStep(e.id) === playback.index && restOver === stepKey;
   /**
-   * The Warden's candle arm. Once a Rest has gone through, or his attack has landed and he has
-   * moved on to his next stance, it already shows what that did to it (Flame Blast puts it out).
+   * The Warden's flags as shown. Once a Rest has gone through, his attack has landed and he has
+   * moved on to his next stance, or he has taken a flame, they already show what that did (Flame
+   * Blast puts his flame out).
    */
-  /** The Warden's flags as shown: once a Rest, his attack or a taken flame has played out, what it did. */
   const shownFlags = (e: Enemy) => {
     const rested = !!playback && restStep(e.id) >= 0 && playback.index >= restStep(e.id) && (restStep(e.id) < playback.index || restOver === stepKey);
     const struck = playback ? strikeStep(e.id) : -1;
@@ -1317,11 +1318,7 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
   const candleArmOf = (e: Enemy): CandleArm => {
     // The phase-two scene: no flame of his own until it flares, then his arm burns for good.
     // (Until all is dark, he still looks as he did; then no flame until it flares.)
-    if (ignite && ignite.who === e.id) {
-      if (igniteNow >= IGNITE.flare) return "scorched";
-      if (igniteNow >= IGNITE.kindle) return "out";
-      return "out";
-    }
+    if (ignite && ignite.who === e.id) return igniteNow >= IGNITE.flare ? "scorched" : "out";
     // Having taken a flame and the light is coming back.
     const u = usurpStep(e.id);
     const usurped = !!playback && u >= 0 && (playback.index > u || (playback.index === u && (playback.phase === "impact" || usurpStage === "reveal")));
@@ -1571,7 +1568,7 @@ function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDo
             ) : (
               <div className="setup-buttons">
                 <button className="hud-button" onClick={onExit}>Menu</button>
-                <button className="hud-button" onClick={onChangeLoadout}>Change loadout</button>
+                {onChangeLoadout && <button className="hud-button" onClick={onChangeLoadout}>Change loadout</button>}
                 <button className="commit" onClick={onRetry}>Retry</button>
               </div>
             )}
@@ -1655,7 +1652,7 @@ function TargetPanel({ enemy, before }: { enemy: Enemy; before?: BarValues }) {
   );
 }
 
-/** Clicking an enemy selects it and opens the wheel. */
+/** A row of choices, one of them picked. */
 function Picker<T extends string>({ label, value, options, labels, focused, onChange }: {
   label: string;
   value: T;

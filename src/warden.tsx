@@ -13,10 +13,10 @@
  * near one, so the flail sits behind his body and the candle arm in front of it.
  */
 import { createContext, useContext, useEffect, useId, useState, type ReactNode } from "react";
+import type { Skeleton } from "./render";
 
 /** The flail is on fire (phase two, after Clutch Arm): its head burns, its trails are flame. */
 const FlailFire = createContext(false);
-import type { Skeleton } from "./render";
 
 type Pt = readonly [number, number];
 export type CandleArm = "lit" | "out" | "scorched";
@@ -69,8 +69,6 @@ export interface WardenSkeleton extends Skeleton {
   chainInHand?: boolean;
   /** The chain held in the candle hand is pulled taut (straight), not sagging. */
   chainTaut?: boolean;
-  /** How far sideways the head hanging from the candle hand swings out (default straight down). */
-  ballSwing?: number;
   /** The head hanging from the candle hand is behind the arm, not in front of it. */
   headBehindArm?: boolean;
   /** His far (right) knee is raised under the cloak: the cloak's front runs flat over his thigh
@@ -85,8 +83,6 @@ export interface WardenSkeleton extends Skeleton {
   swat?: boolean;
   /** The candle hand goes behind his head (drawn under the hood). */
   armBehindHead?: boolean;
-  /** The candle arm goes behind his body altogether (under the cloak and the hood). */
-  armBehindCloak?: boolean;
   /** A swing trail behind the candle fist, from where it was drawn back to where it struck: in
    *  the flame's colours, or the wax's for a punch with the cold wax fist. */
   punchTrail?: boolean | "wax";
@@ -103,7 +99,7 @@ const pose = (
   body: Limbs,
   flail: { elbow: Pt; hand: Pt; ball: Pt },
   candle: { elbow: Pt; hand: Pt },
-  extra: Partial<Pick<WardenSkeleton, "spin" | "burst" | "tilt" | "handle" | "held" | "chainInHand" | "chainTaut" | "ballSwing" | "headBehindArm" | "kneeUnderCloak" | "headInHand" | "rewaxTrail" | "swat" | "armBehindHead" | "turn" | "shoulderTurn" | "faceBack" | "backView" | "flailForearmBehind" | "faceFront" | "spinTrail" | "slamTrail" | "flailArmOver" | "swingTrail" | "risingTrail" | "armBehindCloak" | "shoulderAtRip" | "trailEndsAt" | "punchTrail">> = {},
+  extra: Partial<Omit<WardenSkeleton, keyof Skeleton | "ball">> = {},
 ): WardenSkeleton => ({
   ...body,
   weaponArm: { elbow: flail.elbow, hand: flail.hand },
@@ -151,7 +147,6 @@ export const WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     { elbow: [71, 55], hand: [66, 50] },
     { handle: 238, shoulderAtRip: true, armBehindHead: true, turn: 1, spinTrail: true, trailEndsAt: "wd-spin-behind" },
   ),
-  // Wax Arm Back: the candle arm drawn far back, ready to throw it forward.
   // Wax Arm Back: turned flail shoulder first, hunched low and leaning back, his weight sunk
   // onto his left leg (bent sharply, knee poking out behind), looking back over his shoulder,
   // the candle arm coiled to punch, elbow raised behind him. The flail drags on the floor behind. His left leg, stretched
@@ -611,7 +606,6 @@ const CHAIN = 34;
 /** Where the ground is: the flail's head rests on it rather than going through. */
 const GROUND = 108;
 
-/** The flail as drawn: the handle's ends (the chain hangs from `tip`) and where its head ends up. */
 /** The flail's head: a lump of old wax, built up over years of drips, a few hanging off it. */
 function FlailHead({ at }: { at: Pt }) {
   const [x, y] = at;
@@ -667,6 +661,7 @@ function FlailHandle({ from, to }: { from: Pt; to: Pt }) {
   );
 }
 
+/** The flail as drawn: the handle's ends (the chain hangs from `tip`) and where its head ends up. */
 export function flailOf(s: WardenSkeleton) {
   const hand = s.weaponArm.hand;
   const deg = s.handle ?? (Math.atan2(s.ball[1] - hand[1], s.ball[0] - hand[0]) * 180) / Math.PI;
@@ -840,26 +835,6 @@ function SpinTrail({ s, shoulder, layer = "back" }: { s: WardenSkeleton; shoulde
   );
 }
 
-/** The flail's whirl: a faint ring it traces as it spins. */
-function Spin({ s }: { s: WardenSkeleton }) {
-  const { tip: hand, ball } = flailOf(s);
-  const r = Math.hypot(ball[0] - hand[0], ball[1] - hand[1]);
-  if (s.spin) return null; // drawn as a blur of chains instead (see Flail)
-  return <ellipse cx={hand[0] + r * 0.2} cy={hand[1] - 2} rx={r} ry={r * 0.3} className="fig-spin" />;
-}
-
-/** Just the candle arm's upper arm, from the shoulder to the elbow. */
-function CandleUpperArm({ s, shoulder, arm }: { s: WardenSkeleton; shoulder: Pt; arm: CandleArm }) {
-  const { elbow } = s.freeArm;
-  return (
-    <g>
-      <polyline points={limb(shoulder, elbow)} className={arm === "scorched" ? "fig-arm-burnt" : "fig-arm-wax"} />
-      {arm === "scorched" && <polyline points={limb(shoulder, elbow)} className="fig-arm-embers" />}
-      <circle cx={elbow[0]} cy={elbow[1]} r={3.5} className={arm === "scorched" ? "fig-hand-burnt" : "fig-hand-wax"} />
-    </g>
-  );
-}
-
 /** The candle arm, from the shoulder: wax and lit, wax and cold, or scorched black and burning. */
 function CandleArmEl({ s, shoulder, arm, part = "all" }: {
   s: WardenSkeleton;
@@ -1022,7 +997,7 @@ function ChainInHand({ s, part = "all" }: { s: WardenSkeleton; part?: "chain" | 
   const hand = s.freeArm.hand;
   const mid = add(lerp(tip, hand, 0.5), [0, s.chainTaut ? 0 : 4]);
   // Tucked behind the arm, it hangs only a little below the fist, partly hidden.
-  const bx = hand[0] + (s.ballSwing ?? 0), by = hand[1] + (s.headBehindArm ? 16 : 12);
+  const bx = hand[0], by = hand[1] + (s.headBehindArm ? 16 : 12);
   return (
     <g>
       {part !== "head" && <path d={`M${tip[0]} ${tip[1]} Q${mid[0]} ${mid[1]} ${hand[0]} ${hand[1]}`} className="fig-chain" />}
@@ -1275,20 +1250,15 @@ export function WardenFigure({ s, front, arm, lingerFrom, smokeAgo, phase2Look, 
     // Phase two: his wax burnt black, the inside of his cloak and hood burning.
     <FlailFire.Provider value={!!flailFire}>
     <g className={`wd-figure ${arm === "scorched" || phase2Look ? "wd-phase2" : ""} ${flailFire ? "wd-flaming" : ""}`}>
-      {s.spin && <Spin s={s} />}
       {(s.spinTrail || (lingerFrom && WARDEN_POSES[lingerFrom].spinTrail)) && <SpinTrail s={s} shoulder={flailShoulder} />}
       {/* Whirling behind him, the flail passes behind the cloak. */}
       {s.spin === "behind" && <Flail s={s} />}
       {/* Behind the body: the cloak hides whatever it covers. */}
-      {/* With both arms behind the body, the flail arm goes over the wax one. */}
-      {!swapped && s.armBehindCloak && candleArm}
       {swapped ? candleArm : !s.flailArmOver && flailArm}
       {flailBehind && flailForearm}
       {/* The far leg stays hidden under the cloak; the near one shows through its rip (see Cloak). */}
       <Cloak s={s} />
       <Stain s={s} />
-      {/* With the rest of the arm behind him, the upper arm still comes out over the torso. */}
-      {!swapped && s.armBehindCloak && <CandleUpperArm s={s} shoulder={candleShoulder} arm={arm} />}
       {!swapped && s.armBehindHead && (tucked ? <CandleArmEl s={s} shoulder={candleShoulder} arm={arm} part="arm" /> : candleArm)}
       {/* The flail arm brought round in front of his body. */}
       {!swapped && s.flailArmOver && flailArm}
@@ -1297,7 +1267,7 @@ export function WardenFigure({ s, front, arm, lingerFrom, smokeAgo, phase2Look, 
       <Hood s={s} />
       {tucked && <CandleArmEl s={s} shoulder={candleShoulder} arm={arm} part="flame" />}
       {/* The drool hangs from the hood: in front of the far side, behind whatever arm is nearest. */}
-      {<Beard s={s} />}
+      <Beard s={s} />
       {s.headInHand && <HeadInHand s={s} />}
       {/* The wax arm behind him, holding the chain: the chain still crosses over the cloak. */}
       {s.chainInHand && swapped && (
@@ -1314,7 +1284,7 @@ export function WardenFigure({ s, front, arm, lingerFrom, smokeAgo, phase2Look, 
           <CandleArmEl s={s} shoulder={candleShoulder} arm={arm} part="flame" />
         </>
       )}
-      {swapped ? flailArm : !s.armBehindHead && !s.armBehindCloak && candleArm}
+      {swapped ? flailArm : !s.armBehindHead && candleArm}
       {/* The punch trail goes over everything but the flare at the fist. */}
       {s.punchTrail && (s.punchTrail === "wax" || arm !== "out") && <PunchTrail s={s} shoulder={candleShoulder} />}
       {s.slamTrail && <SlamTrail s={s} />}

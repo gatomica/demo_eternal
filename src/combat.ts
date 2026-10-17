@@ -1,8 +1,8 @@
 /**
  * combat.ts — the combat rules, with no rendering.
  *
- * Every function here is pure: it takes a CombatState and returns a new one,
- * so the UI only has to call `resolveTurn` and render whatever comes back.
+ * `resolveTurn` takes a CombatState and returns a new one (the old one is left untouched), so
+ * the UI only has to call it and render whatever comes back.
  *
  * Units: weights and costs are written in sixteenths of the fighter's max health,
  * matching the design doc. `sixteenths(n, maxHP)` turns them into real numbers.
@@ -63,13 +63,10 @@ export interface Intent {
   target?: string;
   /** Tags from the pattern, e.g. "waxing": a direct hit leaves the target Waxed. */
   tags?: string[];
-  /** The protected turn after falling with a revive left: nothing it does, nothing touches it. */
-  revive?: boolean;
 }
 
 /** How an enemy's last action went, for choosing what it can do next. */
 export interface LastAction {
-  type: ActionType;
   /** The action's name, for picking the next stance. */
   name?: string;
   /**
@@ -131,20 +128,7 @@ export interface Enemy extends Fighter {
   fate?: "fallen" | "encased" | "candle";
 }
 
-export type LogKind = "info" | "hit" | "stagger" | "death";
-export interface LogEntry {
-  text: string;
-  kind: LogKind;
-}
-export interface TurnLog {
-  /** 0 is the opening line before turn 1. */
-  turn: number;
-  entries: LogEntry[];
-}
-
 export interface CombatConfig {
-  /** Damage multiplier against a resting target. 1 = no bonus (current design). */
-  restBonus: number;
   /** The model viewer: nobody takes damage or Fatigue; everything else plays as usual. */
   dummy?: boolean;
 }
@@ -225,8 +209,6 @@ export interface CombatState {
   enemies: Enemy[];
   status: Status;
   config: CombatConfig;
-  /** Oldest first. */
-  log: TurnLog[];
   /** How the most recent turn played out, step by step. Empty before the first turn. */
   lastTurn: Step[];
 }
@@ -266,10 +248,6 @@ export const FLAMING_BONUS = 1 / 4;
 /** Rest clears this much Fatigue. */
 export const REST_CLEARS = 8;
 
-export const DEFAULT_CONFIG: CombatConfig = {
-  restBonus: 1,
-};
-
 /* ============================================================
  * Derived numbers
  * ============================================================ */
@@ -293,14 +271,9 @@ export const resistance = (f: Fighter, blockWeight: WeaponTier | null) =>
 export const dodgeWeight = (f: Fighter) => DODGE_BASE + ARMOR[f.armor].weight + WEAPONS[f.weapon].weight;
 export const dodgeFatigue = (f: Fighter, damage: number) => (damage * dodgeWeight(f)) / 16;
 
-/** An action is affordable if paying for it leaves the fighter below its guard-break point. */
-export const canAfford = (f: Fighter, cost: number) => f.fatigue + cost < f.hp;
-
 /* ============================================================
  * Enemy kinds (see bestiary.ts) and how they pick
  * ============================================================ */
-
-export { ENEMY_KINDS };
 
 /**
  * What an enemy's own rules (its kind's `afterTurn`) get to look at and change at the end of
@@ -318,7 +291,6 @@ export interface TurnReport {
   fell: boolean;
   /** Its flags as they were when the turn started. */
   was: Record<string, boolean>;
-  say: (text: string, kind?: LogKind) => void;
   event: (ev: CombatEvent) => void;
 }
 
@@ -343,7 +315,7 @@ export function describeAction(kindName: string, line: Line, stance: string | un
 function chooseIntent(e: Enemy, state: CombatState, rng: Rng): Intent {
   const kind = ENEMY_KINDS[e.kind];
   const lineDir = e.line === "back" ? "advance" : "retreat";
-  if (e.reviving) return { type: "rest", dir: lineDir, forced: true, revive: true };
+  if (e.reviving) return { type: "rest", dir: lineDir, forced: true };
   if (e.staggered) return { type: "rest", dir: lineDir, forced: true };
 
   const describe = (stance: string | undefined, a: ActionDef) => describeAction(e.kind, e.line, stance, a);
@@ -394,7 +366,6 @@ export interface PlayerSetup {
 export interface EnemySetup {
   kind: string;
   name?: string;
-  maxHP?: number;
   line?: Line;
   /** Action names (or kinds) to open with, one per turn. */
   script?: string[];
@@ -431,15 +402,11 @@ export function openingOf(state: CombatState, setups: EnemySetup[], rng: Rng = M
   const w = after.enemies.find(e => e.id === warden.id)!;
   const o = after.enemies.find(e => e.id === offering.id)!;
   w.flags.sealed = false;
-  w.last = { type: "maneuver", name: "Usurp Flame", outcome: "done" };
+  w.last = { name: "Usurp Flame", outcome: "done" };
   o.alive = false;
   o.fate = "encased";
   o.hp = 0;
   o.fatigue = 0;
-  after.log = [{ turn: 0, entries: [
-    { text: `${w.name} tears the flame from ${o.name}, sealing it whole in wax.`, kind: "info" },
-    { text: "The fight begins.", kind: "info" },
-  ] }];
   after.lastTurn = [];
   chooseIntents(after, rng);
 
@@ -493,7 +460,7 @@ export function createCombat(
   const foes: Enemy[] = enemies.map((setup, i) => {
     const kind = ENEMY_KINDS[setup.kind];
     if (!kind) throw new Error(`Unknown enemy kind "${setup.kind}"`);
-    const maxHP = setup.maxHP ?? kind.maxHP;
+    const maxHP = kind.maxHP;
     return {
       id: `e${i}`,
       kind: setup.kind,
@@ -522,8 +489,7 @@ export function createCombat(
     player: p,
     enemies: foes,
     status: "playing",
-    config: { ...DEFAULT_CONFIG, ...config },
-    log: [{ turn: 0, entries: [{ text: "The fight begins.", kind: "info" }] }],
+    config: { ...config },
     lastTurn: [],
   };
   chooseIntents(state, rng);
@@ -565,17 +531,6 @@ export function validateAction(state: CombatState, action: PlayerAction): string
   }
 }
 
-/** Who is attacking this turn, and which of those attacks the given plan leaves unanswered. */
-export function previewThreat(state: CombatState, action?: PlayerAction) {
-  const attackers = state.enemies.filter(e => e.alive && e.intent.type === "attack");
-  let unanswered: Enemy[];
-  if (state.player.reviving) unanswered = [];
-  else if (action?.type === "block") unanswered = attackers.filter(e => e.line === "front" && e.id !== action.target);
-  else if (action?.type === "maneuver") unanswered = attackers.filter(e => e.line === "front" && !e.intent.ranged && e.id !== action.target);
-  else unanswered = attackers;
-  return { attackers, unanswered };
-}
-
 /* ============================================================
  * Resolving a turn
  *
@@ -603,7 +558,6 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
   const alive = s.enemies.filter(e => e.alive);
   const fighters: Fighter[] = [p, ...alive];
   const byId = (id?: string): Fighter | undefined => fighters.find(f => f.id === id);
-  const nameOf = (f: Fighter) => (f === p ? "You" : f.name);
 
   const locked = new Map<string, Line>(alive.map(e => [e.id, e.line]));
   const wasFlags = new Map(alive.map(e => [e.id, { ...e.flags }]));
@@ -619,9 +573,6 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
 
   const steps: Step[] = [];
   let events: CombatEvent[] = [];
-  const entries: LogEntry[] = [];
-  const say = (text: string, kind: LogKind = "info") => entries.push({ text, kind });
-  const r1 = (n: number) => Math.round(n * 10) / 10;
   const snapshot = (): Record<string, FighterView> => {
     const v: Record<string, FighterView> = {};
     v[p.id] = { hp: p.hp, fatigue: p.fatigue, death: p.death, staggered: p.staggered, alive: p.hp > 0, waxed: p.waxed, encased: !!p.encased };
@@ -655,13 +606,8 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
   const weightOf = (f: Fighter): WeaponTier =>
     f === p ? (act?.type === "attack" && act.weight ? act.weight : p.weapon) : (f as Enemy).intent.weight ?? f.weapon;
   const isRanged = (f: Fighter) => f !== p && !!(f as Enemy).intent.ranged;
-  /** The attack's name for the log, e.g. " (Hurl Wax)". */
-  const withName = (f: Fighter) => {
-    const name = f === p ? undefined : (f as Enemy).intent.action;
-    return name ? ` (${name})` : "";
-  };
 
-  const isBlocking = (f: Fighter, attacker: Enemy | Player) => {
+  const isBlocking = (f: Fighter, attacker: Fighter) => {
     if (out.has(f.id)) return false;
     if (f === p) return act?.type === "block" && (act.target === attacker.id || locked.get(attacker.id) === "back");
     return (f as Enemy).intent.type === "block";
@@ -702,7 +648,6 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
       if (out.has(attacker.id)) {
         cancelled.add(attacker.id);
         events.push({ kind: "canceled", who: attacker.id, action: "attack", reason: fallen.has(attacker.id) ? "fallen" : "staggered" });
-        say(`${nameOf(attacker)} ${fallen.has(attacker.id) ? "falls" : "staggers"} before the attack lands.`);
         return;
       }
       if (fallen.has(target.id)) {
@@ -717,11 +662,11 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
       // Melee closes in on the target; a ranged attacker stays where it is.
       if (attacker === p) pulls.set(target.id, p.id);
       else if (!ranged) pulls.set(attacker.id, attacker.id);
-      const dmg = attackDamage(attacker, weight) * (resting.has(target.id) ? cfg.restBonus : 1);
+      const dmg = attackDamage(attacker, weight);
 
       if (isReviving(target)) {
+        // The blow passes through someone reviving.
         events.push({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: 0, ranged, grit });
-        say(target === p ? `${nameOf(attacker)}'s blow passes through you as you revive.` : `Your blow passes through ${nameOf(target)} as it rises again.`);
         return;
       }
       if (isDodging(target, attacker)) {
@@ -729,10 +674,9 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
         const effort = dodgeFatigue(target, dmg);
         tire(target, effort);
         events.push({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: effort, ranged, grit });
-        say(`${nameOf(target)} ${target === p ? "evade" : "evades"} ${nameOf(attacker)}'s attack${withName(attacker)}: ${r1(effort)} Fatigue.`);
         return;
       }
-      const blocking = isBlocking(target, attacker as Enemy);
+      const blocking = isBlocking(target, attacker);
       if (blocking) blockedSomething.add(target.id);
       const resisted = dmg * resistance(target, blocking ? weightOf(target) : null);
       // On a Block, everything resisted goes back to the attacker; unless the attack is ranged,
@@ -752,21 +696,13 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
         if (!cfg.dummy) target.hp -= burn;
         if (burn > 0) hurt.add(target.id);
         events.push({ kind: "burned", who: target.id, damage: burn });
-        say(`The flaming flail burns ${target === p ? "you" : nameOf(target)}: ${r1(burn)} extra damage.`, "hit");
       }
       if (!blocking && waxer?.intent.tags?.includes("waxing") && !waxer.flags.phase2) {
         const bonus = target.waxed ? through / 8 : 0;
         tire(target, bonus);
         target.waxed = true;
         events.push({ kind: "waxed", who: target.id, bonus });
-        say(bonus > 0 ? `More wax cakes onto ${target === p ? "you" : nameOf(target)}: ${r1(bonus)} extra Fatigue.` : `Wax clings to ${target === p ? "you" : nameOf(target)}.`);
       }
-      say(
-        blocking
-          ? `${nameOf(attacker)} ${attacker === p ? "strike" : "strikes"} into ${target === p ? "your" : `${nameOf(target)}'s`} guard${withName(attacker)}: ${r1(through)} damage, ${r1(sentBack)} Fatigue sent back.`
-          : `${nameOf(attacker)} ${attacker === p ? "hit" : "hits"} ${target === p ? "you" : nameOf(target)}${withName(attacker)}: ${r1(through)} damage, ${r1(resisted)} as Fatigue.`,
-        "hit",
-      );
     });
 
     // After the group lands: falls and staggers take effect before the next, slower group.
@@ -777,12 +713,10 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
         out.add(f.id);
         fallen.add(f.id);
         events.push({ kind: "fall", who: f.id });
-        say(f === p ? "You fall." : `${f.name} falls still at last.`, "death");
       } else if (!f.staggered && f.fatigue >= f.hp) {
         out.add(f.id);
         f.staggered = true;
         events.push({ kind: "stagger", who: f.id });
-        say(f === p ? "You stagger." : `${f.name} staggers.`, "stagger");
       }
     }
     pinStaggered();
@@ -799,7 +733,6 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
     p.waxed = false;
     p.encased = false;
     events.push({ kind: "revive", who: p.id });
-    say("You revive. Nothing could touch you this turn.");
   }
   for (const e of alive) {
     if (!foeReviving.has(e.id)) continue;
@@ -810,11 +743,10 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
     e.staggered = false;
     e.reviving = false;
     events.push({ kind: "revive", who: e.id });
-    say(`${e.name} rises again, whole.`);
   }
-  // Your flame about to be taken (Usurp Flame on you): you stay down, sealed, until he has it;
-  // you only get back up at the very end of the turn.
-  const usurpOnYou = alive.some(e => e.intent.action === "Usurp Flame" && (!e.intent.target || e.intent.target === p.id) && !out.has(e.id));
+  // Your flame about to be taken (Usurp Flame on you, aimed at no ally): you stay down, sealed,
+  // until he has it; you only get back up at the very end of the turn.
+  const usurpOnYou = alive.some(e => e.intent.action === "Usurp Flame" && !e.intent.target && !out.has(e.id));
   let recoverLast = false;
   for (const [id, wasForced] of resting) {
     const f = byId(id)!;
@@ -828,22 +760,21 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
       f.waxed = false;
       f.encased = false;
       events.push({ kind: "rest", who: id, result: "recovered", forced: true });
-      say(f === p ? "You come back to your senses." : `${f.name} recovers.`);
       continue;
     }
     if (hurt.has(id) || out.has(id)) {
+      // A blow breaks the Rest: no recovery.
       events.push({ kind: "rest", who: id, result: "interrupted", forced: false });
-      say(`${f === p ? "Your" : `${f.name}'s`} rest is broken by the blow. No recovery.`, "hit");
       continue;
     }
     f.fatigue -= restAmount(f);
     if (f.fatigue < 0) {
-      const leftover = -f.fatigue / 2;
+      // Rested past zero Fatigue: half the excess heals.
+      heal(f, -f.fatigue / 2);
       f.fatigue = 0;
-      if (!hurt.has(id)) heal(f, leftover);
     }
     if (f.fatigue <= 0) f.waxed = false;
-    events.push({ kind: "rest", who: id, result: "rested", forced: wasForced });
+    events.push({ kind: "rest", who: id, result: "rested", forced: false });
   }
   endStep();
 
@@ -904,7 +835,6 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
       e.death = 0;
       e.staggered = false;
       fellReviving.add(e.id);
-      say(`${e.name} refuses to stay down.`, "death");
     } else if (fallen.has(e.id)) {
       e.alive = false;
       e.fate = "fallen";
@@ -926,17 +856,14 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
       p.fatigue = 0;
       p.death = 0;
       p.staggered = false;
-      say("The world refuses to let you go. You will revive at the end of next turn.", "death");
     } else {
       p.hp = 0;
       s.status = "lost";
       events.push({ kind: "defeat", who: p.id });
-      say("You fall, with nothing left to bring you back.", "death");
     }
   } else if (!p.staggered && p.fatigue >= p.hp) {
     p.staggered = true;
     events.push({ kind: "stagger", who: p.id });
-    say("You stagger.", "stagger");
   }
   // Wax only lasts while there's Fatigue to hold it (a staggered fighter keeps it until it recovers).
   for (const f of fighters) if (f.waxed && f.fatigue <= 0 && !f.staggered) f.waxed = false;
@@ -955,13 +882,13 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
       cancelled.has(e.id) ||
       (type === "rest" && interrupted.has(e.id)) ||
       (type === "block" && !blockedSomething.has(e.id));
-    e.last = { type, name: e.intent.action, outcome: forced ? "recover" : undone ? "undone" : "done" };
+    e.last = { name: e.intent.action, outcome: forced ? "recover" : undone ? "undone" : "done" };
   }
 
   // Each kind's own rules (the Warden's flame, phases, Usurp Flame).
   for (const e of alive) {
     const kind = ENEMY_KINDS[e.kind];
-    if (!kind.afterTurn || (!e.alive && !fellReviving.has(e.id))) continue;
+    if (!kind.afterTurn || !e.alive) continue;
     kind.afterTurn({
       self: e,
       state: s,
@@ -970,7 +897,6 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
       staggered: e.staggered && !wasStaggered.has(e.id),
       fell: fellReviving.has(e.id),
       was: wasFlags.get(e.id)!,
-      say,
       event: ev => events.push(ev),
     });
   }
@@ -982,13 +908,11 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
     p.waxed = false;
     p.encased = false;
     events.push({ kind: "rest", who: p.id, result: "recovered", forced: true });
-    say("You come back to your senses, the wax cracking off you.");
     endStep();
   }
 
   if (s.enemies.every(e => !e.alive) && s.status === "playing") s.status = "won";
 
-  s.log.push({ turn: prev.turn, entries });
   s.lastTurn = steps;
   s.turn += 1;
   if (s.status === "playing") chooseIntents(s, rng);
@@ -1030,7 +954,7 @@ export const ENCOUNTERS: Encounter[] = [
     enemies: [{ kind: "sleepwalker", line: "front" }, { kind: "waxed" }],
   },
   {
-    // The tutorial boss, escorted by two waxed. (Phase 3: rules only; his look comes in phase 4.)
+    // The tutorial boss, escorted by two waxed.
     id: "warden",
     label: "Penitent Warden",
     charges: 1,

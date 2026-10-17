@@ -69,7 +69,7 @@ const KNEELING = {
 const bare = (hand: Pt) => ({ at: hand, angle: 0 });
 
 /** Drawn facing right in a 100 × 120 box, feet on y = 114. */
-export const POSES: Record<Exclude<PoseName, WardenPoseName>, Skeleton> = {
+const POSES: Record<Exclude<PoseName, WardenPoseName>, Skeleton> = {
   idle: {
     head: [50, 22], neck: [50, 33], hip: [50, 66],
     weaponArm: { elbow: [58, 47], hand: [64, 58] },
@@ -397,15 +397,13 @@ function StrikeTrail({ s, tier }: { s: Skeleton; tier: WeaponTier }) {
 
 const limb = (...pts: Pt[]) => pts.map(p => p.join(",")).join(" ");
 
-export interface StickFigureProps {
+interface StickFigureProps {
   /** "back": the player, seen from behind, facing right.
    *  "front": an enemy, seen from the front, facing left toward the player. */
   view: "front" | "back";
   pose: PoseName;
   weapon: WeaponTier;
   armor: ArmorTier;
-  dim?: boolean;
-  className?: string;
   title?: string;
   /** "waxed": kneeling, shins bound together and head sealed in wax. "warden": the Penitent Warden. */
   variant?: "waxed" | "warden";
@@ -500,12 +498,12 @@ function Prop({ prop }: { prop: NonNullable<Skeleton["prop"]> }) {
   );
 }
 
-export function StickFigure({ view, pose, weapon, armor, dim, className, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, encased }: StickFigureProps) {
+export function StickFigure({ view, pose, weapon, armor, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, encased }: StickFigureProps) {
   const s = ALL_POSES[pose];
   const front = view === "front";
   if (variant === "warden" && "ball" in s) {
     return (
-      <svg viewBox="0 0 100 120" className={`figure figure-${view} ${dim ? "is-dim" : ""} ${className ?? ""}`} role="img" aria-label={title}>
+      <svg viewBox="0 0 100 120" className={`figure figure-${view}`} role="img" aria-label={title}>
         {title && <title>{title}</title>}
         <ellipse cx={50} cy={115} rx={28} ry={3.2} className="fig-shadow" />
         <g transform={front ? "translate(100 0) scale(-1 1)" : undefined}>
@@ -537,7 +535,7 @@ export function StickFigure({ view, pose, weapon, armor, dim, className, title, 
   );
 
   return (
-    <svg viewBox="0 0 100 120" className={`figure figure-${view} ${dim ? "is-dim" : ""} ${className ?? ""}`} role="img" aria-label={title}>
+    <svg viewBox="0 0 100 120" className={`figure figure-${view}`} role="img" aria-label={title}>
       {title && <title>{title}</title>}
       <ellipse cx={50} cy={115} rx={26} ry={3} className="fig-shadow" />
       {/* Enemies face left: mirror the whole drawing. */}
@@ -583,7 +581,7 @@ export function StickFigure({ view, pose, weapon, armor, dim, className, title, 
  * (the --bar-track width in index.css); anything less gets a proportionally shorter bar.
  * 120 leaves room above the late-game 100 for passives and buffs.
  */
-export const BAR_FULL_HP = 120;
+const BAR_FULL_HP = 120;
 
 export interface BarValues {
   hp: number;
@@ -667,7 +665,7 @@ export function HealthBar({ fighter, before, className, mirrored }: {
  * Stagger: white shards bursting outward
  * ============================================================ */
 
-export function Shards({ count = 14, small }: { count?: number; small?: boolean }) {
+function Shards({ count = 14, small }: { count?: number; small?: boolean }) {
   return (
     <span className={`shards ${small ? "is-small" : ""}`} aria-hidden="true">
       {Array.from({ length: count }, (_, i) => {
@@ -689,8 +687,10 @@ export function Shards({ count = 14, small }: { count?: number; small?: boolean 
 const FIGURE_UNITS = 102;
 const FEET_Y = 114;
 
-/** Where a figure standing at `p` appears on screen: its 100 × 120 drawing box, and its depth. */
-/** `scale`: how much bigger than a normal figure (the Warden towers over everyone). */
+/**
+ * Where a figure standing at `p` appears on screen: its 100 × 120 drawing box, and its depth.
+ * `scale`: how much bigger than a normal figure (the Warden towers over everyone).
+ */
 export function figureBox(cam: Cam, p: Vec, w: number, h: number, scale = 1) {
   const { sx, sy, ppm, depth } = project(cam, p, w, h);
   const unit = (ppm * FIGURE_HEIGHT * scale) / FIGURE_UNITS;
@@ -754,10 +754,6 @@ export function shotCamera(shot: SceneShot): Cam {
   return "follow" in c ? planningCamera(shot.positions[c.follow], c.yaw) : c;
 }
 
-/**
- * Draws the floor and every figure through the camera. When a new shot arrives, everyone (and
- * the camera) moves from wherever they are right now to the new spots, over the shot's duration.
- */
 /** Something thrown across the field during a beat: from a figure to another, passing through it. */
 export interface Projectile {
   from: string;
@@ -809,6 +805,8 @@ function ProjectileShape({ kind }: { kind: Projectile["kind"] }) {
 /** How long the shockwave takes to spread, and how long after the flash it starts. */
 const SHOCK_MS = 640;
 const SHOCK_DELAY_MS = 120;
+/** How long a melee impact's ring takes to spread and fade. */
+const IMPACT_MS = 380;
 
 /**
  * A shockwave rolling out along the floor: a ring around `center` (a floor point, in meters)
@@ -901,9 +899,6 @@ function Shockwave({ center, reach, toward, flame, proj, impact, full }: {
   );
 }
 
-/** How long a melee impact's ring takes to spread and fade. */
-const IMPACT_MS = 380;
-
 /**
  * A melee blow's shockwave: a thin white ring lying flat on the floor (squashed like Flame
  * Blast's), quickly spreading out to `reach` and fading, with a brief white flash where it hit.
@@ -957,6 +952,10 @@ const rand = (seed: number, i: number) => {
   return x - Math.floor(x);
 };
 
+/**
+ * Draws the floor and every figure through the camera. When a new shot arrives, everyone (and
+ * the camera) moves from wherever they are right now to the new spots, over the shot's duration.
+ */
 export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena, arenaLit, ignite }: {
   figures: SceneFigure[];
   shot: SceneShot;
@@ -1133,8 +1132,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
       {dark?.flame && (() => {
         const t = placed.find(x => x.f.id === dark.flame);
         if (!t) return null;
-        const [px, py] = flameOf(t.f.pose);
-        const fx = t.box.x + (t.box.w * (t.f.view === "front" ? 100 - px : px)) / 100, fy = t.box.y + (t.box.h * py) / 120;
+        const [fx, fy] = toScreen(t.box, flameOf(t.f.pose), t.f.view === "front");
         // The size of the figure's own flame (the Warden's candle is a little smaller), so it
         // hands over to it seamlessly as the light comes back.
         const sz = t.box.h * (t.f.variant === "warden" ? 0.12 : 0.16);
@@ -1151,10 +1149,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
       {usurpTrail && (() => {
         const a = placed.find(x => x.f.id === usurpTrail.from), b = placed.find(x => x.f.id === usurpTrail.to);
         if (!a || !b) return null;
-        const toScreen = (box: typeof a.box, view: SceneFigure["view"], p: readonly [number, number]): Pt =>
-          [box.x + (box.w * (view === "front" ? 100 - p[0] : p[0])) / 100, box.y + (box.h * p[1]) / 120];
-        const from = toScreen(a.box, a.f.view, flameOf(a.f.pose));
-        const hand = toScreen(b.box, b.f.view, WARDEN_POSES["wd-idle"].freeArm.hand);
+        const from = toScreen(a.box, flameOf(a.f.pose), a.f.view === "front");
+        const hand = toScreen(b.box, WARDEN_POSES["wd-idle"].freeArm.hand, b.f.view === "front");
         // Arching up over him: the control point well above both.
         const ctl: Pt = [(from[0] + hand[0]) / 2, Math.min(from[1], hand[1]) - b.box.h * 0.22];
         const N = 28, w = b.box.h * 0.05;

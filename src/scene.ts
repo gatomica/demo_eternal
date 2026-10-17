@@ -33,16 +33,16 @@ export const NEAR = 0.5;
 /** How tall a standing figure is, in meters. */
 export const FIGURE_HEIGHT = 1.8;
 
-export const forward = (yaw: number): Vec => ({ x: Math.sin(yaw), z: Math.cos(yaw) });
+const forward = (yaw: number): Vec => ({ x: Math.sin(yaw), z: Math.cos(yaw) });
 export const right = (yaw: number): Vec => ({ x: Math.cos(yaw), z: -Math.sin(yaw) });
 const add = (a: Vec, b: Vec, k = 1): Vec => ({ x: a.x + b.x * k, z: a.z + b.z * k });
 export const sub = (a: Vec, b: Vec): Vec => ({ x: a.x - b.x, z: a.z - b.z });
 const dot = (a: Vec, b: Vec) => a.x * b.x + a.z * b.z;
-export const dist = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.z - b.z);
+const dist = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.z - b.z);
 /** The yaw that faces along a direction. */
 export const yawOf = (d: Vec) => Math.atan2(d.x, d.z);
 
-export interface Projected {
+interface Projected {
   /** Screen x of the point. */
   sx: number;
   /** Screen y of the point (on the floor). */

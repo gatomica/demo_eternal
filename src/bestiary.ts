@@ -23,10 +23,6 @@ export interface EnemyKind {
   /** The pose shown for each stance while you plan. */
   stancePoses: Record<string, string>;
   /**
-   * How each action is drawn as the turn plays: `act` while it happens (and an attack's wind-up),
-   * `strike` the moment an attack lands. Defaults: the generic pose for its kind, and "strike".
-   */
-  /**
    * How each action is drawn: `act` while it happens (and an attack's wind-up), `strike` the
    * moment an attack lands, `rest` once a Rest actually happens at the end of the turn, and the
    * `projectile` a ranged attack throws (or, for a melee one, `impact`: a shockwave where it lands).
@@ -78,7 +74,6 @@ function enterPhaseTwo(r: TurnReport) {
   r.event({ kind: "phase", who: self.id, phase: 2 });
   // Once he's back on his feet, he always takes up Idle (the only "Second Phase >" stance).
   self.nextFrom = "Second Phase";
-  r.say(`${self.name} tears the wax from his arm. The flame beneath has been burning all along.`, "stagger");
   for (const e of state.enemies) {
     if (e === self || !e.alive || e.kind !== "waxed") continue;
     e.alive = false;
@@ -86,21 +81,18 @@ function enterPhaseTwo(r: TurnReport) {
     e.hp = 0;
     r.event({ kind: "candle", who: e.id });
   }
-  if (state.enemies.some(e => e.kind === "waxed")) r.say("The waxed around him catch fire, burning like candles.");
 }
 
 function setFlaming(r: TurnReport, on: boolean) {
   if (!!r.self.flags.flaming === on) return;
   r.self.flags.flaming = on;
   r.event({ kind: "flag", who: r.self.id, flag: "flaming", on });
-  r.say(on ? `${r.self.name} grips the flail in his burning hand. It catches fire.` : `The flail's fire is smothered against the ground.`);
 }
 
 function setSealed(r: TurnReport, on: boolean) {
   if (r.self.flags.phase2 || !!r.self.flags.sealed === on) return;
   r.self.flags.sealed = on;
   r.event({ kind: "flag", who: r.self.id, flag: "sealed", on });
-  r.say(on ? `${r.self.name}'s flame goes out. He is Sealed.` : `${r.self.name}'s arm burns again. He is Unsealed.`);
 }
 
 export const ENEMY_KINDS: Record<string, EnemyKind> = {
@@ -266,13 +258,11 @@ export const ENEMY_KINDS: Record<string, EnemyKind> = {
             ally.hp = 0;
             r.event({ kind: "usurp", who: self.id, target: ally.id });
             r.event({ kind: "encased", who: ally.id });
-            r.say(`${self.name} tears the flame from ${ally.name}, sealing it whole in wax.`);
           } else {
             // Your flame taken, you're sealed whole in wax until you get back up.
             state.player.waxed = false;
             state.player.encased = true;
             r.event({ kind: "usurp", who: self.id, target: "player" });
-            r.say(`${self.name} tears your flame away, sealing you whole in wax.`, "hit");
           }
           setSealed(r, false);
         }
