@@ -1,12 +1,12 @@
 /**
  * intents.ts — how each enemy picks what it does next: stance, then action (see patterns.ts).
  */
-import { ENEMY_KINDS } from "./bestiary";
+import { ENEMY_KINDS, type KindId } from "./bestiary";
 import { type ActionDef, choose } from "./patterns";
 import type { ActionType, CombatState, Enemy, Intent, Line, Rng } from "./types";
 
 /** The intent for an enemy of this kind doing this action, shown in this stance (or none). */
-export function describeAction(kindName: string, line: Line, stance: string | undefined, a: ActionDef): Intent {
+export function describeAction(kindName: KindId, line: Line, stance: string | undefined, a: ActionDef): Intent {
   const kind = ENEMY_KINDS[kindName];
   const lineDir = line === "back" ? "advance" : "retreat";
   const dir = a.dir === "advance" || a.dir === "retreat" ? a.dir : lineDir;

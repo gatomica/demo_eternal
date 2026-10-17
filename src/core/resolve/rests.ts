@@ -2,7 +2,9 @@
  * rests.ts — a turn's second phase: revives land, and Rests settle. A damaging hit breaks a
  * voluntary Rest; the forced Rest after a stagger always ends the stagger.
  */
+import { kindOf } from "../bestiary";
 import { heal, restAmount } from "../rules";
+import { backOnFeet, fatigueGone } from "./statuses";
 import type { Turn } from "./turn";
 
 export function settleRests(t: Turn) {
@@ -13,8 +15,7 @@ export function settleRests(t: Turn) {
     p.fatigue = 0;
     p.death = 0;
     p.staggered = false;
-    p.waxed = false;
-    p.encased = false;
+    backOnFeet(p);
     t.emit({ kind: "revive", who: p.id });
   }
   for (const e of t.alive) {
@@ -27,20 +28,20 @@ export function settleRests(t: Turn) {
     e.reviving = false;
     t.emit({ kind: "revive", who: e.id });
   }
-  // Your flame about to be taken (Usurp Flame on you, aimed at no ally): you stay down, sealed,
-  // until he has it; you only get back up at the very end of the turn.
-  const usurpOnYou = t.alive.some(e => e.intent.action === "Usurp Flame" && !e.intent.target && !t.out.has(e.id));
+  // Something about to be done to you that keeps you down (Usurp Flame taking your flame, aimed
+  // at no ally): you stay down, sealed, until it's done; you only get back up at the very end of
+  // the turn.
+  const heldDown = t.alive.some(e => !!e.intent.action && !!kindOf(e).holdsTargetDown?.includes(e.intent.action) && !e.intent.target && !t.out.has(e.id));
   for (const [id, wasForced] of t.resting) {
     const f = t.byId(id)!;
     if (t.fallen.has(id)) continue;
-    if (wasForced && f === p && usurpOnYou && p.staggered) { t.recoverLast = true; continue; }
+    if (wasForced && f === p && heldDown && p.staggered) { t.recoverLast = true; continue; }
     if (wasForced) {
       // The forced Rest always ends the break, hit or not, with Fatigue back to 0.
       f.staggered = false;
       f.fatigue = 0;
       // With its Fatigue gone, so is everything that hung on it: the wax breaks away.
-      f.waxed = false;
-      f.encased = false;
+      backOnFeet(f);
       t.emit({ kind: "rest", who: id, result: "recovered", forced: true });
       continue;
     }
@@ -56,7 +57,7 @@ export function settleRests(t: Turn) {
       heal(f, -f.fatigue / 2);
       f.fatigue = 0;
     }
-    if (f.fatigue <= 0) f.waxed = false;
+    if (f.fatigue <= 0) fatigueGone(f);
     t.emit({ kind: "rest", who: id, result: "rested", forced: false });
   }
   t.endStep();

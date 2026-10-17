@@ -23,5 +23,6 @@ export function TestCombat({ onExit }: { onExit: () => void }) {
   const start = () => setRun(r => ({ id: (r?.id ?? 0) + 1, ...startFight(setup) }));
 
   if (!run) return <SetupScreen setup={setup} onChange={setSetup} onStart={start} onExit={onExit} />;
-  return <CombatScreen key={run.id} initial={run.state} opening={run.opening} onRetry={start} onChangeLoadout={() => setRun(null)} onExit={onExit} />;
+  const wonText = ENCOUNTERS.find(e => e.id === setup.encounterId)?.wonText;
+  return <CombatScreen key={run.id} initial={run.state} opening={run.opening} onRetry={start} onChangeLoadout={() => setRun(null)} wonText={wonText} onExit={onExit} />;
 }

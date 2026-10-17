@@ -3,27 +3,16 @@
  * play.
  */
 import { PLAYER_MAX_HP } from "../combat/fight";
-import { ENEMY_KINDS } from "../core/bestiary";
+import { ENEMY_KINDS, kindOf, type KindId, type StatusToggle } from "../core/bestiary";
 import { describeAction } from "../core/intents";
 import type { ActionDef } from "../core/patterns";
 import { createCombat } from "../core/setup";
 import type { CombatState } from "../core/types";
 
-export const VIEWER_KINDS = Object.keys(ENEMY_KINDS);
+export const VIEWER_KINDS = Object.keys(ENEMY_KINDS) as KindId[];
 
-/** A status the viewer can flip, and what each side is called. */
-interface ViewerToggle { key: string; off: string; on: string }
-
-/** Statuses each kind can be shown with (the line applies to everyone). */
-export const VIEWER_TOGGLES: Record<string, ViewerToggle[]> = {
-  warden: [
-    { key: "sealed", off: "Unsealed", on: "Sealed" },
-    { key: "phase2", off: "Phase 1", on: "Phase 2" },
-    { key: "flaming", off: "Flail unlit", on: "Flaming flail" },
-  ],
-};
-
-export const LINE_TOGGLE: ViewerToggle = { key: "back", off: "Front line", on: "Back line" };
+/** Which line it stands on: every kind can be shown on either (its own statuses come from its kind). */
+export const LINE_TOGGLE: StatusToggle = { key: "back", off: "Front line", on: "Back line" };
 
 export interface ViewerShow {
   stance: string;
@@ -39,7 +28,7 @@ export interface ViewerShow {
   interrupt?: boolean;
 }
 
-export function viewerFight(kind: string): CombatState {
+export function viewerFight(kind: KindId): CombatState {
   return createCombat(
     { name: "Dummy", maxHP: PLAYER_MAX_HP, weapon: "normal", armor: "light", charges: 0 },
     [{ kind, line: "front" }],
@@ -54,7 +43,7 @@ export const STAGGERED = "Staggered";
 export function applyShow(s: CombatState, show: ViewerShow): CombatState {
   const v = structuredClone(s);
   const e = v.enemies[0];
-  const kind = ENEMY_KINDS[e.kind];
+  const kind = kindOf(e);
   // Once the action has played, it stands in the stance it moved on to, statuses as the action left them.
   const played = s.turn > show.turn;
   const stanceName = played && show.next ? show.next : show.stance;
@@ -65,15 +54,13 @@ export function applyShow(s: CombatState, show: ViewerShow): CombatState {
   e.fatigue = 0;
   if (!played) {
     e.line = show.on.back ? "back" : "front";
-    for (const t of VIEWER_TOGGLES[e.kind] ?? []) e.flags[t.key] = !!show.on[t.key];
-    if (e.flags.phase2) e.flags.sealed = false; // phase two burns unsealed for good
-    else e.flags.flaming = false; // only his phase-two flame can set the flail alight
+    for (const t of kind.statuses ?? []) e.flags[t.key] = !!show.on[t.key];
+    kind.settleFlags?.(e.flags);
   }
   if (stanceName === STAGGERED) {
     e.staggered = true;
     e.fatigue = e.hp;
-    // A stagger puts the Warden's flame out (before phase two).
-    if ("sealed" in e.flags && !e.flags.phase2) e.flags.sealed = true;
+    kind.staggerFlags?.(e.flags);
     e.intent = { type: "rest", dir: e.line === "back" ? "advance" : "retreat", forced: true };
     v.status = "playing";
     return v;
@@ -87,7 +74,7 @@ export function applyShow(s: CombatState, show: ViewerShow): CombatState {
 }
 
 /** The actions a stance allows with the enemy as shown (conditions like *Sealed checked). */
-export function viewerActions(kindName: string, state: CombatState, stanceName: string) {
+export function viewerActions(kindName: KindId, state: CombatState, stanceName: string) {
   const kind = ENEMY_KINDS[kindName];
   // Staggered, the only way on is to recover (into a `Recover >` stance).
   if (stanceName === STAGGERED) {

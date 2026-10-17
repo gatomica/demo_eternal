@@ -5,7 +5,7 @@
 import { ENEMY_KINDS } from "../core/bestiary";
 import type { Enemy } from "../core/types";
 import type { Pt } from "./geom";
-import { WARDEN_POSES, type WardenPoseName } from "../warden/skeleton";
+import { flailOf, WARDEN_POSES, type WardenPoseName } from "../warden/skeleton";
 
 export interface Skeleton {
   head: Pt;
@@ -294,6 +294,28 @@ export const actionPose = (e: Enemy): PoseName =>
 export const windUpPose = (e: Enemy): PoseName => asPose(e.intent.actPose, "attack");
 
 export const strikePose = (e: Enemy): PoseName => asPose(e.intent.strikePose, "strike");
+
+/** A strike that spins on into its next stance (Flail Swing): the pose it hands off to, its trails still fading. */
+export const handOffOf = (strike?: string): PoseName | undefined => WARDEN_POSES[strike as WardenPoseName]?.trailEndsAt;
+
+/**
+ * Where a blow struck in this pose meets the floor, in figure units (its shockwave starts there):
+ * the fist, or a flail's head brought down on the floor. Unset for poses that don't say.
+ */
+export function impactPoint(strike?: string): Pt | undefined {
+  const landing = WARDEN_POSES[strike as WardenPoseName];
+  if (!landing) return undefined;
+  return landing.slamTrail ? flailOf(landing).ball : landing.freeArm.hand;
+}
+
+// Every pose a kind names must be one we can draw, checked when the game loads (like its pattern).
+for (const [id, kind] of Object.entries(ENEMY_KINDS)) {
+  const named = [
+    ...Object.values(kind.stancePoses), kind.idlePose, kind.downPose, kind.flinchPose,
+    ...Object.values(kind.actionPoses ?? {}).flatMap(p => [p.act, p.strike, p.rest, p.guard]),
+  ];
+  for (const name of named) if (name && !(name in ALL_POSES)) throw new Error(`${kind.name} (${id}): no pose named "${name}"`);
+}
 
 /** Where a figure's own flame is, in figure units: a flame it holds, or else a candle above its head. */
 export function flameOf(pose: PoseName): readonly [number, number] {

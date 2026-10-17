@@ -34,8 +34,6 @@ export const ARMOR: Record<ArmorTier, { resist: number; weight: number; label: s
 /** Even unburdened, a dodge costs this many sixteenths of the damage dodged. */
 export const DODGE_BASE = 1;
 
-/** A flaming flail's direct hit deals this much of its damage again, as extra damage. */
-export const FLAMING_BONUS = 1 / 4;
 
 /** Rest clears this much Fatigue. */
 export const REST_CLEARS = 8;

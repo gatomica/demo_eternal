@@ -1,6 +1,7 @@
 /**
  * types.ts — combat's data: fighters, intents, events, steps and the fight's state.
  */
+import type { KindId } from "./bestiary";
 
 export type Tier = "light" | "normal" | "heavy";
 
@@ -100,7 +101,7 @@ export interface Player extends Fighter {
 }
 
 export interface Enemy extends Fighter {
-  kind: string;
+  kind: KindId;
   line: Line;
   alive: boolean;
   intent: Intent;
@@ -244,7 +245,7 @@ export interface PlayerSetup {
 }
 
 export interface EnemySetup {
-  kind: string;
+  kind: KindId;
   name?: string;
   line?: Line;
   /** Action names (or kinds) to open with, one per turn. */

@@ -2,16 +2,18 @@
  * Scene.tsx — the battlefield: the floor and every figure, seen through the camera.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { Variant } from "../core/bestiary";
 import type { ArmorTier, WeaponTier } from "../core/types";
 import { type Cam, ease, figureBox, HORIZON, lerpAngle, lerpCam, lerpVec, NEAR, planningCamera, project, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, type Vec } from "./camera";
 import { ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
 import type { Pt } from "./geom";
 import { Shards } from "./HealthBar";
+import { lookOf } from "./looks";
 import { flameOf, type PoseName } from "./poses";
 import { StickFigure } from "./StickFigure";
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "../warden/arena";
 import { IGNITE } from "../warden/scenes";
-import { type CandleArm, WARDEN_POSES, type WardenPoseName } from "../warden/skeleton";
+import type { CandleArm, WardenPoseName } from "../warden/skeleton";
 
 export interface SceneFigure {
   id: string;
@@ -19,7 +21,9 @@ export interface SceneFigure {
   pose: PoseName;
   weapon: WeaponTier;
   armor: ArmorTier;
-  variant?: "waxed" | "warden";
+  variant?: Variant;
+  /** It carries a flame of its own (a waxed): phase two's scene draws on it. */
+  flame?: boolean;
   arm?: CandleArm;
   lingerFrom?: WardenPoseName;
   /** When (performance.now()) the Warden's flame went out, while its smoke still shows. */
@@ -179,6 +183,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
   };
   const toScreen = (box: { x: number; y: number; w: number; h: number }, p: readonly [number, number], mirror: boolean): Pt =>
     [box.x + (box.w * (mirror ? 100 - p[0] : p[0])) / 100, box.y + (box.h * p[1]) / 120];
+  /** The hand a figure's stolen flames stream into, in figure units. */
+  const handOf = (f: SceneFigure) => lookOf(f.variant)?.flameHand ?? flameOf(f.pose);
   // Lit for good once the arena is lit, or from the moment his flare relights them.
   const propLit = !!arenaLit || (!!ignite && igniteT >= IGNITE.flare);
   // Every flame the phase-two scene draws on, in screen space: the waxed, the sealed sleepwalkers,
@@ -190,9 +196,9 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
       const i = sources.length;
       sources.push({ id, at, seen, kindle: IGNITE.kindle + rand(ignite.seed, i) * 1200, draw: IGNITE.draw + rand(ignite.seed + 1, i) * 1400 });
     };
-    for (const { f, box } of placed) if (f.variant === "waxed") add(f.id, toScreen(box, flameOf(f.pose), f.view === "front"), true);
+    for (const { f, box } of placed) if (f.flame) add(f.id, toScreen(box, flameOf(f.pose), f.view === "front"), true);
     for (const { pr, box } of props) add(pr.id, toScreen(box, PROP_FLAME[pr.kind], !!pr.flip), true);
-    const [hx, hy] = toScreen(igniter.box, WARDEN_POSES["wd-idle"].freeArm.hand, igniter.f.view === "front");
+    const [hx, hy] = toScreen(igniter.box, handOf(igniter.f), igniter.f.view === "front");
     const far = Math.max(w, h) * 0.8;
     for (let k = 0; k < 10; k++) {
       const a = (k / 10) * Math.PI * 2 + rand(ignite.seed + 2, k);
@@ -239,13 +245,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
         const [fx, fy] = toScreen(box, flameOf(f.pose), f.view === "front");
         const sz = box.h * 0.13;
         return (
-          <svg key={`candle-${f.id}`} className="arena-candle-flame" style={{ left: fx - sz / 2, top: fy - sz * 0.8, width: sz, height: sz, zIndex: 1001 - Math.round(box.depth * 10) }} viewBox="-10 -16 20 20" aria-hidden="true">
-            <circle cx={0} cy={-3} r={9} className="fig-glow" />
-            <g className="fig-flame">
-              <path d="M0 -12 C4.6 -5 4.4 0 0 0 C-4.4 0 -4.6 -5 0 -12 Z" />
-              <path d="M0 -6 C2 -2.4 2 0 0 0 C-2 0 -2 -2.4 0 -6 Z" className="fig-flame-core" />
-            </g>
-          </svg>
+          <LoneFlame key={`candle-${f.id}`} className="arena-candle-flame" at={[fx, fy]} sz={sz} zIndex={1001 - Math.round(box.depth * 10)} />
         );
       })}
       {dark && <div className="scene-dark" style={{ opacity: dark.level, transition: `opacity ${dark.ms}ms ease-in` }} />}
@@ -255,22 +255,16 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
         const [fx, fy] = toScreen(t.box, flameOf(t.f.pose), t.f.view === "front");
         // The size of the figure's own flame (the Warden's candle is a little smaller), so it
         // hands over to it seamlessly as the light comes back.
-        const sz = t.box.h * (t.f.variant === "warden" ? 0.12 : 0.16);
+        const sz = t.box.h * (lookOf(t.f.variant)?.loneFlame ?? 0.16);
         return (
-          <svg className="scene-lone-flame" style={{ left: fx - sz / 2, top: fy - sz * 0.8, width: sz, height: sz }} viewBox="-10 -16 20 20" aria-hidden="true">
-            <circle cx={0} cy={-3} r={9} className="fig-glow" />
-            <g className="fig-flame">
-              <path d="M0 -12 C4.6 -5 4.4 0 0 0 C-4.4 0 -4.6 -5 0 -12 Z" />
-              <path d="M0 -6 C2 -2.4 2 0 0 0 C-2 0 -2 -2.4 0 -6 Z" className="fig-flame-core" />
-            </g>
-          </svg>
+          <LoneFlame className="scene-lone-flame" at={[fx, fy]} sz={sz} />
         );
       })()}
       {usurpTrail && (() => {
         const a = placed.find(x => x.f.id === usurpTrail.from), b = placed.find(x => x.f.id === usurpTrail.to);
         if (!a || !b) return null;
         const from = toScreen(a.box, flameOf(a.f.pose), a.f.view === "front");
-        const hand = toScreen(b.box, WARDEN_POSES["wd-idle"].freeArm.hand, b.f.view === "front");
+        const hand = toScreen(b.box, handOf(b.f), b.f.view === "front");
         // Arching up over him: the control point well above both.
         const ctl: Pt = [(from[0] + hand[0]) / 2, Math.min(from[1], hand[1]) - b.box.h * 0.22];
         const N = 28, w = b.box.h * 0.05;
@@ -301,17 +295,9 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
       })()}
       {ignite && igniter && (() => {
         const t = igniteT;
-        const [hx, hy] = toScreen(igniter.box, WARDEN_POSES["wd-idle"].freeArm.hand, igniter.f.view === "front");
+        const [hx, hy] = toScreen(igniter.box, handOf(igniter.f), igniter.f.view === "front");
         const drawn = sources.filter(src => t >= src.draw).length / Math.max(1, sources.length);
-        const flame = (key: string, at: Pt, sz: number, cls = "") => (
-          <svg key={key} className={`scene-lone-flame ${cls}`} style={{ left: at[0] - sz / 2, top: at[1] - sz * 0.8, width: sz, height: sz }} viewBox="-10 -16 20 20" aria-hidden="true">
-            <circle cx={0} cy={-3} r={9} className="fig-glow" />
-            <g className="fig-flame">
-              <path d="M0 -12 C4.6 -5 4.4 0 0 0 C-4.4 0 -4.6 -5 0 -12 Z" />
-              <path d="M0 -6 C2 -2.4 2 0 0 0 C-2 0 -2 -2.4 0 -6 Z" className="fig-flame-core" />
-            </g>
-          </svg>
-        );
+        const flame = (key: string, at: Pt, sz: number, cls = "") => <LoneFlame key={key} className={`scene-lone-flame ${cls}`} at={at} sz={sz} />;
         return (
           <>
             {/* Flames kindling in the dark. */}
@@ -335,11 +321,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
             {t >= IGNITE.flare && (
               <>
                 <div key={`flare-${ignite.seed}`} className="blast-flash ignite-flare" style={{ left: hx, top: hy, width: igniter.box.h * 1.4, height: igniter.box.h * 1.4 }}>
-                  <svg viewBox="-50 -50 100 100" className="shockwave-svg">
-                    <circle cx={0} cy={0} r={48} className="fig-burst-outer" />
-                    <circle cx={-6} cy={4} r={34} className="blast-mid" />
-                    <circle cx={-10} cy={6} r={20} className="fig-burst-inner" />
-                  </svg>
+                  <FireballFlash />
                 </div>
                 {posNow(ignite.who) && <Shockwave key={`ring-${ignite.seed}`} center={posNow(ignite.who)!} reach={16} toward={0} flame={0.9} proj={proj} full />}
               </>
@@ -397,11 +379,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
           return (
             <div key={pr.key}>
               <div className="blast-flash" style={{ left: fx, top: fy, width: ball, height: ball }}>
-                <svg viewBox="-50 -50 100 100" className="shockwave-svg">
-                  <circle cx={0} cy={0} r={48} className="fig-burst-outer" />
-                  <circle cx={-6} cy={4} r={34} className="blast-mid" />
-                  <circle cx={-10} cy={6} r={20} className="fig-burst-inner" />
-                </svg>
+                <FireballFlash />
               </div>
               {(() => {
                 const A = posNow(pr.from), B = posNow(pr.to);
@@ -428,6 +406,30 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
         );
       })}
     </div>
+  );
+}
+
+/** A lone flame floating over the scene, in screen pixels: a glow, and the flame standing on `at`. */
+function LoneFlame({ at, sz, className, zIndex }: { at: Pt; sz: number; className: string; zIndex?: number }) {
+  return (
+    <svg className={className} style={{ left: at[0] - sz / 2, top: at[1] - sz * 0.8, width: sz, height: sz, zIndex }} viewBox="-10 -16 20 20" aria-hidden="true">
+      <circle cx={0} cy={-3} r={9} className="fig-glow" />
+      <g className="fig-flame">
+        <path d="M0 -12 C4.6 -5 4.4 0 0 0 C-4.4 0 -4.6 -5 0 -12 Z" />
+        <path d="M0 -6 C2 -2.4 2 0 0 0 C-2 0 -2 -2.4 0 -6 Z" className="fig-flame-core" />
+      </g>
+    </svg>
+  );
+}
+
+/** A fireball's flash, filling its box (Flame Blast, and the phase-two flare). */
+function FireballFlash() {
+  return (
+    <svg viewBox="-50 -50 100 100" className="shockwave-svg">
+      <circle cx={0} cy={0} r={48} className="fig-burst-outer" />
+      <circle cx={-6} cy={4} r={34} className="blast-mid" />
+      <circle cx={-10} cy={6} r={20} className="fig-burst-inner" />
+    </svg>
   );
 }
 

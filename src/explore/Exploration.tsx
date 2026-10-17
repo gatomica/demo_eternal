@@ -21,8 +21,8 @@
 import { useEffect, useRef, useState } from "react";
 import { dirOf, wrapIndex } from "../ui/input";
 import { PauseMenu } from "../ui/Menu";
-import { drawKeeper, drawWalker, drawWardenMap, type Frame } from "./figures";
-import { CHASE_MEMORY, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, foeFloor, GRACE_MS, huddle, lookOf, MAP_FOES, type MapFoe, MAX_IN_FIGHT, stepsFrom, TOUCH, waypoint } from "./foes";
+import { drawKeeper, drawWalker, type Frame, MAP_FIGURES } from "./figures";
+import { CHASE_MEMORY, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, foeFloor, GRACE_MS, huddle, MAP_FOES, type MapFoe, MAX_IN_FIGHT, stepsFrom, TOUCH, waypoint } from "./foes";
 import { KEEPER_REACH, KEEPERS, REST_NOTE_MS } from "./keepers";
 import { cornerNudge, slide, surfaceNear, type Walker } from "./movement";
 import { CHUNK, CHUNK_PAD_BOTTOM, CHUNK_PAD_TOP, makeCanvas, paintChunk } from "./paint";
@@ -436,11 +436,10 @@ export function Exploration({ journey, onEncounter, onExit }: {
           const frame: Frame = f.walked <= 0 ? "stand" : phase === 0 ? "stepR" : phase === 2 ? "stepL" : "stand";
           // Each member of the group drawn as what it is, back ones first.
           const spots = huddle(f.def.fight.length);
-          const members = f.def.fight.map((m, i) => ({ kind: m.kind, look: lookOf(m.kind), at: spots[i] })).sort((a, b) => a.at[1] - b.at[1]);
-          for (const { kind, look, at: [dx, dy] } of members) {
+          const members = f.def.fight.map((m, i) => ({ kind: m.kind, at: spots[i] })).sort((a, b) => a.at[1] - b.at[1]);
+          for (const { kind, at: [dx, dy] } of members) {
             const px = ox + (f.x + dx) * T, py = oy + (f.y + dy - f.alt * RISE - BODY_ABOVE_FEET) * T;
-            if (kind === "warden") drawWardenMap(ctx, px, py, T, f.facing);
-            else drawWalker(ctx, px, py, T, f.facing, frame, true, 0, look);
+            MAP_FIGURES[kind](ctx, px, py, T, f.facing, frame);
           }
         } });
       }

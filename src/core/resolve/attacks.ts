@@ -6,8 +6,10 @@
  * staggered loses whatever they hadn't done yet: a slower attack, a Block for later attacks, a
  * Rest, a move.
  */
-import { attackCost, attackDamage, dodgeFatigue, FLAMING_BONUS, resistance, WEAPONS } from "../rules";
+import { kindOf } from "../bestiary";
+import { attackCost, attackDamage, dodgeFatigue, resistance, WEAPONS } from "../rules";
 import type { Enemy, Fighter, Rng } from "../types";
+import { waxOn } from "./statuses";
 import type { Turn } from "./turn";
 
 export function resolveAttacks(t: Turn, rng: Rng) {
@@ -95,19 +97,18 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   if (!dummy) target.hp -= through;
   const sentBack = blocking && ranged ? 0 : resisted;
   t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, grit });
-  // A direct waxing hit (the Warden's flail) leaves wax behind; on wax already there, it also tires.
-  // Once his flame is free (phase two) it leaves no wax; set on fire, it burns for extra damage.
-  const waxer = attacker !== p ? (attacker as Enemy) : undefined;
-  if (!blocking && waxer?.intent.tags?.includes("waxing") && waxer.flags.flaming) {
-    const burn = through * FLAMING_BONUS;
-    if (!dummy) target.hp -= burn;
-    if (burn > 0) t.hurt.add(target.id);
-    t.emit({ kind: "burned", who: target.id, damage: burn });
-  }
-  if (!blocking && waxer?.intent.tags?.includes("waxing") && !waxer.flags.phase2) {
-    const bonus = target.waxed ? through / 8 : 0;
-    t.tire(target, bonus);
-    target.waxed = true;
-    t.emit({ kind: "waxed", who: target.id, bonus });
+  // A direct hit may do more, by the attacker's own rules (the Warden's flail waxes, or burns).
+  const self = attacker !== p ? (attacker as Enemy) : undefined;
+  const onHit = self && kindOf(self).onDirectHit;
+  if (!blocking && self && onHit) {
+    onHit({
+      self, target, damage: through, tags: self.intent.tags ?? [],
+      burn: amount => {
+        if (!dummy) target.hp -= amount;
+        if (amount > 0) t.hurt.add(target.id);
+        t.emit({ kind: "burned", who: target.id, damage: amount });
+      },
+      wax: () => waxOn(t, target, through),
+    });
   }
 }

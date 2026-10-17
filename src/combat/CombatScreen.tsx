@@ -5,18 +5,19 @@ import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, us
 import { ActionWheel, type Anchor } from "./ActionWheel";
 import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_SIDE, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, KNOCK_MS, KNOCKBACK, NUDGE_MS, OPENING_LEAD_IN, phaseFor, phaseTwoOf, type Playback, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt } from "./playback";
 import { defaultSelection, rowsOf, sameSel, type Selection, type Wheel, type WheelOption } from "./selection";
-import { ENEMY_KINDS } from "../core/bestiary";
+import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveTurn } from "../core/resolve";
 import type { CombatState, Enemy, Opening, PlayerAction } from "../core/types";
 import { actionCamera, behind, closeIn, facingToward, figureBox, formation, lerpAngle, pushedAway, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
 import type { Projectile } from "../render/effects";
 import { type BarValues, HealthBar } from "../render/HealthBar";
-import { actionPose, asPose, downPoseOf, flinchPoseOf, idlePoseOf, poseForIntent, type PoseName, strikePose, windUpPose } from "../render/poses";
+import { lookOf } from "../render/looks";
+import { actionPose, asPose, downPoseOf, flinchPoseOf, handOffOf, idlePoseOf, impactPoint, poseForIntent, type PoseName, strikePose, windUpPose } from "../render/poses";
 import { Scene, type SceneFigure } from "../render/Scene";
 import { type Dir, useKeys, wrapIndex } from "../ui/input";
 import { type MenuOption, PauseMenu } from "../ui/Menu";
 import { IGNITE } from "../warden/scenes";
-import { type CandleArm, flailOf, WARDEN_POSES, type WardenPoseName } from "../warden/skeleton";
+import type { CandleArm, WardenPoseName } from "../warden/skeleton";
 
 /** 1 → I, 4 → IV, 9 → IX... */
 function roman(n: number): string {
@@ -33,7 +34,10 @@ function roman(n: number): string {
 
 const barValues = (f: { hp: number; fatigue: number; death: number }): BarValues => ({ hp: f.hp, fatigue: f.fatigue, death: f.death });
 
-export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, changeLabel, onTurnPlayed }: {
+/** How an enemy's look draws it differently (its kind's variant). */
+const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
+
+export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, changeLabel, wonText, onTurnPlayed }: {
   initial: CombatState;
   /** A scene to play before the first turn (it leaves the fight as `initial`). */
   opening?: Opening;
@@ -47,6 +51,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   attackOnPlay?: boolean;
   /** The pause menu's label for onChangeLoadout. */
   changeLabel?: string;
+  /** The title when you win (fights off the map have their own). */
+  wonText?: string;
   /** Called as a turn finishes playing, with the fight as it now stands. */
   onTurnPlayed?: (s: CombatState) => void;
   onRetry: () => void;
@@ -280,7 +286,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     const { w, h } = viewport;
     if (!p || !w) return setAnchor(null);
     const foe = fight.enemies.find(e => e.id === selId);
-    const b = figureBox(shotCamera(shot), p, w, h, foe && ENEMY_KINDS[foe.kind]?.scale);
+    const b = figureBox(shotCamera(shot), p, w, h, foe && kindOf(foe).scale);
     setAnchor({ x: b.x, y: b.y, w: b.w, h: b.h, hudW: w, hudH: h });
   }, [wheelOpen, selId, shot, viewport]);
 
@@ -336,7 +342,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const playSignalled = useEffectEvent(() => {
     const foe = fight.enemies.find(e => e.alive);
     // (Not against a fixed rule like Usurp Flame: that plays on its own.)
-    const fixedRule = !!foe && !!ENEMY_KINDS[foe.kind]?.fixedActions?.includes(foe.intent.action ?? "");
+    const fixedRule = !!foe && !!kindOf(foe).fixedActions?.includes(foe.intent.action ?? "");
     if (playing && !busy) play(!fixedRule && (attackOnPlay || foe?.intent.type === "block" || foe?.intent.type === "maneuver") ? { type: "attack", target: foe!.id } : { type: "rest" });
   });
   const lastSignal = useRef(playSignal);
@@ -358,7 +364,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   useEffect(() => {
     for (const e of fight.enemies) {
       const now = !!e.flags.phase2, was = phaseTwoBefore.current[e.id];
-      if (!playback && was === false && now && e.kind === "warden") setIgnite({ who: e.id, start: performance.now(), seed: Math.random() * 100 });
+      if (!playback && was === false && now && lookOfFoe(e)?.igniteScene) setIgnite({ who: e.id, start: performance.now(), seed: Math.random() * 100 });
       phaseTwoBefore.current[e.id] = now;
     }
   }, [fight, playback]);
@@ -384,7 +390,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     : playback?.phase === "ignite"
       ? phaseTwoOf(playback.steps[playback.index])?.who
       : !playback
-        ? fight.enemies.find(e => e.kind === "warden" && e.flags.phase2 && phaseTwoBefore.current[e.id] === false)?.id
+        ? fight.enemies.find(e => lookOfFoe(e)?.igniteScene && e.flags.phase2 && phaseTwoBefore.current[e.id] === false)?.id
         : undefined;
   const ignite = igniteState ?? (pendingWho ? { who: pendingWho, start: undefined, seed: 0 } : null);
   /** How far into the scene it is, as the last of IGNITE_MARKS reached (0 before it starts). */
@@ -586,7 +592,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return at >= 0 && playback.index >= at ? actionPose(e) : poseForIntent(e);
   };
   /** Its strike pose spins on into its next stance (Flail Swing): it hands off partway through. */
-  const handsOff = (e: Enemy) => !!WARDEN_POSES[e.intent.strikePose as WardenPoseName]?.trailEndsAt;
+  const handsOff = (e: Enemy) => !!handOffOf(e.intent.strikePose);
   /** Its strike has just handed off to its next stance (still this step). */
   const strikeJustOver = (e: Enemy) =>
     !!playback && impact && handsOff(e) && strikeStep(e.id) === playback.index && restOver === stepKey;
@@ -686,12 +692,12 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return playbackPose(e.id, e.staggered, {
       guard: guarding ? { hold: poseForIntent(e), react: e.intent.guardPose ? asPose(e.intent.guardPose, "block") : actionPose(e), keepAfterDodge: e.intent.type === "maneuver" } : undefined,
       telegraph: playback ? restTelegraph(e) : poseForIntent(e),
-      // The Warden attacks straight out of whatever stance he's in.
-      down: downPoseOf(e), windUp: ENEMY_KINDS[e.kind]?.variant === "warden" && e.intent.stance ? poseForIntent(e) : windUpPose(e), strike: strikePose(e), idle: settledPose(e),
+      // Some (the Warden) attack straight out of whatever stance they're in.
+      down: downPoseOf(e), windUp: kindOf(e).attacksFromStance && e.intent.stance ? poseForIntent(e) : windUpPose(e), strike: strikePose(e), idle: settledPose(e),
       strikeHandsOff: handsOff(e),
       // Its strike always plays out in full: if it ends up staggered (or down), it still spins on
       // into the pose its strike ends in, and only drops once the step is over.
-      handOff: handsOff(e) && !standingAfter(e) ? (WARDEN_POSES[e.intent.strikePose as WardenPoseName].trailEndsAt as PoseName) : undefined,
+      handOff: handsOff(e) && !standingAfter(e) ? handOffOf(e.intent.strikePose) : undefined,
       rested: e.intent.restPose ? asPose(e.intent.restPose, "rest") : undefined,
     });
   };
@@ -717,10 +723,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       const kind = thrower?.intent.projectile;
       // Melee attacks throw nothing, but some leave a shockwave where they land.
       if (!ev.ranged && kind !== "impact") continue;
-      // A Warden blast starts at his fist, wherever his landing pose puts it.
-      const landing = thrower?.intent.strikePose && WARDEN_POSES[thrower.intent.strikePose as WardenPoseName];
-      // ...or, for a flail brought down on the floor, where its head lands.
-      const origin = (kind === "blast" || kind === "impact") && landing ? (landing.slamTrail ? flailOf(landing).ball : landing.freeArm.hand) : undefined;
+      // A blast or a blow into the floor starts where its landing pose puts it: a fist, or the
+      // head of a flail brought down on the floor.
+      const origin = kind === "blast" || kind === "impact" ? impactPoint(thrower?.intent.strikePose) : undefined;
       // A flaming flail's slam burns.
       const fiery = kind === "impact" && !!thrower?.flags.flaming;
       if (kind) projectiles.push({ from: ev.attacker, to: ev.target, kind, origin, fiery, key: `${stepKey}-${ev.attacker}` });
@@ -735,8 +740,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     : (playback
       ? phaseTwoStep >= 0
         ? reached(phaseTwoStep)
-        : playback.from.enemies.some(e => e.kind === "warden" && e.flags.phase2)
-      : fight.enemies.some(e => e.kind === "warden" && e.flags.phase2));
+        : playback.from.enemies.some(e => kindOf(e).arena && e.flags.phase2)
+      : fight.enemies.some(e => kindOf(e).arena && e.flags.phase2));
   const playerSealed = (p.waxed || !!p.encased) && p.staggered;
   const figures: SceneFigure[] = [
     {
@@ -748,6 +753,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // that way until you recover: no other look in between.
       pose: track("player", playerSealed ? "w-idle" : playerPose),
       variant: playerSealed ? "waxed" : undefined,
+      // Sealed, your own flame burns on your head (phase two's scene draws on it too).
+      flame: playerSealed,
       candle: p.waxed && p.staggered && !(usurpNow?.target === "player" && usurpStage === "reveal"),
       encased: playerSealed,
       // Waxed but still standing: wax caked on you.
@@ -762,25 +769,26 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       onPick: () => { if (playSignal === undefined) openWheel({ kind: "player" }); },
     },
     ...view.enemies
-      // The waxed stay where they fell, faded, for the rest of the fight.
-      .filter(e => e.alive || fx.get(e.id)?.classes.includes("fx-fall") || e.kind === "waxed")
+      // Some (the waxed) stay where they fell, faded, for the rest of the fight.
+      .filter(e => e.alive || fx.get(e.id)?.classes.includes("fx-fall") || kindOf(e).remains)
       .map((e): SceneFigure => ({
         id: e.id,
         view: "front",
         pose: !playback && walkOff?.[e.id] ? walkOff[e.id] : track(e.id, enemyPose(e)),
         weapon: e.weapon,
         armor: e.armor,
-        variant: ENEMY_KINDS[e.kind]?.variant,
-        scale: ENEMY_KINDS[e.kind]?.scale,
-        arm: e.kind === "warden" ? (arms[e.id] = candleArmOf(e)) : undefined,
+        variant: kindOf(e).variant,
+        scale: kindOf(e).scale,
+        flame: !!kindOf(e).flame,
+        arm: lookOfFoe(e)?.candleArm ? (arms[e.id] = candleArmOf(e)) : undefined,
         // Phase two's look (black wax, burning inside) from the moment all is dark.
         phase2Look: !!ignite && ignite.who === e.id && igniteNow >= IGNITE.kindle,
-        flailFire: e.kind === "warden" && !!shownFlags(e).flaming,
+        flailFire: !!lookOfFoe(e)?.candleArm && !!shownFlags(e).flaming,
         // Its rest pose just gave way to its next stance: that pose's trails keep fading meanwhile.
         lingerFrom: restJustOver(e) ? (e.intent.restPose as WardenPoseName) : strikeJustOver(e) ? (e.intent.strikePose as WardenPoseName) : undefined,
         smokeSince: smoke[e.id],
-        classes: [...(fx.get(e.id)?.classes ?? []), ...(!e.alive && e.kind === "waxed" ? ["is-remains"] : [])],
-        candle: !e.alive && e.kind === "waxed" && arenaLit && e.fate !== "encased",
+        classes: [...(fx.get(e.id)?.classes ?? []), ...(!e.alive && kindOf(e).remains ? ["is-remains"] : [])],
+        candle: !e.alive && !!kindOf(e).remains && arenaLit && e.fate !== "encased",
         // Its flame taken: sealed whole in wax.
         encased: !e.alive && e.fate === "encased",
         stepKey,
@@ -808,7 +816,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       <section className="stage" aria-label="Battlefield">
         <Scene
           figures={figures} shot={shot} projectiles={projectiles} usurpTrail={usurpTrail} arenaLit={arenaLit}
-          arena={fight.enemies.some(e => e.kind === "warden")}
+          arena={fight.enemies.some(e => kindOf(e).arena)}
           dark={ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark}
           ignite={ignite ? { who: ignite.who, start: ignite.start, seed: ignite.seed } : undefined}
         />
@@ -857,7 +865,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
             <h2>
               {fight.status !== "won" ? "You fade"
                 : onDone ? (fight.enemies.length > 1 ? "They lie still" : "It lies still")
-                : "The sleepwalkers are still"}
+                : wonText ?? "The sleepwalkers are still"}
             </h2>
             {onDone ? (
               <div className="setup-buttons">

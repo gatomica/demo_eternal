@@ -5,17 +5,17 @@
  */
 import { useCallback, useMemo, useState } from "react";
 import { CombatScreen } from "../combat/CombatScreen";
-import { ENEMY_KINDS } from "../core/bestiary";
+import { ENEMY_KINDS, type KindId, type StatusToggle } from "../core/bestiary";
 import { nextStances } from "../core/patterns";
 import type { CombatState } from "../core/types";
-import { applyShow, LINE_TOGGLE, STAGGERED, VIEWER_KINDS, VIEWER_TOGGLES, viewerActions, viewerFight, type ViewerShow } from "./viewerModel";
+import { applyShow, LINE_TOGGLE, STAGGERED, VIEWER_KINDS, viewerActions, viewerFight, type ViewerShow } from "./viewerModel";
 import { cycle, useKeys } from "../ui/input";
 import { Picker } from "../ui/Picker";
 
 /** Pick which enemy to look at. A/D change, E opens it, Q goes back to the menu. */
 function ViewerSetup({ kind, onChange, onStart, onExit }: {
-  kind: string;
-  onChange: (k: string) => void;
+  kind: KindId;
+  onChange: (k: KindId) => void;
   onStart: () => void;
   onExit: () => void;
 }) {
@@ -55,7 +55,7 @@ export function ModelViewer({ onExit }: { onExit: () => void }) {
 }
 
 function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
-  kind: string;
+  kind: KindId;
   onBack: () => void;
   onRetry: () => void;
   onExit: () => void;
@@ -66,13 +66,13 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
   const initial = useMemo(() => viewerFight(kindName), [kindName]);
   const override = useCallback((s: CombatState) => applyShow(s, show), [show]);
   const shown = useMemo(() => applyShow(initial, show), [initial, show]);
-  const toggles = [LINE_TOGGLE, ...(VIEWER_TOGGLES[kindName] ?? [])];
-  const flip = (key: string) =>
+  const toggles = [LINE_TOGGLE, ...(kind.statuses ?? [])];
+  const flip = (toggle: StatusToggle) =>
     setShow(prev => {
-      const on = { ...prev.on, [key]: !prev.on[key] };
-      // Entering phase two, he always ends up in the "Second Phase >" stance (Idle).
-      const second = key === "phase2" && on.phase2 ? nextStances(kind.pattern, { action: "Second Phase", outcome: "done" })[0]?.name : undefined;
-      return { ...prev, action: undefined, next: undefined, interrupt: undefined, on, stance: second ?? prev.stance };
+      const on = { ...prev.on, [toggle.key]: !prev.on[toggle.key] };
+      // Switched on, some statuses send it to the stance that follows them (phase two: Idle).
+      const enters = toggle.enters && on[toggle.key] ? nextStances(kind.pattern, { action: toggle.enters, outcome: "done" })[0]?.name : undefined;
+      return { ...prev, action: undefined, next: undefined, interrupt: undefined, on, stance: enters ?? prev.stance };
     });
   // Playing an action also picks, at random, which of the stances it leads to it moves on to,
   // as in a fight; it settles into that stance as the action ends.
@@ -89,7 +89,7 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
     const e = s.enemies[0];
     setShow(prev => {
       const on: Record<string, boolean> = { ...prev.on, back: e.line === "back" };
-      for (const t of VIEWER_TOGGLES[kindName] ?? []) on[t.key] = !!e.flags[t.key];
+      for (const t of kind.statuses ?? []) on[t.key] = !!e.flags[t.key];
       return { stance: prev.next ?? prev.stance, on, turn: s.turn };
     });
   };
@@ -105,10 +105,10 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
         <div className="picker-options">
           {toggles.map(t => {
             const on = !!show.on[t.key];
-            const locked = (t.key === "sealed" && !!show.on.phase2) || (t.key === "flaming" && !show.on.phase2);
+            const locked = t.locked?.(show.on) ?? null;
             return (
-              <button key={t.key} className="chip viewer-toggle" aria-pressed={on} disabled={locked} onClick={() => flip(t.key)}>
-                {locked ? (t.key === "flaming" ? `${t.off} (phase 1)` : `${t.off} (phase 2)`) : on ? t.on : t.off}
+              <button key={t.key} className="chip viewer-toggle" aria-pressed={on} disabled={locked !== null} onClick={() => flip(t)}>
+                {locked ?? (on ? t.on : t.off)}
               </button>
             );
           })}

@@ -12,11 +12,12 @@
  * Gear attaches to joints: the weapon to the weapon hand, armor to the torso, shoulders and head.
  */
 import { memo } from "react";
+import type { Variant } from "../core/bestiary";
 import type { ArmorTier, WeaponTier } from "../core/types";
 import { lerp, limb, type Pt } from "./geom";
+import { lookOf } from "./looks";
 import { ALL_POSES, type PoseName, type Skeleton } from "./poses";
-import type { CandleArm, WardenPoseName, WardenSkeleton } from "../warden/skeleton";
-import { WardenFigure } from "../warden/WardenFigure";
+import type { CandleArm, WardenPoseName } from "../warden/skeleton";
 
 /* ============================================================
  * Gear
@@ -111,7 +112,7 @@ interface StickFigureProps {
   armor: ArmorTier;
   title?: string;
   /** "waxed": kneeling, shins bound together and head sealed in wax. "warden": the Penitent Warden. */
-  variant?: "waxed" | "warden";
+  variant?: Variant;
   /** The Warden's candle arm. */
   arm?: CandleArm;
   /** The Warden: the rest pose he has just left, whose trails keep fading. */
@@ -206,13 +207,15 @@ function Prop({ prop }: { prop: NonNullable<Skeleton["prop"]> }) {
 export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, encased }: StickFigureProps) {
   const s = ALL_POSES[pose];
   const front = view === "front";
-  if (variant === "warden" && "ball" in s) {
+  // A look that draws itself (the Warden), in its own poses.
+  const own = lookOf(variant)?.figure;
+  if (own?.owns(s)) {
     return (
       <svg viewBox="0 0 100 120" className={`figure figure-${view}`} role="img" aria-label={title}>
         {title && <title>{title}</title>}
-        <ellipse cx={50} cy={115} rx={28} ry={3.2} className="fig-shadow" />
+        <ellipse cx={50} cy={115} rx={own.shadow.rx} ry={own.shadow.ry} className="fig-shadow" />
         <g transform={front ? "translate(100 0) scale(-1 1)" : undefined}>
-          <WardenFigure s={s as WardenSkeleton} front={front} arm={arm ?? "lit"} lingerFrom={lingerFrom} smokeAgo={smokeAgo} phase2Look={phase2Look} flailFire={flailFire} />
+          {own.draw({ s, front, arm, lingerFrom, smokeAgo, phase2Look, flailFire })}
         </g>
       </svg>
     );

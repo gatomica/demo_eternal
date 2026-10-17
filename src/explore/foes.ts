@@ -6,19 +6,17 @@
  * lurch after you, slowly, if you come close; sleepwalkers drift around and give chase, though
  * never as fast as you walk. Touching one starts its fight.
  */
+import type { KindId } from "../core/bestiary";
 import { ENCOUNTERS } from "../core/encounters";
 import type { EnemySetup } from "../core/types";
-import { type Look, SLEEPWALKER_LOOK, WAXED_LOOK } from "./figures";
 import type { Walker } from "./movement";
 import { HALF_D, HALF_W } from "./tuning";
 import { FLOOR, tileAt, WORLD } from "./world";
 
-type FoeKind = "waxed" | "sleepwalker" | "warden";
-
 /** An enemy waiting somewhere on the map, and the fight it starts when it reaches you. */
 export interface MapFoe {
   id: string;
-  kind: FoeKind;
+  kind: KindId;
   /** Where it stands at first: its feet, in tiles on the world grid (plan column/row + 1). */
   home: { x: number; y: number; z: number };
   /** The fight. The map shows one figure per enemy in it, huddled together. */
@@ -79,7 +77,7 @@ interface FoeTuning {
   wander: number;
 }
 
-export const FOE_TUNING: Record<FoeKind, FoeTuning> = {
+export const FOE_TUNING: Record<KindId, FoeTuning> = {
   waxed: { notice: 3.2, chase: 0.85, walk: 0.6, wander: 0 },
   sleepwalker: { notice: 4.5, chase: 2.0, walk: 0.8, wander: 1.8 },
   // He waits in the middle of his arena, and only comes for you once you're well inside it.
@@ -87,7 +85,6 @@ export const FOE_TUNING: Record<FoeKind, FoeTuning> = {
 };
 
 /** How a member of a fight looks on the map, by its kind. */
-export const lookOf = (kind: string): Look => (kind === "waxed" ? WAXED_LOOK : SLEEPWALKER_LOOK);
 
 /**
  * How long a chasing enemy keeps hunting once it loses sight of you, in seconds. Meanwhile it

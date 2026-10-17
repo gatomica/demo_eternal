@@ -24,8 +24,8 @@
  *   for), `*Condition` (only available while that condition holds), and `#tag` (a rule it
  *   triggers, e.g. `#waxing`: a direct hit leaves the target Waxed).
  * - A stance line is `Comes from > Stance > Leads to`.
- *   - Comes from: action names (and `Recover`, or `Second Phase`: right after a boss enters its
- *     second phase) separated by `/` or `,`, or `All`.
+ *   - Comes from: action names (and `Recover`, or an event the kind declares, like the Warden's
+ *     `Second Phase`: right after he enters it) separated by `/` or `,`, or `All`.
  *   - Leads to: `/` separates kinds of action, `,` separates actions of the same kind.
  * - Recover is the turn after being staggered (or reviving). `Recover >` stances are also the
  *   ones an enemy opens a fight with.
@@ -82,8 +82,12 @@ export interface Pattern {
 
 export class PatternError extends Error {}
 
-/** Parses a pattern written in the notation above, and checks it for typos and dead ends. */
-export function parsePattern(label: string, src: string): Pattern {
+/**
+ * Parses a pattern written in the notation above, and checks it for typos and dead ends.
+ * `events`: names besides its actions (and Recover) that stances may come from.
+ */
+export function parsePattern(label: string, src: string, { events = [] }: { events?: string[] } = {}): Pattern {
+  const fromNames = new Set(["recover", ...events.map(e => e.toLowerCase())]);
   const fail = (msg: string): never => { throw new PatternError(`${label}: ${msg}`); };
   const actions = new Map<string, ActionDef>();
   const stanceLines: { from: string; name: string; to: string; line: number }[] = [];
@@ -136,7 +140,7 @@ export function parsePattern(label: string, src: string): Pattern {
     else {
       fromSet = new Set<string>();
       for (const n of from.split(/[/,]/).map(x => x.trim()).filter(Boolean)) {
-        if (n.toLowerCase() === "recover" || n.toLowerCase() === "second phase") fromSet.add(n.toLowerCase());
+        if (fromNames.has(n.toLowerCase())) fromSet.add(n.toLowerCase());
         else fromSet.add(find(n, where).name.toLowerCase());
       }
     }
@@ -160,7 +164,7 @@ export function parsePattern(label: string, src: string): Pattern {
 
   // What can follow each action, looked up every time an enemy picks.
   const after = new Map<string, StanceDef[]>();
-  for (const key of ["recover", "second phase", ...actions.keys()]) {
+  for (const key of [...fromNames, ...actions.keys()]) {
     const next = stances.filter(s => s.from === "all" || s.from.has(key));
     if (next.length) after.set(key, next);
   }

@@ -1,6 +1,7 @@
 /**
  * figures.ts — the map's figures: you, the enemies and the hooded keepers.
  */
+import type { KindId } from "../core/bestiary";
 import { COLORS } from "./tuning";
 import type { Dir } from "./world";
 
@@ -226,3 +227,10 @@ export function drawKeeper(g: CanvasRenderingContext2D, x: number, y: number, T:
   g.fillStyle = "#f2b45c";
   g.beginPath(); g.ellipse(X(0), Y(-0.13), 0.022 * T, 0.045 * T * flick, 0, 0, Math.PI * 2); g.fill();
 }
+
+/** How each kind of enemy is drawn on the map. */
+export const MAP_FIGURES: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame) => void> = {
+  sleepwalker: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, SLEEPWALKER_LOOK),
+  waxed: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, WAXED_LOOK),
+  warden: (g, x, y, T, facing) => drawWardenMap(g, x, y, T, facing),
+};

@@ -7,6 +7,8 @@ export interface Encounter {
   id: string;
   label: string;
   enemies: EnemySetup[];
+  /** Shown when you win (Test combat), if not the usual. */
+  wonText?: string;
   /** Your revives in this fight, if not the usual. */
   charges?: number;
 }

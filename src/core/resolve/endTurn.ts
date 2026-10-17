@@ -2,7 +2,8 @@
  * endTurn.ts — a turn's last phase: Fatigue decays, falls and staggers settle, revives are
  * spent, each enemy remembers how its action went, and each kind's own rules have their say.
  */
-import { ENEMY_KINDS } from "../bestiary";
+import { kindOf } from "../bestiary";
+import { backOnFeet, fatigueGone } from "./statuses";
 import type { Turn } from "./turn";
 
 export function endTurn(t: Turn) {
@@ -52,7 +53,7 @@ export function endTurn(t: Turn) {
     t.emit({ kind: "stagger", who: p.id });
   }
   // Wax only lasts while there's Fatigue to hold it (a staggered fighter keeps it until it recovers).
-  for (const f of fighters) if (f.waxed && f.fatigue <= 0 && !f.staggered) f.waxed = false;
+  for (const f of fighters) if (f.waxed && f.fatigue <= 0 && !f.staggered) fatigueGone(f);
   // Back on its feet, the wax sealing it breaks away.
   for (const f of fighters) if (f.encased && !f.staggered) f.encased = false;
   t.pinStaggered();
@@ -71,7 +72,7 @@ export function endTurn(t: Turn) {
 
   // Each kind's own rules (the Warden's flame, phases, Usurp Flame).
   for (const e of alive) {
-    const kind = ENEMY_KINDS[e.kind];
+    const kind = kindOf(e);
     if (!kind.afterTurn || !e.alive) continue;
     kind.afterTurn({
       self: e,
@@ -89,8 +90,7 @@ export function endTurn(t: Turn) {
     // The forced Rest ends the break, as always: the wax sealing you breaks away with it.
     p.staggered = false;
     p.fatigue = 0;
-    p.waxed = false;
-    p.encased = false;
+    backOnFeet(p);
     t.emit({ kind: "rest", who: p.id, result: "recovered", forced: true });
     t.endStep();
   }
