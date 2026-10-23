@@ -3,6 +3,7 @@
  */
 import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActionWheel, type Anchor } from "./ActionWheel";
+import type { CoachStep, Tip } from "./training";
 import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_SIDE, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, KNOCK_MS, KNOCKBACK, NUDGE_MS, OPENING_LEAD_IN, phaseFor, phaseTwoOf, type Playback, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt } from "./playback";
 import { defaultSelection, rowsOf, sameSel, type Selection, type Wheel, type WheelOption } from "./selection";
 import { kindOf } from "../core/bestiary";
@@ -32,12 +33,12 @@ function roman(n: number): string {
   return out;
 }
 
-const barValues = (f: { hp: number; fatigue: number; death: number }): BarValues => ({ hp: f.hp, fatigue: f.fatigue, death: f.death });
+const barValues =(f: { hp: number; fatigue: number; death: number }): BarValues => ({ hp: f.hp, fatigue: f.fatigue, death: f.death });
 
 /** How an enemy's look draws it differently (its kind's variant). */
 const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 
-export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, changeLabel, wonText, onTurnPlayed }: {
+export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, changeLabel, exitLabel, wonText, onTurnPlayed, coach }: {
   initial: CombatState;
   /** A scene to play before the first turn (it leaves the fight as `initial`). */
   opening?: Opening;
@@ -51,6 +52,14 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   attackOnPlay?: boolean;
   /** The pause menu's label for onChangeLoadout. */
   changeLabel?: string;
+  /** The pause menu's label for onExit. */
+  exitLabel?: string;
+  /**
+   * The guide's training: asks for these actions in order, showing the current one, with a tip
+   * after each turn. The fight starts in `sparring` (it can't end early); once the last step is
+   * done that lifts, and the fight is for real.
+   */
+  coach?: { steps: CoachStep[]; tipAfter: (s: CombatState) => Tip | null };
   /** The title when you win (fights off the map have their own). */
   wonText?: string;
   /** Called as a turn finishes playing, with the fight as it now stands. */
@@ -60,7 +69,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   onChangeLoadout?: () => void;
   onExit: () => void;
   /** Set for fights from the map: when it's over, carry on (won or not) instead of retrying. */
-  onDone?: (won: boolean) => void;
+  onDone?: (won: boolean, charges: number) => void;
 }) {
   const [fightRaw, setFight] = useState(initial);
   const fight = useMemo(() => (override ? override(fightRaw) : fightRaw), [fightRaw, override]);
@@ -83,7 +92,17 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const [igniteState, setIgniteState] = useState<{ who: string; start: number; seed: number; at: number } | null>(null);
   const setIgnite = (v: { who: string; start: number; seed: number } | null) => setIgniteState(v && { ...v, at: 0 });
   const [pauseIndex, setPauseIndex] = useState(0);
+  // The training: how many of the coach's steps are done. Once the last turn has played out, the
+  // lesson is over: nothing holds the fight back any more.
+  const [coachStep, setCoachStep] = useState(0);
+  const [tip, setTip] = useState<Tip | null>(null);
   const busy = playback !== null;
+  const trained = !!coach && coachStep >= coach.steps.length;
+  useEffect(() => {
+    if (!trained || busy) return;
+    // The lesson is over: no more safety, and the enemy picks for itself instead of following its script.
+    setFight(f => (f.config.sparring ? { ...f, config: { ...f.config, sparring: false }, enemies: f.enemies.map(e => ({ ...e, script: [] })) } : f));
+  }, [trained, busy]);
   const forced = forcedAction(fight);
   const playing = fight.status === "playing";
 
@@ -323,6 +342,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
 
   /** Resolve the turn, then play it back step by step. */
   const play = (action: PlayerAction) => {
+    if (coach && !forced && coach.steps[coachStep]?.matches(action)) setCoachStep(coachStep + 1);
     const next = resolveTurn(fight, action);
     const pose: PoseName = forced ? "kneel" : action.type; // staggered or reviving: down on one knee
     setFight(next);
@@ -422,6 +442,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         // Anyone who dodged is still walking to their new spot: they keep their pose until there.
         const walking = lastDodgers.current;
         if (Object.keys(walking).length) setWalkOff(walking);
+        if (coach) setTip(coach.tipAfter(fightRaw));
         onTurnPlayed?.(fightRaw); // same render as the playback ending, so nothing flickers
         setPlayback(null);
       },
@@ -442,9 +463,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     { label: "Resume", run: () => setPaused(false) },
     { label: "Restart fight", run: onRetry },
     ...(onChangeLoadout ? [{ label: changeLabel ?? "Change loadout", run: onChangeLoadout }] : []),
-    { label: "Main menu", run: onExit },
+    { label: exitLabel ?? "Main menu", run: onExit },
   ];
-  const finish = () => onDone?.(fight.status === "won");
+  const finish = () => onDone?.(fight.status === "won", fight.player.charges);
 
   useKeys(key => {
     // Escape pauses at any time; the pause menu takes all input until it closes.
@@ -825,6 +846,22 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       {/* Cutscene mode: black strips slide in while a turn plays out. When they leave, it's your move. */}
       <div className="letterbox letterbox-top" aria-hidden="true" />
       {panel && !busy && !paused && panel}
+      {coach && !busy && !paused && !wheelOpen && (
+        <div className="coach" role="status">
+          {trained ? (
+            <>
+              <div className="coach-title">Well done</div>
+              <p className="coach-text">That is everything. Now finish it.</p>
+            </>
+          ) : (
+            <>
+              <div className="coach-title">{coach.steps[coachStep].title} <span className="coach-count">{coachStep + 1} / {coach.steps.length}</span></div>
+              <p className="coach-text">{coach.steps[coachStep].text}</p>
+            </>
+          )}
+          {tip && <p className={`coach-tip ${tip.warn ? "is-warning" : ""}`}>{tip.text}</p>}
+        </div>
+      )}
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
 
       {/* The two health bars sit in fixed slots, so nothing else on screen can push them around. */}

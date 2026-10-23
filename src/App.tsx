@@ -11,6 +11,8 @@ export default function App() {
       {screen === "menu" && <MainMenu onStart={setScreen} />}
       {screen === "test" && <TestCombat onExit={() => setScreen("menu")} />}
       {screen === "explore" && <Journeying onExit={() => setScreen("menu")} />}
+      {screen === "explore-skip" && <Journeying skip onExit={() => setScreen("menu")} />}
+      {screen === "explore-new" && <Journeying fresh onExit={() => setScreen("menu")} />}
       {screen === "viewer" && <ModelViewer onExit={() => setScreen("menu")} />}
     </div>
   );

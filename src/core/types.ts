@@ -124,6 +124,11 @@ export interface Enemy extends Fighter {
 export interface CombatConfig {
   /** The model viewer: nobody takes damage or Fatigue; everything else plays as usual. */
   dummy?: boolean;
+  /**
+   * The guide's training: damage and Fatigue are real, but enemies never lose Health (they stagger
+   * but can't fall) and you never drop below 1, so the lesson can't end early.
+   */
+  sparring?: boolean;
 }
 
 /* ---------- What happened during a turn, step by step ---------- */

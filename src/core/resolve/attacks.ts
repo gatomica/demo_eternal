@@ -50,10 +50,17 @@ export function resolveAttacks(t: Turn, rng: Rng) {
   }
 }
 
+/** Health lost to a blow or a burn. Nothing in the model viewer; in the guide's training, only you, and never your last point. */
+function loseHealth(t: Turn, target: Fighter, amount: number) {
+  const { dummy, sparring } = t.s.config;
+  if (dummy) return;
+  if (!sparring) target.hp -= amount;
+  else if (target === t.p) target.hp = Math.max(1, target.hp - amount);
+}
+
 /** One attack landing: passing through someone reviving, dodged, blocked, or hitting. */
 function strike(t: Turn, attacker: Fighter, target: Fighter) {
   const { p } = t;
-  const dummy = t.s.config.dummy;
   if (t.out.has(attacker.id)) {
     t.cancelled.add(attacker.id);
     t.emit({ kind: "canceled", who: attacker.id, action: "attack", reason: t.fallen.has(attacker.id) ? "fallen" : "staggered" });
@@ -94,7 +101,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   else if (!ranged) t.tire(attacker, resisted);
   const through = dmg - resisted;
   if (through > 0) t.hurt.add(target.id);
-  if (!dummy) target.hp -= through;
+  loseHealth(t, target, through);
   const sentBack = blocking && ranged ? 0 : resisted;
   t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, grit });
   // A direct hit may do more, by the attacker's own rules (the Warden's flail waxes, or burns).
@@ -104,7 +111,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
     onHit({
       self, target, damage: through, tags: self.intent.tags ?? [],
       burn: amount => {
-        if (!dummy) target.hp -= amount;
+        loseHealth(t, target, amount);
         if (amount > 0) t.hurt.add(target.id);
         t.emit({ kind: "burned", who: target.id, damage: amount });
       },

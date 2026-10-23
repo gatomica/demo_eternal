@@ -82,6 +82,59 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   text-shadow: 0 1px 6px #000; animation: explore-note 2.6s ease-in-out forwards;
 }
 @keyframes explore-note { 0% { opacity: 0; } 12% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; } }
+/* The guide speaking, along the bottom of the map. */
+.dialogue {
+  position: absolute; left: 50%; bottom: 7vh; transform: translateX(-50%); z-index: 10;
+  width: min(620px, calc(100% - 32px)); padding: 14px 18px; display: grid; gap: 6px;
+  border: 1px solid var(--line); border-radius: 8px; background: rgb(21 20 27 / 0.92); color: var(--text);
+}
+.dialogue-speaker { color: var(--accent); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.dialogue-text { margin: 0; font-size: 1.05rem; line-height: 1.5; }
+.dialogue-next { justify-self: end; font-size: 0.85rem; opacity: 0.7; }
+/* The guide's training in a fight: what to do next. */
+.coach {
+  position: absolute; z-index: 15; top: 64px; left: 50%; transform: translateX(-50%);
+  width: min(560px, calc(100% - 24px)); padding: 10px 14px; display: grid; gap: 4px; text-align: center;
+  background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line); border-radius: 10px;
+}
+.coach-title { font-size: 1rem; font-weight: 600; color: var(--accent); }
+.coach-count { margin-left: 6px; font-size: 0.75rem; font-weight: 400; opacity: 0.6; }
+.coach-text { margin: 0; font-size: 0.92rem; line-height: 1.45; }
+.coach-tip { margin: 4px 0 0; padding-top: 6px; border-top: 1px solid var(--line); font-size: 0.85rem; line-height: 1.4; opacity: 0.85; }
+.coach-tip.is-warning { color: #e0a85a; opacity: 1; }
+/* Resting: dark, then light again. */
+.explore-sleep { position: absolute; inset: 0; z-index: 20; background: #000; pointer-events: none; animation: explore-sleep 2.4s ease-in-out forwards; }
+@keyframes explore-sleep { 0% { opacity: 0; } 38% { opacity: 1; } 55% { opacity: 1; } 100% { opacity: 0; } }
+/* The inventory over the map. */
+.inventory {
+  width: min(520px, calc(100% - 32px)); padding: 18px 20px; display: grid; gap: 14px;
+  border: 1px solid var(--line); border-radius: 10px; background: rgb(21 20 27 / 0.96); color: var(--text);
+}
+.inventory-title { margin: 0; font-size: 1.1rem; font-weight: 600; }
+.inventory-slots { display: grid; gap: 8px; }
+.inventory-slot {
+  display: grid; grid-template-columns: 5.5rem 1fr auto; gap: 2px 12px; align-items: baseline;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; text-align: left;
+}
+.inventory-slot.is-focused { border-color: var(--accent); }
+.inventory-slot-label { grid-row: 1 / 3; color: var(--accent); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; align-self: center; }
+.inventory-slot-name { font-size: 1.02rem; }
+.inventory-slot-stats { grid-column: 2; font-size: 0.8rem; opacity: 0.65; }
+.inventory-slot-hint { grid-column: 3; grid-row: 1 / 3; align-self: center; font-size: 0.75rem; opacity: 0.6; }
+.inventory-bag { display: grid; gap: 4px; font-size: 0.9rem; }
+.inventory-bag-title { font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.6; }
+.inventory-empty { opacity: 0.5; }
+.inventory-note { font-size: 0.8rem; opacity: 0.6; }
+.inventory-keys { font-size: 0.85rem; opacity: 0.7; }
+/* The way back to the main menu, in the corner of the inventory screen. */
+.inventory-exit { position: absolute; left: 16px; bottom: 16px; width: auto; padding: 8px 16px; font-size: 0.9rem; }
+.inventory-exit-note { opacity: 0.6; font-size: 0.8rem; margin-left: 4px; }
+/* The knot you carry, on the map. */
+.explore-knot {
+  position: absolute; left: 14px; bottom: 14px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
+  background: rgb(21 20 27 / 0.85); color: var(--text); font-size: 0.85rem; pointer-events: none;
+}
+.explore-knot.is-slack { opacity: 0.55; }
 .explore-fade { position: absolute; inset: 0; background: #000; pointer-events: none; animation: explore-fade 0.65s ease-in forwards; }
 @keyframes explore-fade {
   0% { opacity: 0; }
@@ -292,6 +345,36 @@ kbd {
 }
 @media (prefers-reduced-motion: reduce) { .shards { display: none; } }
 
+/* ---------- Blood on a direct hit ---------- */
+.blood { position: absolute; left: 50%; top: 40%; width: 0; height: 0; pointer-events: none; z-index: 6; }
+/* A drop flies sideways (the outer one) while it rises and then falls (the inner one). */
+.blood-drop { position: absolute; left: 0; top: 0; animation: blood-x var(--t) ease-out 0.15s both; }
+.blood-drop > i {
+  display: block; width: var(--size); height: var(--size); margin: calc(var(--size) / -2) 0 0 calc(var(--size) / -2);
+  border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; background: #a3141b;
+  animation: blood-y var(--t) linear 0.15s both;
+}
+@keyframes blood-x { from { transform: translateX(0); } to { transform: translateX(var(--dx)); } }
+@keyframes blood-y {
+  0% { transform: translateY(0); opacity: 1; animation-timing-function: ease-out; }
+  40% { transform: translateY(var(--rise)); animation-timing-function: ease-in; }
+  85% { opacity: 1; }
+  100% { transform: translateY(var(--fall)); opacity: 0; }
+}
+/* Splashes left on the body, soaking in and fading. */
+.blood-splat {
+  position: absolute; left: var(--x); top: var(--y); width: var(--size); height: calc(var(--size) * 0.8);
+  margin: calc(var(--size) / -2) 0 0 calc(var(--size) / -2); border-radius: 55% 45% 60% 40% / 50% 60% 40% 50%; background: #7d0f15;
+  animation: blood-splat 1.3s ease-out 0.15s both;
+}
+@keyframes blood-splat {
+  0% { transform: scale(0); opacity: 0; }
+  12% { transform: scale(1.15); opacity: 0.95; }
+  65% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .blood-drop { display: none; } }
+
 /* ---------- Stick figure ---------- */
 .figure { width: 100%; height: 100%; display: block; overflow: visible; }
 .fig-limb { fill: none; stroke: var(--ink); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
@@ -446,7 +529,9 @@ kbd {
 @keyframes smoke-wisp { 0% { opacity: 0.9; transform: translateY(2px) scaleY(0.4); } 100% { opacity: 0; transform: translateY(-10px) scaleY(1.2); } }
 @keyframes smoke-cloud { 0% { opacity: 0.7; transform: scale(0.6); } 100% { opacity: 0; transform: translateY(-6px) scale(2.2); } }
 /* The arena's sealed sleepwalkers (floor mounds and wax walls). */
-.arena-slot { position: absolute; pointer-events: none; }
+.arena-slot { position: absolute; pointer-events: none; transition: opacity 0.25s ease; }
+/* Wax in front of a fighter lets them show through. */
+.arena-slot.is-see-through { opacity: 0.3; }
 .arena-wall { fill: #8c7a3e; stroke: #6d5f2f; stroke-width: 1.5; }
 .arena-mound { fill: #9c8843; stroke: #6d5f2f; stroke-width: 1.2; }
 .arena-drip { fill: none; stroke: #a8944c; stroke-width: 2.4; stroke-linecap: round; }

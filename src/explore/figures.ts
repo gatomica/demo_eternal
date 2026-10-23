@@ -228,6 +228,106 @@ export function drawKeeper(g: CanvasRenderingContext2D, x: number, y: number, T:
   g.beginPath(); g.ellipse(X(0), Y(-0.13), 0.022 * T, 0.045 * T * flick, 0, 0, Math.PI * 2); g.fill();
 }
 
+/**
+ * A waxed that has been beaten, lying on the floor where it fell: toppled on its side, bound
+ * shins out behind, its wax head resting on the stones.
+ */
+export function drawFallenWaxed(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
+  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
+  const foot = 0.36;
+  g.fillStyle = COLORS.shadow;
+  g.beginPath(); g.ellipse(X(0), Y(foot), 0.4 * T, 0.09 * T, 0, 0, Math.PI * 2); g.fill();
+  g.lineCap = "round"; g.lineJoin = "round";
+  // The bound shins, flat to the right.
+  g.strokeStyle = WAXED_LOOK.wax!; g.lineWidth = Math.max(3, 0.12 * T);
+  g.beginPath(); g.moveTo(X(0.08), Y(foot - 0.05)); g.lineTo(X(0.36), Y(foot - 0.02)); g.stroke();
+  // Torso and arms lying along the floor.
+  g.strokeStyle = WAXED_LOOK.ink; g.lineWidth = Math.max(2, 0.075 * T);
+  g.beginPath(); g.moveTo(X(0.08), Y(foot - 0.05)); g.lineTo(X(-0.14), Y(foot - 0.08)); g.stroke();
+  g.beginPath(); g.moveTo(X(-0.1), Y(foot - 0.08)); g.lineTo(X(-0.2), Y(foot + 0.01)); g.stroke();
+  g.beginPath(); g.moveTo(X(-0.06), Y(foot - 0.07)); g.lineTo(X(-0.02), Y(foot + 0.02)); g.stroke();
+  // The head, a lump of wax.
+  g.fillStyle = WAXED_LOOK.wax!;
+  g.beginPath(); g.ellipse(X(-0.26), Y(foot - 0.07), 0.15 * T, 0.12 * T, 0, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = "rgba(0,0,0,0.35)"; g.lineWidth = 1; g.stroke();
+}
+
+/**
+ * A broken sword lying on the floor: a hilt and a stub of blade, the snapped tip a little way
+ * off, and a small glint that comes and goes so it catches the eye.
+ */
+export function drawBrokenSword(g: CanvasRenderingContext2D, x: number, y: number, T: number, t: number) {
+  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
+  const foot = 0.32;
+  g.lineCap = "round"; g.lineJoin = "round";
+  g.fillStyle = COLORS.shadow;
+  g.beginPath(); g.ellipse(X(0), Y(foot), 0.3 * T, 0.06 * T, 0, 0, Math.PI * 2); g.fill();
+  // The hilt and the stub of the blade, slanting across the floor.
+  const line = (x1: number, y1: number, x2: number, y2: number, color: string, w: number) => {
+    g.strokeStyle = color; g.lineWidth = Math.max(2, w * T);
+    g.beginPath(); g.moveTo(X(x1), Y(y1)); g.lineTo(X(x2), Y(y2)); g.stroke();
+  };
+  line(-0.22, foot - 0.02, -0.28, foot - 0.07, "#6d5a3c", 0.07);
+  line(-0.2, foot - 0.04, 0.08, foot - 0.1, "#b9b6c6", 0.06);
+  line(-0.12, foot - 0.12, -0.08, foot + 0.02, "#8d7a54", 0.05);
+  // The snapped tip.
+  g.fillStyle = "#b9b6c6";
+  g.beginPath(); g.moveTo(X(0.17), Y(foot - 0.12)); g.lineTo(X(0.34), Y(foot - 0.06)); g.lineTo(X(0.18), Y(foot - 0.04)); g.closePath(); g.fill();
+  // A glint.
+  const glint = 0.5 + 0.5 * Math.sin(t / 380);
+  g.strokeStyle = `rgb(255 244 210 / ${0.15 + 0.6 * glint})`; g.lineWidth = Math.max(1, 0.02 * T);
+  const gx = X(0.0), gy = Y(foot - 0.13), r = (0.03 + 0.05 * glint) * T;
+  g.beginPath(); g.moveTo(gx - r, gy); g.lineTo(gx + r, gy); g.moveTo(gx, gy - r); g.lineTo(gx, gy + r); g.stroke();
+}
+
+/** A whole sword lying on the floor, a glint on its blade. */
+function drawSword(g: CanvasRenderingContext2D, x: number, y: number, T: number, t: number) {
+  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
+  const foot = 0.32;
+  g.lineCap = "round"; g.lineJoin = "round";
+  g.fillStyle = COLORS.shadow;
+  g.beginPath(); g.ellipse(X(0), Y(foot), 0.34 * T, 0.06 * T, 0, 0, Math.PI * 2); g.fill();
+  const line = (x1: number, y1: number, x2: number, y2: number, color: string, w: number) => {
+    g.strokeStyle = color; g.lineWidth = Math.max(2, w * T);
+    g.beginPath(); g.moveTo(X(x1), Y(y1)); g.lineTo(X(x2), Y(y2)); g.stroke();
+  };
+  line(-0.26, foot - 0.02, -0.32, foot - 0.06, "#6d5a3c", 0.07);
+  line(-0.2, foot - 0.03, 0.34, foot - 0.12, "#cfcde0", 0.06);
+  line(-0.2, foot - 0.12, -0.16, foot + 0.04, "#8d7a54", 0.05);
+  glint(g, X(0.1), Y(foot - 0.16), T, t);
+}
+
+/** A breastplate lying on the floor, a glint on its shoulder. */
+function drawArmorPiece(g: CanvasRenderingContext2D, x: number, y: number, T: number, t: number) {
+  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
+  const foot = 0.32;
+  g.fillStyle = COLORS.shadow;
+  g.beginPath(); g.ellipse(X(0), Y(foot), 0.3 * T, 0.06 * T, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#8f8da1";
+  g.beginPath();
+  g.moveTo(X(-0.22), Y(foot - 0.22)); g.lineTo(X(0.22), Y(foot - 0.22));
+  g.lineTo(X(0.16), Y(foot - 0.02)); g.lineTo(X(-0.16), Y(foot - 0.02)); g.closePath(); g.fill();
+  g.strokeStyle = "#5c5a6c"; g.lineWidth = Math.max(1, 0.03 * T); g.stroke();
+  g.fillStyle = "#6a6879";
+  g.beginPath(); g.ellipse(X(0), Y(foot - 0.22), 0.08 * T, 0.04 * T, 0, 0, Math.PI * 2); g.fill();
+  glint(g, X(-0.12), Y(foot - 0.18), T, t);
+}
+
+/** A small star of light that comes and goes, so a thing on the floor catches the eye. */
+function glint(g: CanvasRenderingContext2D, gx: number, gy: number, T: number, t: number) {
+  const pulse = 0.5 + 0.5 * Math.sin(t / 380);
+  g.strokeStyle = `rgb(255 244 210 / ${0.15 + 0.6 * pulse})`; g.lineWidth = Math.max(1, 0.02 * T);
+  const r = (0.03 + 0.05 * pulse) * T;
+  g.beginPath(); g.moveTo(gx - r, gy); g.lineTo(gx + r, gy); g.moveTo(gx, gy - r); g.lineTo(gx, gy + r); g.stroke();
+}
+
+/** Gear lying on the map floor, by its look. */
+export function drawPickup(g: CanvasRenderingContext2D, x: number, y: number, T: number, t: number, look: "broken-sword" | "sword" | "armor") {
+  if (look === "broken-sword") drawBrokenSword(g, x, y, T, t);
+  else if (look === "sword") drawSword(g, x, y, T, t);
+  else drawArmorPiece(g, x, y, T, t);
+}
+
 /** How each kind of enemy is drawn on the map. */
 export const MAP_FIGURES: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame) => void> = {
   sleepwalker: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, SLEEPWALKER_LOOK),

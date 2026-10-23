@@ -97,6 +97,29 @@ export function HealthBar({ fighter, before, className, mirrored }: {
  * Stagger: white shards bursting outward
  * ============================================================ */
 
+/** A direct hit: drops of blood flung out of the wound and splashed on the body, as the blow lands. */
+export function Blood({ count = 13 }: { count?: number }) {
+  return (
+    <span className="blood" aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => {
+        // Thrown to either side, most up and out, then falling; a little fixed jitter so it isn't mechanical.
+        const side = i % 2 ? 1 : -1;
+        const style = {
+          "--dx": `${side * (12 + ((i * 37) % 40))}px`,
+          "--rise": `${-(10 + ((i * 23) % 30))}px`,
+          "--fall": `${8 + ((i * 41) % 46)}px`,
+          "--size": `${3 + ((i * 17) % 5)}px`,
+          "--t": `${0.5 + ((i * 13) % 25) / 100}s`,
+        } as CSSProperties;
+        return <b key={i} className="blood-drop" style={style}><i /></b>;
+      })}
+      {[[-14, -6, 15], [10, 6, 12], [-4, 20, 10], [16, -14, 9], [-18, 12, 8]].map(([x, y, size], i) => (
+        <u key={i} className="blood-splat" style={{ "--x": `${x}px`, "--y": `${y}px`, "--size": `${size}px` } as CSSProperties} />
+      ))}
+    </span>
+  );
+}
+
 export function Shards({ count = 14, small }: { count?: number; small?: boolean }) {
   return (
     <span className={`shards ${small ? "is-small" : ""}`} aria-hidden="true">

@@ -8,10 +8,13 @@
  */
 import type { KindId } from "../core/bestiary";
 import { ENCOUNTERS } from "../core/encounters";
+import { TRAINING_SCRIPT } from "../combat/training";
 import type { EnemySetup } from "../core/types";
 import type { Walker } from "./movement";
+import { openFloor } from "./seals";
+import { TUTORIAL_FOE } from "./tutorial";
 import { HALF_D, HALF_W } from "./tuning";
-import { FLOOR, tileAt, WORLD } from "./world";
+import { WORLD } from "./world";
 
 /** An enemy waiting somewhere on the map, and the fight it starts when it reaches you. */
 export interface MapFoe {
@@ -21,6 +24,10 @@ export interface MapFoe {
   home: { x: number; y: number; z: number };
   /** The fight. The map shows one figure per enemy in it, huddled together. */
   fight: EnemySetup[];
+  /** It never notices you or moves: you walk up to it. */
+  still?: boolean;
+  /** Once beaten it stays where it fell, lying on the floor, for good. */
+  lies?: boolean;
 }
 
 /** The Warden's fight, as Test combat has it (his escorts, and the waxed whose flame he takes first). */
@@ -28,6 +35,11 @@ const WARDEN_FIGHT = ENCOUNTERS.find(e => e.id === "warden")!.enemies;
 
 /** The tutorial, roughly in the order you'll meet it. Levels: 0-1 below ground, 2 ground, 3-6 above. */
 export const MAP_FOES: MapFoe[] = [
+  // The start room: a waxed lying in the corner, the guide's lesson. It scratches and rests on a script.
+  {
+    id: TUTORIAL_FOE, kind: "waxed", home: { x: 4.5, y: 6.5, z: 2 }, still: true, lies: true,
+    fight: [{ kind: "waxed", line: "front", script: TRAINING_SCRIPT }],
+  },
   // Ground floor. In the hall: a lone waxed, then a pair further in.
   { id: "hall-waxed", kind: "waxed", home: { x: 17.5, y: 4.5, z: 2 }, fight: [{ kind: "waxed" }] },
   { id: "hall-pair", kind: "waxed", home: { x: 21.5, y: 11.5, z: 2 }, fight: [{ kind: "waxed" }, { kind: "waxed" }] },
@@ -107,7 +119,7 @@ export const ENCOUNTER_FADE_MS = 650;
 /* ---------- Finding the way: step counts over the floor, no full path search ---------- */
 
 /** Tiles an enemy on level z can walk on (enemies keep to their level: floor only). */
-export const foeFloor = (z: number, x: number, y: number) => tileAt(z, x, y) === FLOOR;
+export const foeFloor = (z: number, x: number, y: number) => openFloor(z, x, y);
 
 /**
  * How many steps each tile of level z is from tile (tx, ty), walking floor only (-1: can't get

@@ -20,6 +20,16 @@ export const KEEPERS: Keeper[] = [
   { id: "sanctum", at: { x: 69.5, y: 13.6, z: 6 } },
 ];
 
+/** The keeper who speaks to you (see tutorial.ts): the one beside where you first wake. They are all the one guide. */
+export const GUIDE = "start";
+
+/**
+ * The guide isn't always there: it fades in as you come near a place you can rest, fully visible
+ * by FADE_NEAR tiles and not at all beyond FADE_FAR.
+ */
+export const FADE_NEAR = 1.9;
+export const FADE_FAR = 3.6;
+
 /** How close you must stand to a keeper to rest by it, in tiles. */
 export const KEEPER_REACH = 1.1;
 

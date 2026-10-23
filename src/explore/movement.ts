@@ -1,6 +1,7 @@
 /**
  * movement.ts — walking: bumping into walls, sliding along them, stepping up and dropping down.
  */
+import { sealedAt } from "./seals";
 import { CORNER_ASSIST, HALF_D, HALF_W, STEP_TOLERANCE } from "./tuning";
 import { type Dir, FLOOR, isRamp, LEVELS, rampAt, rampHeight, tileAt } from "./world";
 
@@ -35,7 +36,7 @@ export function surfaceNear(tx: number, ty: number, px: number, py: number, alt:
   for (let z = 0; z < LEVELS; z++) {
     const t = tileAt(z, tx, ty);
     let hgt: number | null = null;
-    if (t === FLOOR) hgt = z;
+    if (t === FLOOR) hgt = sealedAt(z, tx, ty) ? null : z; // wax closes a tile like a wall
     else if (isRamp(t)) hgt = rampHeight(z, tx, ty, rampAt(z, tx, ty)!, px, py);
     if (hgt === null || hgt > alt + STEP_TOLERANCE) continue;
     if (!best || hgt > best.h) best = { h: hgt, t };

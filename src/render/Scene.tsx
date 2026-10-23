@@ -7,7 +7,7 @@ import type { ArmorTier, WeaponTier } from "../core/types";
 import { type Cam, ease, figureBox, HORIZON, lerpAngle, lerpCam, lerpVec, NEAR, planningCamera, project, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, type Vec } from "./camera";
 import { ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
 import type { Pt } from "./geom";
-import { Shards } from "./HealthBar";
+import { Blood, Shards } from "./HealthBar";
 import { lookOf } from "./looks";
 import { flameOf, type PoseName } from "./poses";
 import { StickFigure } from "./StickFigure";
@@ -206,12 +206,16 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
     }
   }
 
+  /** Whether this piece of the arena stands between the camera and a fighter it overlaps (it goes see-through, so nobody is hidden). */
+  const coversFigure = (box: ReturnType<typeof figureBox>) => placed.some(({ box: b }) =>
+    b.depth > box.depth && b.x < box.x + box.w && b.x + b.w > box.x && b.y < box.y + box.h && b.y + b.h > box.y);
+
   return (
     <div className="scene" ref={boxRef}>
       <div className="scene-floor" style={{ top: `${HORIZON * 100}%` }} />
       {w > 0 && <FloorGrid cam={c} w={w} h={h} />}
       {props.map(({ pr, box }) => (
-        <div key={pr.id} className="arena-slot" style={{ left: box.x, top: box.y, width: box.w, height: box.h, zIndex: 1000 - Math.round(box.depth * 10), filter: `brightness(${Math.max(0.55, Math.min(1, 1.05 - box.depth * 0.04))})` }}>
+        <div key={pr.id} className={`arena-slot ${coversFigure(box) ? "is-see-through" : ""}`} style={{ left: box.x, top: box.y, width: box.w, height: box.h, zIndex: 1000 - Math.round(box.depth * 10), filter: `brightness(${Math.max(0.55, Math.min(1, 1.05 - box.depth * 0.04))})` }}>
           <SealedSleeper kind={pr.kind} flip={pr.flip} lit={propLit} />
         </div>
       ))}
@@ -237,6 +241,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
             <StickFigure view={f.view} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} encased={f.encased} />
             {f.classes.includes("fx-break") && <Shards />}
+            {f.classes.includes("fx-hit") && <Blood />}
           </div>
         </button>
       ))}

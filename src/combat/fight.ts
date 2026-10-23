@@ -3,7 +3,7 @@
  * one (the Warden taking a waxed's flame).
  */
 import { createCombat, openingOf } from "../core/setup";
-import type { ArmorTier, CombatState, EnemySetup, Opening, WeaponTier } from "../core/types";
+import type { ArmorTier, CombatConfig, CombatState, EnemySetup, Opening, WeaponTier } from "../core/types";
 
 /** What you carry into a fight. */
 export interface Loadout {
@@ -18,7 +18,7 @@ export const PLAYER_MAX_HP = 20;
 const REVIVE_CHARGES = 2;
 
 /** A fight against these enemies, with its opening scene if it has one. */
-export function newFight(enemies: EnemySetup[], loadout: Loadout, charges = REVIVE_CHARGES): { state: CombatState; opening?: Opening } {
-  const state = createCombat({ maxHP: PLAYER_MAX_HP, weapon: loadout.weapon, armor: loadout.armor, charges }, enemies);
+export function newFight(enemies: EnemySetup[], loadout: Loadout, charges = REVIVE_CHARGES, config: CombatConfig = {}): { state: CombatState; opening?: Opening } {
+  const state = createCombat({ maxHP: PLAYER_MAX_HP, weapon: loadout.weapon, armor: loadout.armor, charges }, enemies, config);
   return openingOf(state, enemies);
 }

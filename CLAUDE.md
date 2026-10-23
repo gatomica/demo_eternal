@@ -50,7 +50,11 @@ keep it up to date when a rule, enemy or map change is decided or built.
   shared grid, levels 0-1 below ground, 2 the ground floor, 3-6 above), `world.ts` (tiles,
   ramps), `movement.ts`, `sight.ts`, `paint.ts` (chunked level painting), `figures.ts` (map
   figures, `MAP_FIGURES` by kind), `foes.ts` (`MAP_FOES`, chasing), `keepers.ts` (`KEEPERS`, rest
-  points), `tuning.ts`, `Exploration.tsx`.
+  points; the guide fades in at each), `tutorial.ts` (the guide's teaching: state, lines, the
+  knot), `seals.ts` (the wax closing the start room), `gear.ts` (inventory, drops, losing it all on
+  a fall), `pickups.ts` (gear lying on the floor, e.g. the broken sword), `save.ts` (progress in localStorage), `Inventory.tsx`, `Dialogue.tsx`, `tuning.ts`, `Exploration.tsx`. The tutorial fight is
+  the `start-waxed` map enemy; its coach steps, tips and script are in `combat/training.ts`
+  (`CombatScreen`'s `coach` prop).
 - `index.css`: all styles.
 
 ### Adding an enemy
