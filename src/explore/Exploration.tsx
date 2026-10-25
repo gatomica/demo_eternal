@@ -21,8 +21,8 @@
 import { useEffect, useRef, useState } from "react";
 import { dirOf, wrapIndex } from "../ui/input";
 import { Dialogue } from "./Dialogue";
-import { drawFallenWaxed, drawPickup, drawKeeper, drawWalker, type Frame, MAP_FIGURES } from "./figures";
-import { cycleSlot, gearName, type Inventory as Bag, receive, SLOTS } from "./gear";
+import { drawFallenWaxed, drawPickup, drawKeeper, drawWalker, type Frame, MAP_FIGURES, playerLook } from "./figures";
+import { cycleSlot, gearName, type Inventory as Bag, loadoutOf, receive, SLOTS } from "./gear";
 import { Inventory } from "./Inventory";
 import { PICKUP_REACH, PICKUPS } from "./pickups";
 import { CHASE_MEMORY, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, foeFloor, GRACE_MS, huddle, MAP_FOES, type MapFoe, MAX_IN_FIGHT, stepsFrom, TOUCH, waypoint } from "./foes";
@@ -827,7 +827,9 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
           sg.fillRect(0, 0, W, H);
         }
       }
-      drawWalker(sg, fx, fy - BODY_ABOVE_FEET * T, T, me.facing, frame, true, (me.alt - me.ground) * RISE);
+      // You wear what you have equipped.
+      const look = playerLook(loadoutOf(invRef.current));
+      drawWalker(sg, fx, fy - BODY_ABOVE_FEET * T, T, me.facing, frame, true, (me.alt - me.ground) * RISE, look);
       if (base < LEVELS && inSight[base]) foesOnly(base, y => y > me.y);
       for (let z = base + 1; z < LEVELS; z++) if (inSight[z]) rows(z, split, WORLD.h);
       evictChunks();
@@ -837,7 +839,7 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
       g.drawImage(scene, 0, 0);
       // Your outline shows faintly through anything covering you (it vanishes into you otherwise).
       g.globalAlpha = GHOST_ALPHA;
-      drawWalker(g, fx, fy - BODY_ABOVE_FEET * T, T, me.facing, frame, false);
+      drawWalker(g, fx, fy - BODY_ABOVE_FEET * T, T, me.facing, frame, false, 0, look);
       g.globalAlpha = 1;
     };
 

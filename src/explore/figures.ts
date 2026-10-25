@@ -2,6 +2,7 @@
  * figures.ts — the map's figures: you, the enemies and the hooded keepers.
  */
 import type { KindId } from "../core/bestiary";
+import type { ArmorTier, WeaponTier } from "../core/types";
 import { COLORS } from "./tuning";
 import type { Dir } from "./world";
 
@@ -16,9 +17,21 @@ export interface Look {
   wax?: string;
   /** Arms held out in front, the way sleepwalkers walk. */
   reach?: boolean;
+  /** What it carries in its hand and wears, as in a fight (none if left out). */
+  weapon?: WeaponTier;
+  armor?: ArmorTier;
 }
 
 const PLAYER_LOOK: Look = { ink: COLORS.ink, eye: COLORS.eye };
+
+/** You on the map, wearing what you have equipped. */
+export const playerLook = (gear: { weapon: WeaponTier; armor: ArmorTier }): Look => ({ ...PLAYER_LOOK, ...gear });
+
+/** Gear colors, the same as in a fight (index.css: --metal, --grip, --armor). */
+const METAL = "#b9bccb", GRIP = "#8a6b4a", ARMOR_INK = "#6f7489";
+
+/** How wide the plate over the torso is, in tiles (wider is heavier). */
+const PLATE_WIDTH: Record<ArmorTier, number> = { none: 0, light: 0.11, normal: 0.13, heavy: 0.15 };
 
 export const SLEEPWALKER_LOOK: Look = { ink: "#aaa5b8", eye: null, reach: true };
 
@@ -53,12 +66,55 @@ export function drawWalker(
 
   if (look.wax) { drawKneeler(g, X, Y, line, T, facing, step, foot, look); return; }
 
+  /** A stroke in a color of its own, then back to the figure's ink. */
+  const stroke = (color: string, w: number, x1: number, y1: number, x2: number, y2: number) => {
+    g.strokeStyle = color; g.lineWidth = Math.max(1.5, w * T); line(x1, y1, x2, y2);
+    g.strokeStyle = look.ink; g.lineWidth = Math.max(2, 0.075 * T);
+  };
+  /** Armor: a plate over the torso, as in a fight. */
+  const plate = () => {
+    const armor = look.armor ?? "none";
+    if (armor !== "none") stroke(ARMOR_INK, PLATE_WIDTH[armor], 0, neck + 0.03, 0, neck + (hip - neck) * 0.86);
+  };
+  /** Normal and heavy armor add pauldrons, at these shoulders (both from the front, one from the side). */
+  const pads = (at: number[]) => {
+    if (look.armor !== "normal" && look.armor !== "heavy") return;
+    g.fillStyle = ARMOR_INK;
+    for (const u of at) { g.beginPath(); g.arc(X(u), Y(shoulder + 0.01), (look.armor === "heavy" ? 0.055 : 0.042) * T, 0, Math.PI * 2); g.fill(); }
+  };
+  /** The weapon, held at the hand (u, v) and hanging down, its tip leaning `lean` tiles out per tile down. */
+  const weapon = (u: number, v: number, lean: number) => {
+    const tier = look.weapon ?? "baseline";
+    if (tier === "baseline") return;
+    const n = Math.hypot(lean, 1), du = lean / n, dv = 1 / n;
+    const at = (d: number, across = 0): [number, number] => [u + du * d - dv * across, v + dv * d + du * across];
+    const seg = (color: string, w: number, a: [number, number], b: [number, number]) => stroke(color, w, a[0], a[1], b[0], b[1]);
+    const fill = (color: string, pts: [number, number][]) => {
+      g.fillStyle = color; g.beginPath();
+      pts.forEach(([pu, pv], i) => (i ? g.lineTo(X(pu), Y(pv)) : g.moveTo(X(pu), Y(pv))));
+      g.closePath(); g.fill();
+    };
+    if (tier === "light") { // dagger
+      seg(GRIP, 0.035, at(-0.03), at(0.02));
+      seg(METAL, 0.025, at(0.02, -0.035), at(0.02, 0.035));
+      fill(METAL, [at(0.02, -0.02), at(0.15), at(0.02, 0.02)]);
+    } else if (tier === "normal") { // sword
+      seg(GRIP, 0.035, at(-0.04), at(0.03));
+      seg(METAL, 0.03, at(0.03, -0.055), at(0.03, 0.055));
+      fill(METAL, [at(0.03, -0.022), at(0.29, -0.016), at(0.33), at(0.29, 0.016), at(0.03, 0.022)]);
+    } else { // maul, its head near the floor
+      seg(GRIP, 0.04, at(-0.06), at(0.3));
+      fill(METAL, [at(0.27, -0.08), at(0.38, -0.08), at(0.38, 0.08), at(0.27, 0.08)]);
+    }
+  };
+
   if (facing === "up" || facing === "down") {
     // Legs: the stepping foot lifts; the arm on the other side swings.
     const lift = (side: number) => (step === side ? -0.08 : 0);
     leg(-0.04, hip, -0.08, foot + lift(-1));
     leg(0.04, hip, 0.08, foot + lift(1));
     line(0, neck, 0, hip);
+    plate();
     if (look.reach) {
       // Arms held out ahead: toward you when facing down, away when facing up.
       const out = facing === "down" ? 0.17 : -0.12;
@@ -66,9 +122,15 @@ export function drawWalker(
       line(0.03, shoulder, 0.07, shoulder + out);
     } else {
       const swing = (side: number) => (step === -side ? (facing === "down" ? 0.05 : -0.05) : step === side ? (facing === "down" ? -0.03 : 0.03) : 0);
+      // The weapon is in your right hand: on the left of the screen when you face it, the
+      // right when you turn away. Seen from behind, it hangs behind the body.
+      const side = facing === "down" ? -1 : 1;
+      if (facing === "up") weapon(side * 0.16, 0.02 + swing(side), side * 0.35);
       line(-0.02, shoulder, -0.16, 0.02 + swing(-1));
       line(0.02, shoulder, 0.16, 0.02 + swing(1));
+      if (facing === "down") weapon(side * 0.16, 0.02 + swing(side), side * 0.35);
     }
+    pads([-0.05, 0.05]);
   } else {
     const m = facing === "right" ? 1 : -1;
     // Legs scissor, arms swing against them.
@@ -76,18 +138,30 @@ export function drawWalker(
     leg(0, hip, m * reach, foot);
     leg(0, hip, -m * reach, foot + (step ? -0.02 : 0));
     line(0, neck, 0, hip);
+    plate();
     if (look.reach) {
       line(0, shoulder, m * 0.24, shoulder + 0.02);
       line(0, shoulder + 0.02, m * 0.21, shoulder + 0.06);
     } else {
       const arm = step ? 0.1 : 0.045;
+      // The weapon hangs from the front hand, tip a little ahead. Facing right, your right hand
+      // is the far one, so it goes behind the body.
+      if (facing === "right") weapon(m * arm, 0.03, m * 0.3);
       line(0, shoulder, -m * arm, 0.03);
       line(0, shoulder, m * arm, 0.03);
+      if (facing === "left") weapon(m * arm, 0.03, m * 0.3);
     }
+    pads([0]);
   }
 
   g.fillStyle = look.ink;
   g.beginPath(); g.arc(X(0), Y(headY), r * T, 0, Math.PI * 2); g.fill();
+  // Heavy armor comes with a helmet over the top of the head, stopping above the eyes.
+  if (look.armor === "heavy") {
+    g.fillStyle = ARMOR_INK;
+    g.beginPath(); g.arc(X(0), Y(headY - 0.015), r * 1.07 * T, Math.PI, Math.PI * 2); g.fill();
+    g.fillRect(X(-r * 1.14), Y(headY - 0.04), r * 2.28 * T, 0.03 * T);
+  }
 
   // Eyes give away which way the head faces; from behind there are none.
   if (!look.eye) return;
