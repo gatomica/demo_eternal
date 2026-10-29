@@ -2,14 +2,16 @@
  * CombatScreen.tsx — the combat screen: planning, then the turn played back step by step.
  */
 import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { play as playSfx, prepare as prepareSfx, sfxFor } from "../audio/sfx";
 import { ActionWheel, type Anchor } from "./ActionWheel";
 import type { CoachStep, Tip } from "./training";
 import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_SIDE, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, phaseAt, phaseFor, phaseTwoOf, type Playback, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt } from "./playback";
 import { defaultSelection, rowsOf, sameSel, type Selection, type Wheel, type WheelOption } from "./selection";
 import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveTurn } from "../core/resolve";
+import { attackCost } from "../core/rules";
 import type { CombatState, Enemy, Opening, PlayerAction } from "../core/types";
-import { actionCamera, behind, closeIn, facingToward, figureBox, formation, lerpAngle, pushedAway, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
+import { behind, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
 import type { Projectile } from "../render/effects";
 import { type BarValues, HealthBar } from "../render/HealthBar";
 import { lookOf } from "../render/looks";
@@ -38,7 +40,7 @@ const barValues =(f: { hp: number; fatigue: number; death: number }): BarValues 
 /** How an enemy's look draws it differently (its kind's variant). */
 const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 
-export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, changeLabel, exitLabel, wonText, onTurnPlayed, coach, figureAngle }: {
+export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, playerAction, playerHold, playerAngle, playerDead, light = true, changeLabel, exitLabel, wonText, onTurnPlayed, coach, figureAngle }: {
   initial: CombatState;
   /** A scene to play before the first turn (it leaves the fight as `initial`). */
   opening?: Opening;
@@ -52,6 +54,16 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   attackOnPlay?: boolean;
   /** The model viewer's Model stance: how the enemy is seen (3/4 or straight on, from the front or behind). */
   figureAngle?: { view: "front" | "back"; straight: boolean; sides?: boolean };
+  /** The model viewer's player mode: each change plays this action for you (instead of a Rest or an Attack). */
+  playerAction?: PlayerAction;
+  /** The model viewer's player mode: the pose you hold while no turn is playing. */
+  playerHold?: PoseName;
+  /** The model viewer's player mode: how you are seen (default: 3/4 from behind, as in a fight). */
+  playerAngle?: { view: "front" | "back"; straight: boolean; sides?: boolean };
+  /** The model viewer's player mode: you lie where you fell (your remains), whatever the fight says. */
+  playerDead?: boolean;
+  /** The fight's limited light (default on). The Model viewer can turn it off to see everything. */
+  light?: boolean;
   /** The pause menu's label for onChangeLoadout. */
   changeLabel?: string;
   /** The pause menu's label for onExit. */
@@ -123,6 +135,24 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const stepKey = playback ? `${playback.from.turn}-${playback.index}-${playback.phase}` : "rest";
   const p = view.player;
 
+  // Get the sounds ready as the fight opens, so the first blow doesn't wait for them to load.
+  useEffect(() => { prepareSfx(); }, []);
+
+  // Each blow's sound lands with its picture: as the step's impact phase begins.
+  useEffect(() => {
+    if (!impact || !step) return;
+    // One of each sound per step; except the flames, one for each unit they lick (up to three, a beat apart).
+    const heard = new Map<string, number>();
+    for (const ev of step.events) {
+      const s = sfxFor(ev);
+      if (!s) continue;
+      const n = heard.get(s.name) ?? 0;
+      heard.set(s.name, n + 1);
+      if (n === 0 || (s.name === "flame" && n < 3)) playSfx(s.name, s.delay + n * 0.09);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepKey]);
+
   // Keep the selection valid: a fallen enemy hands the cursor to the next one.
   const rows = rowsOf(fight);
   const sel: Selection = rows.flat().some(s => sameSel(s, selection)) ? selection : defaultSelection(fight);
@@ -151,6 +181,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     };
   })();
   const chosen = wheelOpen && highlight ? wheel[highlight] : null;
+  // Hovering an Attack (before you commit to it): the Fatigue it would cost flickers on your bar.
+  const previewCost = !busy && chosen?.action.type === "attack" ? attackCost(p, chosen.action.weight) : 0;
   const wheelCenter = sel.kind === "player" ? "You" : selectedEnemy?.name ?? "";
 
   const hudRef = useRef<HTMLDivElement>(null);
@@ -189,7 +221,50 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     if (!target || !alive.length) return { follow: "player", yaw };
     const c = alive.reduce((acc, e) => ({ x: acc.x + pos[e.id].x / alive.length, z: acc.z + pos[e.id].z / alive.length }), { x: 0, z: 0 });
     const toward = lerpAngle(yawOf(sub(c, anchor)), yawOf(sub(target, anchor)), 1) - yawOf(sub(c, anchor));
-    return { follow: "player", yaw: yaw + toward * CAMERA_FOLLOW };
+    const aimed = yaw + toward * CAMERA_FOLLOW;
+    return { follow: "player", yaw: aimed + clearView(anchor, aimed, pos, st) };
+  };
+
+  /**
+   * How far to swing the camera around you (radians) so that nobody stands in front of the enemy you
+   * have selected: the least turn that leaves the most of it in view. Those on the front line count
+   * double against it, being the ones that usually get in the way of the back line; a camera that
+   * can't clear everyone settles for clearing the front line.
+   */
+  const clearView = (anchor: Vec, yaw: number, pos: Record<string, Vec>, st: CombatState): number => {
+    const target = st.enemies.find(e => e.id === selId && e.alive);
+    if (!target || !pos[target.id]) return 0;
+    const others = st.enemies.filter(e => e.alive && e.id !== target.id && pos[e.id]);
+    if (!others.length) return 0;
+    const W = viewport.w || 1280, H = viewport.h || 720;
+    // What of a figure's box is figure: its middle (the box is wider than the body).
+    const body = (cam: Cam, e: Enemy) => {
+      const b = figureBox(cam, pos[e.id], W, H, kindOf(e).scale);
+      return { l: b.x + b.w * 0.3, r: b.x + b.w * 0.7, t: b.y, b: b.y + b.h, depth: b.depth };
+    };
+    const hiddenAt = (turn: number) => {
+      const cam = planningCamera(anchor, yaw + turn);
+      const t = body(cam, target);
+      let hidden = 0;
+      for (const o of others) {
+        const b = body(cam, o);
+        if (b.depth >= t.depth) continue; // only a nearer figure can stand in front
+        const across = Math.max(0, Math.min(t.r, b.r) - Math.max(t.l, b.l)) / (t.r - t.l);
+        const down = Math.max(0, Math.min(t.b, b.b) - Math.max(t.t, b.t)) / (t.b - t.t);
+        hidden += across * down * (o.line === "front" ? 2 : 1);
+      }
+      return hidden;
+    };
+    let best = 0, bestScore = hiddenAt(0);
+    if (bestScore === 0) return 0;
+    // Swing either way, a little at a time; a wider turn only wins by clearing the view that much better.
+    for (let turn = 0.05; turn <= 0.65 + 1e-6; turn += 0.05) {
+      for (const sign of [1, -1]) {
+        const score = hiddenAt(sign * turn) + turn * 0.1;
+        if (score < bestScore) { best = sign * turn; bestScore = score; }
+      }
+    }
+    return best;
   };
 
   /** Puts everyone in formation around the player standing at `anchor`, and frames them. */
@@ -239,10 +314,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // The camera settles between him and his target, then closes in as he dashes at it.
       const a = w.pos[usurp.who], t = w.pos[usurp.target];
       if (!a || !t) return;
-      if (usurpStage === "focus") shoot(w.pos, actionCamera(shotCamera(shot), a, t), USURP_STAGES.dash);
+      const between: ShotCamera = { between: [usurp.who, usurp.target], yaw: shotCamera(shot).yaw };
+      if (usurpStage === "focus") shoot(w.pos, between, USURP_STAGES.dash);
       if (usurpStage === "dash") {
         const at = closeIn(a, t, STRIKE_GAP);
-        shoot({ ...w.pos, [usurp.who]: at }, actionCamera(shotCamera(shot), at, t), USURP_STAGES.black - USURP_STAGES.dash);
+        shoot({ ...w.pos, [usurp.who]: at }, between, USURP_STAGES.black - USURP_STAGES.dash);
       }
       return;
     }
@@ -289,7 +365,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     if (playback.phase === "approach") {
       // A melee attacker closes in (a ranged one stays put), and the camera moves in on the two.
       const at = attack.ranged ? a : closeIn(a, t, STRIKE_GAP);
-      const camera = actionCamera(shotCamera(shot), at, t);
+      // (It stays centered between the two as they move: closing in, knocked back, dodging.)
+      const camera: ShotCamera = { between: [attack.attacker, attack.target], yaw: shotCamera(shot).yaw };
       shoot({ ...w.pos, [attack.attacker]: at }, camera, APPROACH_MS);
       if (attack.result === "dodged") {
         // A target that dodges gets clear late in the approach, timed to be gone just as the blow arrives (the
@@ -379,6 +456,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   // The model viewer's Play: a turn where you only Rest, so the enemy's action plays on its own.
   // Against a Block or a Maneuver you attack instead, so there's something to block or dodge.
   const playSignalled = useEffectEvent(() => {
+    if (playerAction) {
+      if (playing && !busy) play(playerAction);
+      return;
+    }
     const foe = fight.enemies.find(e => e.alive);
     // (Not against a fixed rule like Usurp Flame: that plays on its own.)
     const fixedRule = !!foe && !!kindOf(foe).fixedActions?.includes(foe.intent.action ?? "");
@@ -539,7 +620,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    */
   const turnSteps = playback?.steps;
   const turnIx = useMemo(() => (turnSteps ? indexTurn(turnSteps) : null), [turnSteps]);
-  const stepOf = (m: "strike" | "rest" | "dodge" | "maneuver" | "usurp" | "backUp" | "phaseTwoBy", id: string) => turnIx?.[m].get(id) ?? -1;
+  const stepOf = (m: "strike" | "rest" | "fall" | "raised" | "dodge" | "maneuver" | "usurp" | "backUp" | "phaseTwoBy", id: string) => turnIx?.[m].get(id) ?? -1;
   /** This turn's step `i` has played: it's behind us, or it's showing and its blow has landed. */
   const reached = (i: number) => !!playback && i >= 0 && (playback.index > i || (playback.index === i && impact));
   /** The step where someone's attack lands, or -1. */
@@ -643,7 +724,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         telegraph: playerBackUp ? "idle" : playback.playerPose, down: "kneel", windUp: "attack", strike: punching ? "punch" : "strike", idle: "idle",
         guard: playback.action?.type === "block" || playback.action?.type === "maneuver" ? { hold: "idle", react: playback.playerPose, keepAfterDodge: playback.action.type === "maneuver" } : undefined,
       })
-    : forced ? "kneel" : (chosen?.action.type as PoseName | undefined) ?? "idle";
+    : forced ? "kneel" : playerHold ?? (chosen?.action.type as PoseName | undefined) ?? "idle";
   // While you plan, an enemy only shows its stance; as the turn plays, its action shows.
   // After its attack, an enemy already settles into the stance it takes next (if it's still up).
   /** Still on its feet once the turn is over (not staggered, fallen or reviving). */
@@ -792,13 +873,32 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         flame: usurpStage === "focus" || usurpStage === "dash" ? usurpNow.target : usurpStage === "reveal" ? usurpNow.who : undefined,
       }
     : undefined;
-  const usurpTrail = usurpNow && usurpStage === "reveal" ? { from: usurpNow.target, to: usurpNow.who, key: `${stepKey}-usurp` } : undefined;
+  const usurpTrails: { from: string; to: string; key: string }[] = [];
+  if (usurpNow && usurpStage === "reveal") usurpTrails.push({ from: usurpNow.target, to: usurpNow.who, key: `${stepKey}-usurp` });
+  // A lit waxed dying as the turn ends: its flame streams into the Warden's hand.
+  if (impact && step) {
+    for (const ev of step.events) {
+      if (ev.kind === "drained") usurpTrails.push({ from: ev.who, to: ev.by, key: `${stepKey}-drained-${ev.who}` });
+      // Staggered in phase two, the Warden sends a flame to a fallen waxed, and it rises.
+      else if (ev.kind === "raised" && ev.by) usurpTrails.push({ from: ev.by, to: ev.who, key: `${stepKey}-raised-${ev.who}` });
+    }
+  }
 
   // Ranged attacks throw something across the field as they land.
   const projectiles: Projectile[] = [];
+  let flames = 0;
   if (playback && impact && step) {
     for (const ev of step.events) {
+      // A fire attack that lands (a fan of flames, a blast, a burning flail, a shockwave) sets its target alight for a moment.
+      if ((ev.kind === "attack" && ev.fire && ev.result === "hit") || ev.kind === "burned" || ev.kind === "splash") {
+        const to = ev.kind === "burned" ? ev.who : ev.target;
+        projectiles.push({ from: to, to, kind: "flamehit", key: `${stepKey}-${to}-flamehit${flames++}` });
+      }
       if (ev.kind !== "attack") continue;
+      // A melee blow that was blocked clangs back at its attacker (a ranged one sends nothing back).
+      if (ev.result === "blocked" && !ev.ranged) {
+        projectiles.push({ from: ev.target, to: ev.attacker, kind: "clang", key: `${stepKey}-${ev.attacker}-clang` });
+      }
       const thrower = playback.from.enemies.find(e => e.id === ev.attacker);
       const kind = thrower?.intent.projectile;
       // Melee attacks throw nothing, but some leave a shockwave where they land.
@@ -822,16 +922,74 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         ? reached(phaseTwoStep)
         : playback.from.enemies.some(e => kindOf(e).arena && e.flags.phase2)
       : fight.enemies.some(e => kindOf(e).arena && e.flags.phase2));
+  /**
+   * Its remains lie where it fell, instead of the figure: it has fallen for good (this turn, once the
+   * blow has landed, or in an earlier one), or it fell with a revive left and lies there until it rises.
+   */
+  /**
+   * Its fall has shown: once the blow that drops it has landed. Under grit (it was dropped by a tied attack
+   * and finishes its own, in the step it falls) it stays up until that attack is over, and lies down after.
+   */
+  const fellBy = (id: string): boolean => {
+    const fall = stepOf("fall", id);
+    if (fall < 0) return false;
+    return stepOf("strike", id) === fall ? !!playback && playback.index > fall : reached(fall);
+  };
+  /** It has just lain down, in the beat showing now: its remains drop (see `.fx-die`). */
+  const justFell = (id: string): boolean => {
+    const fall = stepOf("fall", id);
+    if (!playback || fall < 0) return false;
+    if (stepOf("strike", id) !== fall) return playback.index === fall;
+    // After its own attack: the next step, in the first beat it shows (an attack's approach, or any other step's only beat).
+    const next = playback.steps[fall + 1];
+    return playback.index === fall + 1 && (isAttackStep(next) ? playback.phase === "approach" : true);
+  };
+  const looksDead = (e: Enemy): boolean => {
+    // Sealed in wax by the Warden (its flame taken), or because it died lit: its remains from that step on.
+    if (!e.alive && e.fate === "encased") return true;
+    if (!playback) return e.alive ? e.reviving : true;
+    const was = playback.from.enemies.find(x => x.id === e.id);
+    if (was && !was.alive) {
+      // A fallen waxed rises when it is raised: with the fire shockwave of phase two, or as its step plays.
+      const raised = stepOf("raised", e.id);
+      if (raised < 0) return true;
+      return raised === (turnIx?.phaseTwo ?? -1) ? !arenaLit : !reached(raised);
+    }
+    if (was?.reviving) {
+      // The Warden lies where he fell until he rises in the dark of his phase-two scene, with the light still fading out.
+      const p2 = stepOf("phaseTwoBy", e.id);
+      if (p2 >= 0) {
+        if (playback.index !== p2) return playback.index < p2;
+        return ignite && ignite.who === e.id ? igniteNow < IGNITE.kindle : playback.phase === "ignite";
+      }
+      return !reached(stepOf("backUp", e.id));
+    }
+    return reached(stepOf("fall", e.id));
+  };
+  /**
+   * Your remains lie where you fell instead of you: you fell this turn (once the blow has landed), you are
+   * down for good, or you fell with a charge left and lie there until the revive lands.
+   */
+  const playerLooksDead = (): boolean => {
+    if (playerDead) return true;
+    if (!playback) return fight.status === "lost" || p.reviving;
+    if (playback.from.player.reviving) return !reached(stepOf("backUp", "player"));
+    return fellBy("player");
+  };
+  const youDead = playerLooksDead();
   const playerSealed = (p.waxed || !!p.encased) && p.staggered;
   const figures: SceneFigure[] = [
     {
       id: "player",
-      view: "back",
+      view: playerAngle?.view ?? "back",
+      straight: playerAngle?.straight,
+      sides: playerAngle?.sides,
       // Staggered while Waxed, you're sealed like the waxed: kneeling, shins bound, head in wax,
       // your flame burning on it (until it's taken).
       // Staggered while Waxed (or with your flame taken), you're sealed whole in wax, and stay
       // that way until you recover: no other look in between.
       pose: track("player", playerSealed ? "w-idle" : playerPose),
+      dead: youDead ? "pieces" : undefined,
       variant: playerSealed ? "waxed" : undefined,
       // Sealed, your own flame burns on your head (phase two's scene draws on it too).
       flame: playerSealed,
@@ -841,7 +999,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       waxCaked: p.waxed && !p.staggered,
       weapon: p.weapon,
       armor: p.armor,
-      classes: fx.get("player")?.classes ?? [],
+      // Fallen, you drop and stay there, a little faded (instead of fading out).
+      classes: youDead
+        ? [...(fx.get("player")?.classes ?? []).filter(c => c !== "fx-fall"), ...(justFell("player") ? ["fx-die"] : []), "is-remains"]
+        : (fx.get("player")?.classes ?? []).filter(c => c !== "fx-fall"),
       stepKey,
       selected: !busy && sel.kind === "player",
       disabled: busy || !playing || forced !== null,
@@ -850,7 +1011,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     },
     ...view.enemies
       // Some (the waxed) stay where they fell, faded, for the rest of the fight.
-      .filter(e => e.alive || fx.get(e.id)?.classes.includes("fx-fall") || kindOf(e).remains)
+      .filter(e => e.alive || fx.get(e.id)?.classes.includes("fx-fall") || kindOf(e).remains || looksDead(e))
       .map((e): SceneFigure => ({
         id: e.id,
         view: figureAngle?.view ?? "front",
@@ -858,7 +1019,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         sides: figureAngle?.sides,
         foe: true,
         hand: kindOf(e).weaponHand,
-        pose: !playback && walkOff?.[e.id] ? walkOff[e.id] : track(e.id, enemyPose(e)),
+        pose: looksDead(e) && kindOf(e).deathLook === "wax" ? asPose(kindOf(e).deathPose, "w-idle") : !playback && walkOff?.[e.id] ? walkOff[e.id] : track(e.id, enemyPose(e)),
         weapon: e.weapon,
         armor: e.armor,
         variant: kindOf(e).variant,
@@ -871,15 +1032,25 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         // Its rest pose just gave way to its next stance: that pose's trails keep fading meanwhile.
         lingerFrom: restJustOver(e) ? (e.intent.restPose as WardenPoseName) : strikeJustOver(e) ? (e.intent.strikePose as WardenPoseName) : undefined,
         smokeSince: smoke[e.id],
-        classes: [...(fx.get(e.id)?.classes ?? []), ...(!e.alive && kindOf(e).remains ? ["is-remains"] : [])],
-        candle: !e.alive && !!kindOf(e).remains && arenaLit && e.fate !== "encased",
-        // Its flame taken: sealed whole in wax.
-        encased: !e.alive && e.fate === "encased",
+        // The fallen lie there, a little faded: they drop (instead of fading out), then stay.
+        // (A unit that is about to lie down, but still has its own attack to finish, stays up and unfaded until then.)
+        classes: looksDead(e)
+          ? [...(fx.get(e.id)?.classes ?? []).filter(c => c !== "fx-fall"), ...(justFell(e.id) ? ["fx-die"] : []), "is-remains"]
+          : [...(fx.get(e.id)?.classes ?? []).filter(c => c !== "fx-fall"), ...(!e.alive && kindOf(e).remains ? ["is-remains"] : [])],
+        dead: looksDead(e) ? kindOf(e).deathLook ?? "pieces" : undefined,
+        // The fallen waxed burn as candles once the arena is lit (not the sealed ones); the lit ones, alive, carry theirs on their heads.
+        candle: !!kindOf(e).remains && arenaLit && (e.alive ? !looksDead(e) : e.fate !== "encased"),
+        // Its flame taken, or fallen (the waxed): sealed whole in wax.
+        encased: (!e.alive && e.fate === "encased") || (looksDead(e) && kindOf(e).deathLook === "wax"),
         stepKey,
-        selected: !busy && sel.kind === "enemy" && sel.id === e.id && e.alive,
-        disabled: busy || !playing || forced !== null || !e.alive,
+        selected: !busy && sel.kind === "enemy" && sel.id === e.id && e.alive && !looksDead(e),
+        disabled: busy || !playing || forced !== null || !e.alive || looksDead(e),
         label: `Select ${e.name}`,
         onPick: () => { if (playSignal === undefined) openWheel({ kind: "enemy", id: e.id }); },
+        // While you plan, the bar of whoever you're targeting, right below it (mid-turn it sits on the black strip instead).
+        bar: playing && !busy && e.id === shownId && e.alive
+          ? <HealthBar fighter={e} before={shownBefore && barValues(shownBefore)} mirrored />
+          : undefined,
       })),
   ];
 
@@ -899,8 +1070,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     <div className={`hud ${busy ? "is-cinematic" : ""}`} ref={hudRef}>
       <section className="stage" aria-label="Battlefield">
         <Scene
-          figures={figures} shot={shot} projectiles={projectiles} usurpTrail={usurpTrail} arenaLit={arenaLit}
+          figures={figures} shot={shot} projectiles={projectiles} usurpTrails={usurpTrails} arenaLit={arenaLit}
           arena={fight.enemies.some(e => kindOf(e).arena)}
+          light={light}
           dark={ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark}
           ignite={ignite ? { who: ignite.who, start: ignite.start, seed: ignite.seed } : undefined}
         />
@@ -927,18 +1099,19 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       )}
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
 
-      {/* The two health bars sit in fixed slots, so nothing else on screen can push them around. */}
+      {/* Your health bar sits in a fixed slot, so nothing else on screen can push it around. The target's hangs right below it, in the scene. */}
       <div className="bar-slot bar-slot-player">
         {/* Revives left, as a red Roman numeral beside your bar. Nothing shows once they're gone. */}
         {p.charges > 0 && (
           <span className="revive-count" aria-label={`${p.charges} revives left`}>{roman(p.charges)}</span>
         )}
-        <HealthBar fighter={p} />
+        <HealthBar fighter={p} preview={previewCost} />
       </div>
 
-      {(busy || playing) && (
+      {/* While a turn plays, the target's bar sits bottom right, mirroring yours (in planning it hangs below the enemy). */}
+      {busy && (
         <div className="bar-slot bar-slot-target">
-          {shownEnemy && (shownEnemy.alive || busy) && (
+          {shownEnemy && (
             <TargetPanel key={shownEnemy.id} enemy={shownEnemy} before={shownBefore && barValues(shownBefore)} />
           )}
         </div>
@@ -985,7 +1158,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   );
 }
 
-/** One health bar for whoever you're targeting (or, mid-turn, whoever the action involves). Always in the same spot. */
+/** One health bar for whoever the turn's action involves. Always in the same spot. */
 function TargetPanel({ enemy, before }: { enemy: Enemy; before?: BarValues }) {
   return (
     <div className="hud-target">

@@ -16,7 +16,19 @@
 export interface Vec { x: number; z: number }
 
 /** The camera: where it stands on the floor, and the direction it looks (radians, 0 = +z). */
-export interface Cam { x: number; z: number; yaw: number }
+export interface Cam {
+  x: number;
+  z: number;
+  yaw: number;
+  /** The spot on the floor the shot is about (the player you ride behind, the middle of two fighters): the fight's light is centered on it. */
+  look?: Vec;
+}
+
+/** How far ahead of a camera with no subject of its own the light is centered, in meters. */
+export const LOOK_AHEAD = 4;
+
+/** Where a camera's light is centered: its subject, or else a spot ahead of it. */
+export const focusOf = (c: Cam): Vec => c.look ?? { x: c.x + Math.sin(c.yaw) * LOOK_AHEAD, z: c.z + Math.cos(c.yaw) * LOOK_AHEAD };
 
 /* ============================================================
  * Lens
@@ -97,6 +109,22 @@ const LINES = {
   back: { side: 4.3, ahead: 3.6, spacing: 1.5 },
 } as const;
 
+/**
+ * The light around the player in a fight, as distances on the floor from them (meters): fully lit
+ * to `clear`, fading to `back` (the arc the back line stands on, so just inside the edge, and dim; the front line stands on a nearer arc),
+ * `backDark` dark there, and black from `edge` on: no floor, no horizon, nothing beyond.
+ */
+export const LIGHT = { clear: 2.8, back: Math.hypot(LINES.back.side, LINES.back.ahead), backDark: 0.8, edge: 7.4 } as const;
+
+/** How dark the light has become (0 lit, 1 black) at this floor distance from the player. */
+export function darkAt(d: number): number {
+  const soft = (t: number) => t * t * (3 - 2 * t);
+  if (d <= LIGHT.clear) return 0;
+  if (d >= LIGHT.edge) return 1;
+  if (d <= LIGHT.back) return LIGHT.backDark * soft((d - LIGHT.clear) / (LIGHT.back - LIGHT.clear));
+  return LIGHT.backDark + (1 - LIGHT.backDark) * soft((d - LIGHT.back) / (LIGHT.edge - LIGHT.back));
+}
+
 /** Turns a position relative to the player (side, ahead) into a floor position. */
 function fromPlayer(anchor: Vec, yaw: number, side: number, ahead: number): Vec {
   return add(add(anchor, right(yaw), side), forward(yaw), ahead);
@@ -105,15 +133,21 @@ function fromPlayer(anchor: Vec, yaw: number, side: number, ahead: number): Vec 
 /** The over-the-shoulder planning shot for a player standing at `anchor`, facing `yaw`. */
 export function planningCamera(anchor: Vec, yaw: number): Cam {
   const p = add(add(anchor, forward(yaw), -CAMERA_BEHIND), right(yaw), CAMERA_SIDE);
-  return { x: p.x, z: p.z, yaw };
+  return { x: p.x, z: p.z, yaw, look: anchor };
 }
 
 /** Slots in the formation for the enemies on each line, in order, relative to the player. */
 export function formation(anchor: Vec, yaw: number, front: string[], back: string[]): Map<string, Vec> {
   const spots = new Map<string, Vec>();
+  // Each line stands on an arc around the player, all the same distance from them: its middle
+  // where the line's slot is, the rest spread along the arc (`spacing` apart, along the arc).
   for (const [line, ids] of [["front", front], ["back", back]] as const) {
     const { side, ahead, spacing } = LINES[line];
-    ids.forEach((id, i) => spots.set(id, fromPlayer(anchor, yaw, side + (i - (ids.length - 1) / 2) * spacing, ahead)));
+    const r = Math.hypot(side, ahead), mid = Math.atan2(side, ahead);
+    ids.forEach((id, i) => {
+      const a = mid + ((i - (ids.length - 1) / 2) * spacing) / r; // from straight ahead, toward your right
+      spots.set(id, fromPlayer(anchor, yaw, r * Math.sin(a), r * Math.cos(a)));
+    });
   }
   return spots;
 }
@@ -138,7 +172,7 @@ export function actionCamera(current: Cam, a: Vec, b: Vec): Cam {
   const mid = { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2 };
   const back = 2.2 + dist(a, b) * 0.6; // pull back further the further apart they are
   const p = add(mid, forward(current.yaw), -back);
-  return { x: p.x, z: p.z, yaw: current.yaw };
+  return { x: p.x, z: p.z, yaw: current.yaw, look: mid };
 }
 
 /** A spot `gap` meters short of `target`, on the line from `from`. */
@@ -179,6 +213,7 @@ export const lerpCam = (a: Cam, b: Cam, t: number): Cam => ({
   x: a.x + (b.x - a.x) * t,
   z: a.z + (b.z - a.z) * t,
   yaw: lerpAngle(a.yaw, b.yaw, t),
+  look: a.look && b.look ? lerpVec(a.look, b.look, t) : b.look ?? a.look,
 });
 
 /* ============================================================
@@ -205,7 +240,7 @@ export function figureBox(cam: Cam, p: Vec, w: number, h: number, scale = 1) {
  * shot), facing `yaw`. A riding camera stays locked to its figure while it moves, so the figure
  * holds still on screen and the world turns around it.
  */
-export type ShotCamera = Cam | { follow: string; yaw: number };
+export type ShotCamera = Cam | { follow: string; yaw: number } | { between: [string, string]; yaw: number };
 
 /** Where everyone should be and where the camera should look, and how long to take getting there. */
 export interface SceneShot {
@@ -219,5 +254,10 @@ export interface SceneShot {
 /** The camera a shot ends on. */
 export function shotCamera(shot: SceneShot): Cam {
   const c = shot.camera;
-  return "follow" in c ? planningCamera(shot.positions[c.follow], c.yaw) : c;
+  if ("follow" in c) return planningCamera(shot.positions[c.follow], c.yaw);
+  if ("between" in c) return trackingCamera(c.yaw, shot.positions[c.between[0]], shot.positions[c.between[1]]);
+  return c;
 }
+
+/** The camera centered between two fighters wherever they stand (an attack's shot follows them as they move). */
+export const trackingCamera = (yaw: number, a: Vec, b: Vec): Cam => actionCamera({ x: 0, z: 0, yaw }, a, b);

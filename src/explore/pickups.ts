@@ -31,5 +31,17 @@ export const PICKUPS: Pickup[] = [
   { id: "crypt-weapon", at: { x: 50.5, y: 31.5, z: 0 }, gear: { slot: "weapon", tier: "heavy", eternal: true }, look: "sword" },
 ];
 
+/** Gear lying where something fell or where you let it go, not set on the map: picked up like the rest. */
+export interface GroundItem {
+  id: string;
+  at: { x: number; y: number; z: number };
+  gear: GearSpec;
+  /** The enemy it dropped from (a key of the journey's corpses): it goes when that one gets up again, and comes back when it falls. Missing: you left it there. */
+  from?: string;
+}
+
+/** How a piece of gear lies on the floor. */
+export const lookOfGear = (g: GearSpec): Pickup["look"] => (g.slot === "weapon" ? "sword" : "armor");
+
 /** How close you must stand to pick something up, in tiles. */
 export const PICKUP_REACH = 0.9;

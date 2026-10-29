@@ -1,6 +1,7 @@
 /**
  * conditions.ts — the `*Condition`s an action can name in a pattern (`Stride: maneuver, retreat,
- * *Hurt, *!Close`). An action is only available while all of them hold; `!` flips one.
+ * *Hurt, *!Close`). An action is only available while all of them hold; `!` flips one; `*A or *B`
+ * is one condition that holds while either does.
  *
  * Three sources, looked up in this order: the kind's own `conditions`, the common ones below, and
  * the kind's statuses (`flags`), so `*Phase2` or `*Sealed` work without writing anything.
@@ -35,8 +36,14 @@ export function conditionOf(kind: EnemyKind, need: string): Condition | undefine
 
 /** Whether all of an action's conditions hold for this enemy right now. */
 export function isAvailable(kind: EnemyKind, self: Enemy, state: CombatState, a: ActionDef): boolean {
-  return a.needs.every(need => {
-    const holds = conditionOf(kind, need)?.(self, state) ?? false;
-    return need.startsWith("!") ? !holds : holds;
-  });
+  // Each need holds if any of its alternatives (`*A or *B`, kept as "a|b") does.
+  return a.needs.every(need =>
+    need.split("|").some(alt => {
+      const holds = conditionOf(kind, alt)?.(self, state) ?? false;
+      return alt.startsWith("!") ? !holds : holds;
+    }),
+  );
 }
+
+/** A need as it is written in a pattern, for messages: `*Far or *Flaming`. */
+export const needText = (need: string) => need.split("|").map(alt => `*${alt}`).join(" or ");

@@ -14,9 +14,9 @@ import type { ArmorTier, Fighter, WeaponTier } from "./types";
 /** `speed` orders attacks within a turn: lower goes first, equal speeds land together. */
 export const WEAPONS: Record<WeaponTier, { weight: number; cost: number; damage: number; block: number; speed: number; label: string }> = {
   baseline: { weight: 0, cost: 1, damage: 1, block: 0, speed: 0, label: "None" },
-  light:  { weight: 1, cost: 1, damage: 2, block: 2, speed: 1, label: "Light" },
+  light:  { weight: 2, cost: 1, damage: 2, block: 2, speed: 1, label: "Light" },
   normal: { weight: 3, cost: 3, damage: 3, block: 3, speed: 2, label: "Normal" },
-  heavy:  { weight: 8, cost: 8, damage: 4, block: 4, speed: 3, label: "Heavy" },
+  heavy:  { weight: 4, cost: 8, damage: 4, block: 4, speed: 3, label: "Heavy" },
 };
 
 /**
@@ -26,13 +26,16 @@ export const WEAPONS: Record<WeaponTier, { weight: number; cost: number; damage:
  */
 export const ARMOR: Record<ArmorTier, { resist: number; weight: number; label: string }> = {
   none:   { resist: 1, weight: 0, label: "None" },
-  light:  { resist: 2, weight: 1, label: "Light" },
+  light:  { resist: 2, weight: 2, label: "Light" },
   normal: { resist: 3, weight: 3, label: "Normal" },
-  heavy:  { resist: 4, weight: 8, label: "Heavy" },
+  heavy:  { resist: 4, weight: 4, label: "Heavy" },
 };
 
-/** Even unburdened, a dodge costs this many sixteenths of the damage dodged. */
-export const DODGE_BASE = 1;
+/** Even unburdened, a dodge turns half the damage dodged into Fatigue (8 sixteenths). */
+export const DODGE_BASE = 8;
+
+/** A Block adds this much Resistance (half the damage) on top of armor and weapon. */
+export const BLOCK_BASE = 8;
 
 
 /** Rest clears this much Fatigue. */
@@ -51,9 +54,12 @@ export const attackDamage = (f: Fighter, weight: WeaponTier = f.weapon) => sixte
 
 export const restAmount = (f: Fighter) => sixteenths(REST_CLEARS, f.maxHP);
 
-/** Share of incoming damage turned into Fatigue (0..1), with a Block of the given weight or none. */
+/**
+ * Share of incoming damage turned into Fatigue (0..1). Armor alone when not blocking; a Block
+ * adds the baseline and its weight's bonus.
+ */
 export const resistance = (f: Fighter, blockWeight: WeaponTier | null) =>
-  Math.min(1, (ARMOR[f.armor].resist + (blockWeight ? WEAPONS[blockWeight].block : 0)) / 16);
+  Math.min(1, (ARMOR[f.armor].resist + (blockWeight ? BLOCK_BASE + WEAPONS[blockWeight].block : 0)) / 16);
 
 /**
  * The Fatigue a dodged attack of this much damage turns into: (base + armor weight + weapon

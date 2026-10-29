@@ -3,7 +3,7 @@
  * happened to whom so far, and the steps it has recorded. Each phase of the turn (attacks.ts,
  * rests.ts, movement.ts, endTurn.ts) reads and changes it in turn.
  */
-import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Line, Player, PlayerAction, Step, WeaponTier } from "../types";
+import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Player, PlayerAction, Step, WeaponTier } from "../types";
 
 /** The action the player is locked into this turn, if any. */
 export function forcedAction(state: CombatState): "rest" | "revive" | null {
@@ -38,14 +38,10 @@ export interface Turn {
   foeReviving: Set<string>;
   /** Who Rests this turn, and whether it's the forced Rest after a stagger. */
   resting: Map<string, boolean>;
-  /** Lines as they were when the turn started: what you saw while planning is what you fight. */
-  locked: Map<string, Line>;
   /** Enemies' flags and who was staggered, as the turn started. */
   wasFlags: Map<string, Record<string, boolean>>;
   wasStaggered: Set<string>;
 
-  /** Gained Fatigue this turn (so it doesn't decay). */
-  gained: Set<string>;
   /** Took health damage this turn (which breaks a Rest). */
   hurt: Set<string>;
   /** Fell or staggered this turn: whatever they hadn't done yet is lost. */
@@ -54,8 +50,6 @@ export interface Turn {
   fallen: Set<string>;
   /** Pulled to the front line by a melee attack: enemy id -> who pulled it. */
   pulls: Map<string, string>;
-  /** Blocks that actually caught an attack. */
-  blockedSomething: Set<string>;
   /** Actions cancelled before they happened. */
   cancelled: Set<string>;
   /** Rests broken by a blow. */
@@ -99,16 +93,15 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
   const resting = new Map<string, boolean>();
   if (act?.type === "rest") resting.set(p.id, p.staggered);
   for (const e of alive) if (e.intent.type === "rest" && !foeReviving.has(e.id)) resting.set(e.id, e.intent.forced);
-  const locked = new Map<string, Line>(alive.map(e => [e.id, e.line]));
 
   const t: Turn = {
     s, p, alive, fighters,
     byId: id => fighters.find(f => f.id === id),
-    act, reviving, foeReviving, resting, locked,
+    act, reviving, foeReviving, resting,
     wasFlags: new Map(alive.map(e => [e.id, { ...e.flags }])),
     wasStaggered: new Set(fighters.filter(f => f.staggered).map(f => f.id)),
-    gained: new Set(), hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(),
-    blockedSomething: new Set(), cancelled: new Set(), interrupted: new Set(), fellReviving: new Set(),
+    hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(),
+    cancelled: new Set(), interrupted: new Set(), fellReviving: new Set(),
     recoverLast: false,
     steps: [],
     events: [],
@@ -119,7 +112,6 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
     },
     tire: (f, amount) => {
       if (amount <= 0) return;
-      t.gained.add(f.id);
       if (cfg.dummy) return;
       if (!f.staggered) f.fatigue += amount;
     },
@@ -129,7 +121,7 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
     isRanged: f => f !== p && !!(f as Enemy).intent.ranged,
     isBlocking: (f, attacker) => {
       if (t.out.has(f.id)) return false;
-      if (f === p) return act?.type === "block" && (act.target === attacker.id || locked.get(attacker.id) === "back");
+      if (f === p) return act?.type === "block" && act.target === attacker.id;
       return (f as Enemy).intent.type === "block";
     },
     /**

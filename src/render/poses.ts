@@ -88,7 +88,7 @@ export type PoseName =
   | "sw-windup" | "sw-brace" | "sw-flinch" | "sw-down" | "sw-idle" | "sw-charging" | "sw-struggling" | "sw-guarded"
   | "sw-overhead" | "sw-chop" | "sw-parry" | "sw-charge" | "sw-backstep" | "sw-despair"
   | "w-idle" | "w-hands" | "w-scratch" | "w-wax-hand" | "w-hurl"
-  | "w-cower" | "w-crawl" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
+  | "w-dead" | "w-cower" | "w-crawl" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
   | WardenPoseName;
 
 /**
@@ -449,6 +449,15 @@ const POSES: Record<Exclude<PoseName, WardenPoseName>, Skeleton> = {
     weaponArm: { elbow: [55, 72], hand: [57, 86] },
     freeArm: { elbow: [45, 72], hand: [47, 86] },
     ...KNEELING, weapon: bare([57, 86]),
+  },
+  // Dead: folded right down onto its knees, hunched low over itself, head bowed to its knees, arms
+  // wrapped round its own body, hugging itself.
+  "w-dead": {
+    head: [70, 101], neck: [60, 94], hip: [44, 105],
+    adjust: { torso: 0.6, leadThigh: 0.6, leadShin: 0.832, rearThigh: 0.6, rearShin: 0.832, weaponUpper: 0.95, weaponFore: 0.9, freeUpper: 0.9, freeFore: 0.9 },
+    weaponArm: { elbow: [68, 106], hand: [50, 98] },
+    freeArm: { elbow: [57, 108], hand: [47, 100] },
+    ...KNEELING, weapon: bare([50, 98]),
   },
   // Hands Raised: both hands up, fingers hooked, about to claw.
   "w-hands": {

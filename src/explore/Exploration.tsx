@@ -21,11 +21,12 @@
 import { useEffect, useRef, useState } from "react";
 import { dirOf, wrapIndex } from "../ui/input";
 import { Dialogue } from "./Dialogue";
-import { drawFallenWaxed, drawPickup, drawKeeper, drawWalker, type Frame, MAP_FIGURES, playerLook } from "./figures";
-import { cycleSlot, gearName, type Inventory as Bag, loadoutOf, receive, SLOTS } from "./gear";
-import { Inventory } from "./Inventory";
-import { PICKUP_REACH, PICKUPS } from "./pickups";
-import { CHASE_MEMORY, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, foeFloor, GRACE_MS, huddle, MAP_FOES, type MapFoe, MAX_IN_FIGHT, stepsFrom, TOUCH, waypoint } from "./foes";
+import { ENEMY_KINDS } from "../core/bestiary";
+import { drawPickup, drawKeeper, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
+import { choosePiece, equippedSide, equipSide, gearName, unequip, type GearSpec, type Inventory as Bag, loadoutOf, piecesFor, receive, SIDES, SLOTS } from "./gear";
+import { type ChoiceList, Inventory } from "./Inventory";
+import { type GroundItem, lookOfGear, PICKUP_REACH, PICKUPS } from "./pickups";
+import { CHASE_MEMORY, type Corpse, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, foeFloor, GRACE_MS, huddle, livingDef, MAP_FOES, type MapFoe, MAX_IN_FIGHT, memberKey, stepsFrom, TOUCH, waypoint } from "./foes";
 import { FADE_FAR, FADE_NEAR, GUIDE, KEEPER_REACH, KEEPERS, REST_NOTE_MS } from "./keepers";
 import { cornerNudge, slide, surfaceNear, type Walker } from "./movement";
 import { CHUNK, CHUNK_PAD_BOTTOM, CHUNK_PAD_TOP, makeCanvas, paintChunk } from "./paint";
@@ -43,8 +44,14 @@ const SLEEP_MID_MS = 1100;
 export interface Journey {
   /** Where you are; missing means where you wake: by the keeper you last rested by, or the start. */
   at?: { x: number; y: number; alt: number; facing: Dir };
-  /** Enemies already beaten (they stay gone). */
+  /** Enemies already beaten (they stay gone, until you rest: then the sleepwalkers get up again). */
   defeated: string[];
+  /** Where each beaten enemy lies (by member: see `memberKey`). The sleepwalkers' remains go when you rest; the others stay for good. */
+  corpses?: Record<string, Corpse>;
+  /** Gear lying on the ground where enemies fell, or where you let go of it. */
+  ground?: GroundItem[];
+  /** Set as a fight starts: where each of its enemies would lie if it fell, so the map can leave them there after a win. */
+  fallen?: Record<string, Corpse>;
   /** The keeper you last rested by (a keeper's id). */
   rested?: string;
   /** The guide's teaching: while it isn't done, the start room's exits are sealed in wax. */
@@ -103,23 +110,109 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
   const [inv, setInvState] = useState<Bag>(journey.inventory);
   const setInv = (b: Bag) => { invRef.current = b; setInvState(b); };
   const [invFocus, setInvFocus] = useState(0);
+  // The list of everything you own for a slot, open from the place you wield.
+  const [choice, setChoice] = useState<ChoiceList | null>(null);
+  const choiceRef = useRef<ChoiceList | null>(null);
+  choiceRef.current = choice;
+  const INV_MENU = SLOTS.length * SIDES.length;
+  useEffect(() => { if (!paused) setChoice(null); }, [paused]);
+  /** E (or a click) on a place of the inventory: wield what lies there, or on the one you wield, open the list to pick another. */
+  const activatePlace = (i: number) => {
+    if (i === INV_MENU) { onExit(snapshot.current()); return; }
+    const slot = SLOTS[Math.floor(i / SIDES.length)], side = SIDES[i % SIDES.length];
+    if (equippedSide(invRef.current, slot) === side) {
+      // (The list starts with "Unequip", then the pieces: the cursor begins on what you wield.)
+      const at = piecesFor(invRef.current, slot, side).findIndex(g => g.id === invRef.current[slot]) + 1;
+      setChoice({ slot, side, at });
+    } else {
+      setInv(equipSide(invRef.current, slot, side));
+    }
+  };
+  /** E on an entry of the list: wield that piece. */
+  const chooseEntry = (index?: number) => {
+    const c = choiceRef.current;
+    if (!c) return;
+    const at = index ?? c.at;
+    const piece = at > 0 ? piecesFor(invRef.current, c.slot, c.side)[at - 1] : undefined;
+    setInv(piece ? choosePiece(invRef.current, c.slot, piece) : unequip(invRef.current, c.slot, c.side));
+    setChoice(null);
+  };
   // Gear on the floor: what you've taken, and what you're standing by.
   const takenRef = useRef<string[]>(journey.taken);
+  // Who lies beaten, and where: the sleepwalkers get up again when you rest by a keeper (their remains go with them); the waxed and the Warden stay dead.
+  const defeatedRef = useRef<string[]>(journey.defeated);
+  const corpsesRef = useRef<Record<string, Corpse>>((() => {
+    const out = { ...(journey.corpses ?? {}) };
+    // (A save from before the remains were kept: each beaten group lies where it started.)
+    for (const id of journey.defeated) {
+      const def = MAP_FOES.find(f => f.id === id);
+      if (!def) continue;
+      const spots = huddle(def.fight.length);
+      def.fight.forEach((m, i) => { out[memberKey(id, i)] ??= { kind: m.kind, x: def.home.x + spots[i][0], y: def.home.y + spots[i][1], alt: def.home.z }; });
+    }
+    return out;
+  })());
+  /** Set up by the map's loop: the sleepwalkers get up again, back where they started. */
+  const respawnRef = useRef<() => void>(() => {});
+  const groundRef = useRef<GroundItem[]>(journey.ground ?? []);
   const nearPickupRef = useRef<string | null>(null);
   const [nearPickup, setNearPickup] = useState<string | null>(null);
-  const pickUp = () => {
-    const p = PICKUPS.find(x => x.id === nearPickupRef.current);
-    if (!p) return;
-    takenRef.current = [...takenRef.current, p.id];
+  /** Everything lying within reach to be picked up: gear set on the map that you haven't taken, and what lies where things fell. */
+  const floorItems = () => [
+    ...PICKUPS.filter(p => !takenRef.current.includes(p.id)).map(p => ({ id: p.id, at: p.at, gear: p.gear, look: p.look })),
+    ...groundRef.current.map(g => ({ id: g.id, at: g.at, gear: g.gear, look: lookOfGear(g.gear) })),
+  ];
+  /** Takes an item off the floor (wherever it lies). */
+  const lift = (id: string) => {
+    if (PICKUPS.some(p => p.id === id)) takenRef.current = [...takenRef.current, id];
+    else groundRef.current = groundRef.current.filter(g => g.id !== id);
     nearPickupRef.current = null;
     setNearPickup(null);
+  };
+  // The item on the ground that the inventory is offering to swap for what you wear.
+  const [swapId, setSwapId] = useState<string | null>(null);
+  const swapRef = useRef<string | null>(null);
+  swapRef.current = swapId;
+  /** The ordinary gear you wear in the slot of this piece, if any (the case where a pick-up becomes a swap). */
+  const wornInSlot = (gear: GearSpec) => {
+    const cur = invRef.current;
+    const piece = cur.bag.find(x => x.id === cur[gear.slot]);
+    return piece && !piece.eternal ? piece : undefined;
+  };
+  const pickUp = () => {
+    const item = floorItems().find(x => x.id === nearPickupRef.current);
+    if (!item) return;
+    // Wearing ordinary gear of its kind already: the inventory opens, to swap them (you leave what you wear here).
+    if (!item.gear.eternal && wornInSlot(item.gear)) {
+      held.current = [];
+      setSwapId(item.id);
+      setInvFocus(0);
+      setPaused(true);
+      return;
+    }
+    lift(item.id);
     // It goes in the bag; wearing it is up to you.
-    const { inventory, replaced } = receive(invRef.current, [p.gear], false);
+    const { inventory, replaced } = receive(invRef.current, [item.gear], false);
     setInv(inventory);
     setNote({
-      text: `You pick up the ${gearName(p.gear).toLowerCase()}.${replaced.length ? ` You let go of the ${replaced.map(gearName).join(", ").toLowerCase()}.` : ""} Open your inventory (Esc) to equip it.`,
+      text: `You pick up the ${gearName(item.gear).toLowerCase()}.${replaced.length ? ` You let go of the ${replaced.map(gearName).join(", ").toLowerCase()}.` : ""} Open your inventory (Esc) to equip it.`,
       id: Date.now(),
     });
+    latest.current.onSave(snapshot.current());
+  };
+  /** The swap: the gear on the ground goes on, and what you wore lies there instead. */
+  const swap = () => {
+    const item = floorItems().find(x => x.id === swapRef.current);
+    const worn = item && wornInSlot(item.gear);
+    setSwapId(null);
+    setPaused(false);
+    if (!item || !worn) return;
+    lift(item.id);
+    const { id: _id, ...left } = worn;
+    groundRef.current = [...groundRef.current, { id: `left-${Date.now()}`, at: item.at, gear: left as GearSpec }];
+    const { inventory } = receive(invRef.current, [item.gear], true);
+    setInv(inventory);
+    setNote({ text: `You take the ${gearName(item.gear).toLowerCase()} and leave your ${gearName(worn).toLowerCase()} here.`, id: Date.now() });
     latest.current.onSave(snapshot.current());
   };
   useEffect(() => {
@@ -145,6 +238,7 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
       // In the dark: your candle moves here, and the knot, if slack, winds itself tight.
       window.setTimeout(() => {
         restedAt.current = id;
+        respawnRef.current();
         if (knotRef.current === "unwound") {
           setKnot("wound");
           setNote({ text: "The knot winds itself tight again.", id: Date.now() });
@@ -203,7 +297,11 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
     const key = e.key.toLowerCase();
     if (key === "escape") {
       e.preventDefault();
-      if (!e.repeat) { held.current = []; setInvFocus(0); setPaused(p => !p); }
+      if (!e.repeat) {
+        // (Esc closes an open list first.)
+        if (choiceRef.current) { setChoice(null); return; }
+        held.current = []; setInvFocus(0); setSwapId(null); setPaused(p => !p);
+      }
       return;
     }
     if (paused) {
@@ -211,10 +309,21 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
       // what's worn in a slot, E uses the menu button, Q closes.
       e.preventDefault();
       if (e.repeat) return;
-      if (dir === "up" || dir === "down") setInvFocus(i => wrapIndex(i, dir === "up" ? -1 : 1, SLOTS.length + 1));
-      else if ((dir === "left" || dir === "right") && invFocus < SLOTS.length) setInv(cycleSlot(invRef.current, SLOTS[invFocus], dir === "right" ? 1 : -1));
-      else if ((key === "e" || key === "enter" || key === " ") && invFocus === SLOTS.length) onExit(snapshot.current());
-      else if (key === "q") setPaused(false);
+      const accept = key === "e" || key === "enter" || key === " ";
+      if (accept && swapRef.current) swap();
+      else if (choiceRef.current) {
+        // The list: W/S choose, E wields, Q goes back to the places.
+        const c = choiceRef.current;
+        if (dir === "up" || dir === "down") setChoice({ ...c, at: wrapIndex(c.at, dir === "up" ? -1 : 1, piecesFor(invRef.current, c.slot, c.side).length + 1) });
+        else if (accept) chooseEntry();
+        else if (key === "q") setChoice(null);
+      } else if (dir === "up" || dir === "down") {
+        // Rows of places, then the way back to the menu.
+        setInvFocus(i => (i === INV_MENU ? (dir === "up" ? INV_MENU - SIDES.length : 0) : dir === "up" ? (i < SIDES.length ? INV_MENU : i - SIDES.length) : i + SIDES.length >= INV_MENU ? INV_MENU : i + SIDES.length));
+      } else if (dir === "left" || dir === "right") {
+        setInvFocus(i => (i === INV_MENU ? i : Math.floor(i / SIDES.length) * SIDES.length + (dir === "left" ? 0 : 1)));
+      } else if (accept) activatePlace(invFocus);
+      else if (key === "q") { setSwapId(null); setPaused(false); }
       return;
     }
     if (talk) {
@@ -271,12 +380,30 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
       x: at.x, y: at.y, alt: at.alt, vx: 0, vy: 0,
       facing: at.facing, walked: 0, climbing: false, fall: 0, ground: at.alt,
     };
-    // Everyone not yet beaten, back where they started.
-    const foes: Foe[] = MAP_FOES.filter(f => !begin.defeated.includes(f.id)).map(def => ({
+    // Everyone not yet beaten (or, of a group, whoever is not dead for good), back where they started.
+    const makeFoe = (def: MapFoe): Foe => ({
       def, x: def.home.x, y: def.home.y, alt: def.home.z, vx: 0, vy: 0, facing: "down", walked: 0,
       climbing: false, fall: 0, ground: def.home.z, target: null, wait: Math.random() * 2, chasing: false, lostFor: 0, lastSeen: null, seenAt: null,
       homeSteps: stepsFrom(def.home.z, Math.floor(def.home.x), Math.floor(def.home.y)),
-    }));
+    });
+    /** Everyone who is up: each group not beaten, whoever in it is not dead for good, at its start. */
+    const spawn = () => MAP_FOES.filter(f => !defeatedRef.current.includes(f.id)).flatMap(f => {
+      const def = livingDef(f, corpsesRef.current);
+      return def ? [makeFoe(def)] : [];
+    });
+    const foes: Foe[] = spawn();
+    respawnRef.current = () => {
+      // The sleepwalkers get up again, their remains gone; the waxed and the Warden stay dead.
+      corpsesRef.current = Object.fromEntries(Object.entries(corpsesRef.current).filter(([, c]) => !ENEMY_KINDS[c.kind].respawns));
+      // What they dropped goes with them (they will drop it again when they fall again).
+      groundRef.current = groundRef.current.filter(it => !it.from || corpsesRef.current[it.from]);
+      defeatedRef.current = defeatedRef.current.filter(id => {
+        const def = MAP_FOES.find(f => f.id === id);
+        return !def || !livingDef(def, corpsesRef.current);
+      });
+      // Everyone else goes back to where they started too, whatever they were doing.
+      foes.splice(0, foes.length, ...spawn());
+    };
     let grace = GRACE_MS;
     let lastHint = -Infinity;
     let fadeTimer = 0;
@@ -295,7 +422,9 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
     };
     snapshot.current = () => ({
       at: { x: me.x, y: me.y, alt: me.alt, facing: me.facing },
-      defeated: latest.current.journey.defeated,
+      defeated: defeatedRef.current,
+      corpses: corpsesRef.current,
+      ground: groundRef.current,
       rested: restedAt.current,
       tutorial: tutorialRef.current,
       knot: knotRef.current,
@@ -480,7 +609,7 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
       const by = KEEPERS.find(k => (k.id !== GUIDE || guide.phase === "home") && Math.abs(k.at.z - me.alt) < 0.2 && Math.hypot(k.at.x - me.x, k.at.y - me.y) < KEEPER_REACH)?.id ?? null;
       if (by !== nearRef.current) { nearRef.current = by; setNear(by); }
       // Gear on the floor within reach.
-      const onFloor = PICKUPS.find(p => !takenRef.current.includes(p.id) && Math.abs(p.at.z - me.alt) < 0.2 && Math.hypot(p.at.x - me.x, p.at.y - me.y) < PICKUP_REACH)?.id ?? null;
+      const onFloor = floorItems().find(p => Math.abs(p.at.z - me.alt) < 0.2 && Math.hypot(p.at.x - me.x, p.at.y - me.y) < PICKUP_REACH)?.id ?? null;
       if (onFloor !== nearPickupRef.current) { nearPickupRef.current = onFloor; setNearPickup(onFloor); }
     };
 
@@ -575,8 +704,15 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
         leaving.current = true;
         held.current = [];
         setEntering(true);
-        const backTo = snapshot.current();
-        const joining = [f.def, ...pursuers(f)];
+        // Where each of them would lie, if it fell.
+        const joiners = [f, ...pursuers(f)];
+        const fallen: Record<string, Corpse> = {};
+        for (const jf of joiners) {
+          const spots = huddle(jf.def.fight.length);
+          jf.def.fight.forEach((m, j) => { fallen[memberKey(jf.def.id, jf.def.members?.[j] ?? j)] = { kind: m.kind, x: jf.x + spots[j][0], y: jf.y + spots[j][1], alt: jf.alt }; });
+        }
+        const backTo = { ...snapshot.current(), fallen };
+        const joining = joiners.map(x => x.def);
         fadeTimer = window.setTimeout(() => latest.current.onEncounter(joining, backTo), ENCOUNTER_FADE_MS);
       }
     };
@@ -585,16 +721,16 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
      * Who joins the fight `first` starts: the others chasing you, nearest first, as long as the
      * fight stays within MAX_IN_FIGHT enemies. Anyone left out keeps chasing on the map.
      */
-    const pursuers = (first: Foe): MapFoe[] => {
+    const pursuers = (first: Foe): Foe[] => {
       let count = first.def.fight.length;
-      const out: MapFoe[] = [];
+      const out: Foe[] = [];
       const chasing = foes
         .filter(f => f !== first && f.chasing)
         .sort((a, b) => Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y));
       for (const f of chasing) {
         if (count + f.def.fight.length > MAX_IN_FIGHT) continue;
         count += f.def.fight.length;
-        out.push(f.def);
+        out.push(f);
       }
       return out;
     };
@@ -619,13 +755,14 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
           }
         } });
       }
-      for (const p of PICKUPS) {
-        if (takenRef.current.includes(p.id) || p.at.z !== z || !test(p.at.y)) continue;
+      for (const p of floorItems()) {
+        if (Math.round(p.at.z) !== z || !test(p.at.y)) continue;
         list.push({ y: p.at.y, draw: () => drawPickup(ctx, ox + p.at.x * T, oy + (p.at.y - p.at.z * RISE - BODY_ABOVE_FEET) * T, T, performance.now(), p.look) });
       }
-      for (const def of MAP_FOES) {
-        if (!def.lies || !begin.defeated.includes(def.id) || def.home.z !== z || !test(def.home.y)) continue;
-        list.push({ y: def.home.y, draw: () => drawFallenWaxed(ctx, ox + def.home.x * T, oy + (def.home.y - def.home.z * RISE - BODY_ABOVE_FEET) * T, T) });
+      // Whoever lies beaten, where it fell.
+      for (const c of Object.values(corpsesRef.current)) {
+        if (Math.round(c.alt) !== z || !test(c.y)) continue;
+        list.push({ y: c.y, draw: () => MAP_REMAINS[c.kind](ctx, ox + c.x * T, oy + (c.y - c.alt * RISE - BODY_ABOVE_FEET) * T, T) });
       }
       for (const k of KEEPERS) {
         // The guide may be dropping in or walking over; the others stand where they are.
@@ -863,7 +1000,7 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
     <div className="explore">
       <canvas ref={canvasRef} className="explore-canvas" />
       {nearPickup && !paused && !entering && !talk && (
-        <div className="explore-prompt"><kbd>E</kbd> Pick up the {gearName(PICKUPS.find(p => p.id === nearPickup)!.gear).toLowerCase()}</div>
+        <div className="explore-prompt"><kbd>E</kbd> Pick Up</div>
       )}
       {near && !nearPickup && !paused && !entering && !talk && (
         <div className="explore-prompt"><kbd>E</kbd> {near === GUIDE ? (tutorialRef.current.beaten ? "Rest with the guide" : "Speak with the guide") : "Rest"}</div>
@@ -872,7 +1009,11 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
       {talk && <Dialogue speaker="The guide" text={talk.lines[talk.at]} last={talk.at + 1 >= talk.lines.length} />}
       {note && <div key={note.id} className="explore-note">{note.text}</div>}
       {entering && <div className="explore-fade" />}
-      {paused && <Inventory inv={inv} knot={knot} focus={invFocus} onFocus={setInvFocus} onExit={() => onExit(snapshot.current())} />}
+      {paused && (() => {
+        const offered = swapId ? floorItems().find(p => p.id === swapId) : undefined;
+        const worn = offered && wornInSlot(offered.gear);
+        return <Inventory inv={inv} knot={knot} focus={invFocus} onFocus={setInvFocus} onActivate={activatePlace} list={choice ?? undefined} onListHover={at => choice && setChoice({ ...choice, at })} onListPick={chooseEntry} swap={offered && worn ? { gear: offered.gear, worn } : undefined} />;
+      })()}
     </div>
   );
 }

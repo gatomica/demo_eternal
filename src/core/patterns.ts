@@ -14,6 +14,7 @@
  *     Drag Forward:  maneuver, advance
  *     Wax Guard:     block, light, *Sealed
  *     Stride:        maneuver, retreat, *Hurt, *!Close
+ *     Flail Swing:   attack, normal, *Far or *Flaming
  *   stances:
  *     All > Hands Raised > Scratch
  *     Rising Flail > Flail Spinning Overhead > Flail Slam
@@ -23,7 +24,7 @@
  *   Modifiers: a weight (baseline, light, normal, heavy), `ranged`, a Maneuver direction
  *   (`advance` closes in on you, `retreat` backs off, `by-line` does whichever its line calls
  *   for), `*Condition` (only available while that condition holds; `*!Condition` while it
- *   doesn't; several must all hold), and `#tag` (a rule it triggers, e.g. `#waxing`: a direct
+ *   doesn't; several must all hold; `*A or *B` holds while either does), and `#tag` (a rule it triggers, e.g. `#waxing`: a direct
  *   hit leaves the target Waxed). Conditions: see conditions.ts.
  * - A stance line is `Comes from > Stance > Leads to`.
  *   - Comes from: action names (and `Recover`, or an event the kind declares, like the Warden's
@@ -34,11 +35,14 @@
  *
  * PICKING
  * 1. Next stance, evenly among those the last action leads to. If the last action didn't
- *    happen (a Rest cut short, a Block with nothing to block, a cancelled action), or it was the
- *    Recover after a stagger: evenly among the Recover stances.
+ *    happen (a Rest cut short, a cancelled action), or it was the Recover after a stagger: evenly
+ *    among the Recover stances (a Rest cut short, "flinched", avoids the stance it was broken out of).
+ *    A Block counts as done even if it had nothing to block.
  * 2. Within the stance: the first action, in the order written, whose conditions hold. Nothing
  *    random: write an action with no conditions last, as the one it falls back on.
- * 3. Safety net: if none of the stance's actions are available, the enemy acts as if it just
+ *    A stance with none of its actions available is disabled: it can't be picked, and the
+ *    others share its turn.
+ * 3. Safety net: if none of those stances has an action available, the enemy acts as if it just
  *    Recovered and picks again from the Recover stances.
  */
 import type { ActionType, WeaponTier } from "./types";
@@ -55,7 +59,10 @@ export interface ActionDef {
   ranged: boolean;
   /** For a Maneuver: closes in on you, backs off, or whichever its current line calls for. */
   dir?: "advance" | "retreat" | "by-line";
-  /** Conditions that must all hold for it to be available (lowercase; a leading `!` negates). */
+  /**
+   * Conditions that must all hold for it to be available (lowercase; a leading `!` negates). One
+   * entry can name alternatives joined by `|` (from `*A or *B`): it holds while any of them does.
+   */
   needs: string[];
   /** Rules it triggers (`#tag`), e.g. "waxing". */
   tags: string[];
@@ -107,7 +114,7 @@ export function parsePattern(label: string, src: string, { events = [] }: { even
         if ((WEIGHTS as string[]).includes(w)) def.weight = w as WeaponTier;
         else if (w === "ranged") def.ranged = true;
         else if (w === "advance" || w === "retreat" || w === "by-line") def.dir = w;
-        else if (w.startsWith("*")) def.needs.push(w.slice(1).replace(/^!\s*/, "!"));
+        else if (w.startsWith("*")) def.needs.push(w.split(/\s+or\s+/).map(alt => alt.replace(/^\*\s*/, "").replace(/^!\s*/, "!")).join("|"));
         else if (w.startsWith("#")) def.tags.push(w.slice(1));
         else fail(`action "${name}": unknown modifier "${w}"`);
       }
@@ -168,6 +175,8 @@ export interface PatternMemory {
   /** The action's name, if it had one. */
   action?: string;
   outcome: "done" | "undone" | "recover";
+  /** A stance to steer clear of when picking among the Recover stances: the one a flinched Rest was broken out of. */
+  avoid?: string;
 }
 
 const pick = <T>(items: readonly T[], rng: () => number): T => items[Math.floor(rng() * items.length)];
@@ -176,7 +185,12 @@ const pick = <T>(items: readonly T[], rng: () => number): T => items[Math.floor(
 export function nextStances(p: Pattern, last: PatternMemory | null): StanceDef[] {
   const key = last && last.outcome === "done" && last.action ? last.action.toLowerCase() : "recover";
   const known = p.after.get(key);
-  if (known) return known;
+  if (known) {
+    // A flinched unit recovers into a different stance than the one it was flinched out of (so a
+    // Recover stance can't loop on itself), when there is another to go to.
+    const others = key === "recover" && last?.avoid ? known.filter(s => s.name !== last.avoid) : known;
+    return others.length ? others : known;
+  }
   // Not an action of its own (or one nothing follows): only the "All >" stances, or else Recover's.
   const any = p.stances.filter(s => s.from === "all");
   return any.length ? any : p.after.get("recover")!;
@@ -197,12 +211,15 @@ export function choose(
   available: (a: ActionDef) => boolean,
   rng: () => number,
 ): { stance: StanceDef; action: ActionDef } | null {
-  const stance = pick(nextStances(p, last), rng);
-  const action = pickAction(stance, available);
-  if (action) return { stance, action };
+  // A stance with nothing available can't be picked ("disabled"): the others share its turn.
+  const open = nextStances(p, last).filter(s => s.actions.some(available));
+  if (open.length) {
+    const stance = pick(open, rng);
+    return { stance, action: pickAction(stance, available)! };
+  }
   // Safety net: act as if it just Recovered.
-  const open = nextStances(p, null).filter(s => s.actions.some(available));
-  if (!open.length) return null;
-  const again = pick(open, rng);
+  const recover = nextStances(p, null).filter(s => s.actions.some(available));
+  if (!recover.length) return null;
+  const again = pick(recover, rng);
   return { stance: again, action: pickAction(again, available)! };
 }

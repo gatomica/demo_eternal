@@ -1,5 +1,5 @@
 /**
- * save.ts — keeping your progress on the map between visits: where you stand, who is beaten, the
+ * save.ts — keeping your progress on the map between visits: where you stand, who is beaten (and where they lie), the
  * tutorial, the knot, your gear and where you last rested. It lives in the browser (localStorage);
  * if that isn't available, the game just plays without saving.
  */
@@ -10,7 +10,7 @@ const KEY = "demo-eternal-journey-v1";
 /** Writes your progress down (without the one-off note about what the last fight dropped). */
 export function saveJourney(journey: Journey) {
   try {
-    const { found: _found, ...keep } = journey;
+    const { found: _found, fallen: _fallen, ...keep } = journey;
     localStorage.setItem(KEY, JSON.stringify(keep));
   } catch {
     // No storage: nothing to keep it in.
@@ -23,7 +23,7 @@ export function loadJourney(): Journey | null {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const j = JSON.parse(raw) as Journey;
-    return Array.isArray(j.defeated) && j.tutorial && j.inventory && Array.isArray(j.inventory.bag) ? { ...j, taken: j.taken ?? [] } : null;
+    return Array.isArray(j.defeated) && j.tutorial && j.inventory && Array.isArray(j.inventory.bag) ? { ...j, taken: j.taken ?? [], corpses: j.corpses ?? {}, ground: j.ground ?? [] } : null;
   } catch {
     return null;
   }

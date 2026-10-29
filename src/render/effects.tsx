@@ -9,7 +9,8 @@ import type { Pt } from "./geom";
 export interface Projectile {
   from: string;
   to: string;
-  kind: "fan" | "blast" | "wax" | "impact";
+  /** `clang`: a melee blow caught by a Block, so a starburst flashes where the blocker (`from`) meets the attacker (`to`). */
+  kind: "fan" | "blast" | "wax" | "impact" | "clang" | "flamehit";
   /** Changes every beat, so the flight replays. */
   key: string;
   /** A flaming flail's impact: its shockwave burns instead of white spikes. */
@@ -157,6 +158,84 @@ export function Shockwave({ center, reach, toward, flame, proj, impact, full }: 
         </svg>
       ))}
     </>
+  );
+}
+
+/** The tongues of a flame hit: where each stands (share of the box, across and up from its middle), how big, and when it flares. */
+const FLAME_HIT = [
+  [-0.3, 0.02, 0.8, 0.00], [0.28, 0.0, 0.9, 0.05], [-0.12, -0.1, 1.15, 0.02],
+  [0.12, -0.12, 1.05, 0.08], [0.0, -0.22, 0.85, 0.12], [-0.38, -0.18, 0.6, 0.1], [0.4, -0.2, 0.65, 0.04],
+] as const;
+
+/**
+ * Flames licking a unit a fire attack has hit: tongues flaring up around its body in a flash of
+ * orange glow, then dying away. Drawn over the unit, centered on `cx`, `cy` (screen pixels), the
+ * size of its box.
+ */
+export function FlameHit({ cx, cy, size }: { cx: number; cy: number; size: number }) {
+  return (
+    <div className="flame-hit" style={{ left: cx, top: cy, width: size * 0.8, height: size * 0.9 }} aria-hidden="true">
+      <svg viewBox="-50 -60 100 100" overflow="visible">
+        <circle cx={0} cy={-8} r={34} className="flame-hit-glow" />
+        {FLAME_HIT.map(([x, y, k, delay], i) => (
+          <g key={i} transform={`translate(${x * 100} ${y * 100 + 28}) scale(${k * 2.3})`}>
+            <g className="flame-hit-tongue" style={{ animationDelay: `${delay}s` }}>
+              <path d="M0 -12 C4.6 -5 4.4 0 0 0 C-4.4 0 -4.6 -5 0 -12 Z" className="fig-burst-outer" />
+              <path d="M0 -6 C2 -2.4 2 0 0 0 C-2 0 -2 -2.4 0 -6 Z" className="fig-burst-inner" />
+            </g>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+/** How long a clang's burst takes to flare and fade. */
+const CLANG_MS = 340;
+
+/**
+ * The "clang" of a blocked blow: a starburst of white spikes radiating from the point where the
+ * weapons met (a screen point, `reach` px at most), like a burst of sound. The spikes fly outward
+ * and leave the center empty, fading as they go, after a bright flash at the start. A few are
+ * long and the rest short, so it reads as a spark rather than a gear.
+ */
+export function ClangBurst({ cx, cy, reach }: { cx: number; cy: number; reach: number }) {
+  const [p, setP] = useState(0.001);
+  useEffect(() => {
+    const start = performance.now();
+    let raf = 0;
+    const tick = () => {
+      const k = Math.min(1, (performance.now() - start) / CLANG_MS);
+      setP(k);
+      if (k < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  if (p >= 1) return null;
+  // Each spike is its own shard: its tip races out first and its base follows, so they leave the
+  // center behind and it's left empty.
+  const tipK = 1 - (1 - p) ** 3;
+  const baseK = Math.max(0, (p - 0.12) / 0.88) ** 1.6;
+  const fade = p < 0.45 ? 1 : 1 - (p - 0.45) / 0.55;
+  const SPIKES = 12;
+  const shards: string[] = [];
+  for (let i = 0; i < SPIKES; i++) {
+    // Alternating long and short, with a little irregularity.
+    const long = (i % 2 === 0 ? 1 : 0.7) * (0.9 + 0.2 * Math.sin(i * 2.7));
+    const a = (i / SPIKES) * Math.PI * 2 + 0.2;
+    const tip = reach * long * (0.2 + 0.8 * tipK);
+    const base = reach * long * 0.75 * baseK;
+    const half = 0.16; // half the base's angular width
+    const at = (r: number, ang: number) => `${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`;
+    shards.push(`${at(base, a - half)} ${at(tip, a)} ${at(base, a + half)}`);
+  }
+  const flash = Math.max(0, 1 - p * 3);
+  return (
+    <svg className="shockwave" style={{ zIndex: 2000 }} aria-hidden="true">
+      {shards.map((pts, i) => <polygon key={i} points={pts} className="impact-spike" style={{ opacity: fade }} />)}
+      {flash > 0 && <circle cx={cx} cy={cy} r={reach * 0.22 * (0.6 + p)} className="impact-flash" style={{ opacity: flash }} />}
+    </svg>
   );
 }
 

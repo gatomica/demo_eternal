@@ -1,5 +1,5 @@
 /**
- * endTurn.ts — a turn's last phase: Fatigue decays, falls and staggers settle, revives are
+ * endTurn.ts — a turn's last phase: falls and staggers settle, revives are
  * spent, each enemy remembers how its action went, and each kind's own rules have their say.
  */
 import { kindOf } from "../bestiary";
@@ -8,10 +8,6 @@ import type { Turn } from "./turn";
 
 export function endTurn(t: Turn) {
   const { p, s, alive, fighters } = t;
-  for (const f of fighters) {
-    if (!t.gained.has(f.id) && !f.staggered) f.fatigue /= 2;
-    f.death /= 2; // nothing applies Death yet; kept so the rule is in place
-  }
   for (const e of alive) {
     if (t.fallen.has(e.id) && e.revives > 0) {
       // A boss with a revive left: its protected turn is next, then it rises at full health.
@@ -63,11 +59,14 @@ export function endTurn(t: Turn) {
   for (const e of alive) {
     if (!e.alive) continue;
     const { type, forced } = e.intent;
-    const undone =
-      t.cancelled.has(e.id) ||
-      (type === "rest" && t.interrupted.has(e.id)) ||
-      (type === "block" && !t.blockedSomething.has(e.id));
-    e.last = { name: e.intent.action, outcome: forced ? "recover" : undone ? "undone" : "done" };
+    const flinched = type === "rest" && t.interrupted.has(e.id);
+    const undone = t.cancelled.has(e.id) || flinched;
+    e.last = {
+      name: e.intent.action,
+      outcome: forced ? "recover" : undone ? "undone" : "done",
+      // (A flinched unit recovers into a stance other than the one it was flinched out of.)
+      flinchedFrom: flinched && !forced ? e.intent.stance : undefined,
+    };
   }
 
   // Each kind's own rules (the Warden's flame, phases, Usurp Flame).

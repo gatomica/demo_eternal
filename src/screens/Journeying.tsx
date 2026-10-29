@@ -12,7 +12,7 @@ import type { CombatState, Opening } from "../core/types";
 import { Exploration, type Journey } from "../explore/Exploration";
 import type { MapFoe } from "../explore/foes";
 import { dropsOf, EMPTY_INVENTORY, gotNote, loadoutOf, lose, receive } from "../explore/gear";
-import { PICKUPS } from "../explore/pickups";
+import { type GroundItem, PICKUPS } from "../explore/pickups";
 import { clearSave, loadJourney, saveJourney } from "../explore/save";
 import { knotCharges, NEW_TUTORIAL, TUTORIAL_FOE } from "../explore/tutorial";
 
@@ -76,15 +76,20 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
           const knot = backTo.knot && (charges > 0 ? "wound" : "unwound");
           if (won) {
             // Back where you stood, the enemy gone, and what it carried yours.
-            const drops = dropsOf(enemiesOf(foes));
-            const { inventory, replaced } = receive(backTo.inventory, drops);
+            // What they carried lies where they fell, to pick up.
+            const dropped: GroundItem[] = Object.entries(backTo.fallen ?? {}).flatMap(([key, c]) =>
+              dropsOf([{ kind: c.kind }]).map((gear, i) => ({ id: `drop-${key}-${i}-${Date.now()}`, at: { x: c.x, y: c.y, z: c.alt }, gear, from: key })),
+            );
             setJourney({
               ...backTo,
               knot,
               defeated: [...backTo.defeated, ...foes.map(f => f.id)],
+              // They lie where they fell.
+              corpses: { ...backTo.corpses, ...backTo.fallen },
+              fallen: undefined,
               tutorial: lesson ? { ...backTo.tutorial, beaten: true } : backTo.tutorial,
-              inventory,
-              found: drops.length ? gotNote("Dropped", drops, replaced) : undefined,
+              ground: [...(backTo.ground ?? []), ...dropped],
+              found: dropped.length ? gotNote("Dropped", dropped.map(d => d.gear), []) : undefined,
             });
             setFinale(lesson);
           } else {
@@ -92,6 +97,8 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
             // the gear you carried is gone.
             setJourney({
               defeated: backTo.defeated,
+              corpses: backTo.corpses,
+              ground: backTo.ground,
               taken: backTo.taken,
               rested: backTo.rested,
               tutorial: lesson ? { ...backTo.tutorial, attempts: backTo.tutorial.attempts + 1 } : backTo.tutorial,

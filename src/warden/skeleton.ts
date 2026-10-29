@@ -108,6 +108,7 @@ export type WardenPoseName =
   | "wd-swing" | "wd-rising" | "wd-slam" | "wd-punch" | "wd-fan" | "wd-blast"
   | "wd-chain-guard" | "wd-wax-guard" | "wd-stride" | "wd-usurp" | "wd-clutch-arm" | "wd-fallen"
   | "wd-wound-up" | "wd-wax-swat" | "wd-usurp-dash" | "wd-flinch"
+  | "wd-chain-ready" | "wd-wax-ready" | "wd-winding-up" | "wd-clutch-ready"
   | "wd-t" | "wd-t-b";
 
 /** The poses as written; `WARDEN_POSES` (below) is these fitted to the rig. */
@@ -275,6 +276,40 @@ export const RAW_WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     { head: [48, 24], neck: [49, 35], hip: [49, 68], ...legs([59, 92], [64, 114], [40, 92], [35, 114]) },
     { elbow: [42, 50], hand: [38, 62], ball: [35, 85] },
     { elbow: [61, 50], hand: [61, 24] },
+  ),
+  // Chain Guard's windup, from the start of the turn: Chain Guard's body and crouch, but the flail
+  // arm only half raised, the handle held out in front of him, and the wax hand reaching down
+  // with the chain clutched in it, the flail's head hanging below it (as in Flail Clutched), slack
+  // until the guard goes up.
+  "wd-chain-ready": pose(
+    { head: [56, 25], neck: [54, 36], hip: [49, 68], ...legs([63, 90], [71, 114], [40, 92], [29, 114]) },
+    { elbow: [54, 50], hand: [62, 44], ball: [76, 86] },
+    { elbow: [45, 57], hand: [52, 66] },
+    { handle: 70, turn: 1, chainInHand: true, headBehindArm: true },
+  ),
+  // Wax Guard's windup: Wax Guard's body, the wax forearm just starting to come up, angled out
+  // from his side (it ends upright before his mask).
+  "wd-wax-ready": pose(
+    { head: [48, 24], neck: [49, 35], hip: [49, 68], ...legs([59, 92], [64, 114], [40, 92], [35, 114]) },
+    { elbow: [42, 50], hand: [38, 62], ball: [35, 85] },
+    { elbow: [62, 52], hand: [67, 40] },
+  ),
+  // Wind Up Flail's windup: like its rest pose (Wax Shoulder In, hunched, the flail arm stretched
+  // back) but standing taller, the flail arm only just drawn back and the flail beginning to drag
+  // behind him, the wax arm bent up toward his mask.
+  "wd-winding-up": pose(
+    { head: [53, 26], neck: [51, 37], hip: [48, 68], ...legs([58, 92], [64, 114], [41, 92], [35, 114]) },
+    { elbow: [42, 54], hand: [33, 60], ball: [14, 112] },
+    { elbow: [68, 52], hand: [64, 44] },
+    { handle: 215, shoulderAtRip: true, armBehindHead: true, turn: 1 },
+  ),
+  // Clutch Arm's windup: standing a little hunched, the flail arm drawn up with the handle held out
+  // before him and the flail hanging, the wax hand reaching across toward it.
+  "wd-clutch-ready": pose(
+    { head: [58, 32], neck: [53, 43], hip: [48, 72], ...legs([59, 94], [64, 114], [40, 95], [34, 114]) },
+    { elbow: [60, 48], hand: [68, 56], ball: [80, 98] },
+    { elbow: [62, 66], hand: [72, 62] },
+    { handle: 40 },
   ),
   // Stride (as he dodges and backs off): spun around on his right leg to turn his back on you,
   // leaning over that leg, the left one swinging out behind. Both arms trail after the spin: the

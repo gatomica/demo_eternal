@@ -86,8 +86,22 @@ export interface EnemyKind {
   flinchPose?: string;
   /** It attacks straight out of the stance it showed, with no wind-up pose of its own. */
   attacksFromStance?: boolean;
+  /**
+   * Its attacks tagged `#shockwave` (a flaming slam, a flame blast) send a shockwave through the whole fight: it hits its
+   * allies too, as a direct hit, while this holds (default: always).
+   */
+  shockwave?: (self: Enemy) => boolean;
+  /** On the map, it comes back to life when you rest by a keeper (the others stay dead, their remains lying where they fell). */
+  respawns?: boolean;
   /** Where it falls, it stays: faded, for the rest of the fight (it can still burn as a candle). */
   remains?: boolean;
+  /**
+   * What lies where it fell: "pieces" (default); "wax": sealed whole in wax (in `deathPose`), as if the Warden had
+   * taken its flame; or "cloak": a cloak draped over a thick pool of wax.
+   */
+  deathLook?: "pieces" | "wax" | "cloak";
+  /** The pose it lies in when its `deathLook` is "wax". */
+  deathPose?: string;
   /** Its fight takes place in its arena (see warden/arena.tsx). */
   arena?: boolean;
   /**
@@ -97,12 +111,14 @@ export interface EnemyKind {
   flame?: { stance: string; action: string };
   /** Conditions named in the pattern (`*Name`, written in lowercase here), checked when picking. */
   conditions?: Record<string, (self: Enemy, state: CombatState) => boolean>;
+  /** It picks after everyone else each turn, to react to what they chose (the Warden: which waxed is about to Clutch Flame). */
+  decidesLast?: boolean;
   /**
-   * A fixed rule: an action it must take this turn whatever its stance (and, for a Maneuver aimed
-   * at an ally, which one), or null. Kinds with one choose after everyone else each turn.
+   * Who an action is aimed at, when it isn't you: an ally's id (a Maneuver aimed at an ally moves toward them, which
+   * pushes you away), or undefined for you. Called when the action has been picked.
    */
-  forced?: (self: Enemy, state: CombatState, rng: Rng) => { action: string; target?: string } | null;
-  /** Actions only a fixed rule (`forced`) uses, from any stance; the model viewer lists them too. */
+  aim?: (self: Enemy, state: CombatState, action: string, rng: Rng) => string | undefined;
+  /** Actions that play on their own, with nothing of yours to attack or dodge (the model viewer lets them run alone). */
   fixedActions?: string[];
   /** Actions that, aimed at you, keep you down (your forced Rest waits) until the very end of the turn. */
   holdsTargetDown?: string[];
@@ -152,7 +168,7 @@ function checkKind(id: string, kind: EnemyKind) {
   const hasAction = (name: string) => actions.has(name.toLowerCase());
   const hasStance = (name: string) => stances.some(s => s.name === name);
   for (const a of actions.values()) {
-    for (const need of a.needs) if (!conditionOf(kind, need)) fail(`"${a.name}" needs *${need}, but no such condition exists`);
+    for (const need of a.needs) for (const alt of need.split("|")) if (!conditionOf(kind, alt)) fail(`"${a.name}" needs *${alt.replace(/^!/, "")}, but no such condition exists`);
   }
   for (const s of Object.keys(kind.stancePoses)) if (!hasStance(s)) fail(`a pose for stance "${s}", which isn't in its pattern`);
   for (const a of Object.keys(kind.actionPoses ?? {})) if (!hasAction(a)) fail(`poses for action "${a}", which isn't in its pattern`);

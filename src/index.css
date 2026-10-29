@@ -24,8 +24,7 @@
   --bar-track: min(38vw, 540px);  /* full length of a health bar at BAR_FULL_HP */
   --bar-h: 20px;                   /* bar thickness */
   --bar-inset-x: 7vw;              /* how far the bars sit from the side edges */
-  --bar-inset-top: max(64px, 8vh); /* your bar, below the menu row */
-  --bar-inset-bottom: 8vh;         /* your target's bar */
+  --bar-inset-top: max(64px, 8vh); /* your bar, below the menu row (and your target's bar, from the bottom edge) */
   --strip-h: 11vh;                 /* letterbox strips during playback */
   --floor-mark: rgb(255 255 255 / 0.06);
   --floor-far: #1b1a24;
@@ -152,17 +151,17 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
  * Fixed positions, inset toward the middle of the screen: yours top left, your target's bottom right.
  * Each bar grows from its anchored end toward the center as max health rises. */
 .bar-slot { position: absolute; z-index: 10; display: grid; gap: 6px; width: var(--bar-track); transition: top 0.45s ease, bottom 0.45s ease, left 0.45s ease, right 0.45s ease; }
-/* Cutscene mode: the bars settle into the letterbox strips, right by the screen edges. */
-.is-cinematic .bar-slot-player { top: calc((var(--strip-h) - var(--bar-h)) / 2); left: 3vw; }
-.is-cinematic .bar-slot-target { bottom: calc((var(--strip-h) - var(--bar-h)) / 2); right: 3vw; }
 
 .letterbox { position: absolute; left: 0; right: 0; height: var(--strip-h); z-index: 9; background: #000; transition: transform 0.45s ease; pointer-events: none; }
 .letterbox-top { top: 0; transform: translateY(-100%); }
 .letterbox-bottom { bottom: 0; transform: translateY(100%); }
 .is-cinematic .letterbox { transform: none; }
 .bar-slot-player { top: var(--bar-inset-top); left: var(--bar-inset-x); justify-items: start; }
-.bar-slot-target { bottom: var(--bar-inset-bottom); right: var(--bar-inset-x); justify-items: end; text-align: right; }
+/* While a turn plays, the target's bar sits bottom right: the same distance from the bottom edge as yours is from the top, and from the right as yours is from the left. */
+.bar-slot-target { bottom: var(--bar-inset-top); right: var(--bar-inset-x); justify-items: end; text-align: right; }
 .hud-target { display: grid; gap: 6px; justify-items: end; width: 100%; }
+/* While you plan, it hangs right below the enemy in the scene (see Scene's `bar`), the same size as in the strip. */
+.figure-bar { position: absolute; transform: translateX(-50%); z-index: 1900; pointer-events: none; }
 /* Revives left: a red Roman numeral just left of your bar, vertically centered on it. */
 .revive-count {
   position: absolute;
@@ -228,6 +227,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .fx-dodge { animation: dodge-blur 0.5s ease-out; }
 .fx-break { animation: hit-shake 0.4s ease-out, break-fade 0.8s ease-out forwards; }
 .fx-fall { animation: fall 0.7s ease-in 0.2s forwards; }
+/* A unit that falls leaves its remains where it fell: it drops, then lies there, a little faded. */
+.fx-die { animation: die 0.7s ease-out 0.15s both; }
 /* Walking to a new spot: quick steps in place while the scene moves the figure. */
 .fx-step { animation: step-bob 0.35s ease-in-out 2; }
 
@@ -243,6 +244,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 @keyframes break-fade { to { filter: grayscale(1) brightness(0.8); } }
 @keyframes fall { to { transform: translateY(8%); opacity: 0; } }
+@keyframes die { from { transform: translateY(-6%); opacity: 1; } to { transform: none; opacity: 0.65; } }
 @keyframes step-bob { 25%, 75% { transform: translateY(-2.5%); } 50% { transform: translateY(0); } }
 
 
@@ -320,11 +322,14 @@ kbd {
 .bar-lost { background: var(--flesh-lost); }
 .bar-room { background: var(--flesh); }
 .bar-fatigue { background: var(--sleep); }
+/* The Fatigue an action would cost, before you commit to it: flickers beside the Fatigue you have. */
+.bar-preview { background: var(--sleep); animation: bar-preview 0.8s ease-in-out infinite alternate; }
+@keyframes bar-preview { from { opacity: 0.15; } to { opacity: 0.9; } }
 .bar-death { background: var(--void); }
 .bar-flash { position: absolute; inset: -1px; border-radius: 3px; background: #fff; pointer-events: none; animation: bar-flash 0.3s ease-out forwards; }
 @keyframes bar-flash { from { opacity: 0.85; } to { opacity: 0; } }
 .bar.is-staggered { border-color: var(--sleep); box-shadow: 0 0 6px rgb(243 241 248 / 0.45); }
-@media (prefers-reduced-motion: reduce) { .bar-trail > i { transition: none; } .bar-flash { animation: none; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .bar-trail > i { transition: none; } .bar-flash { animation: none; opacity: 0; } .bar-preview { animation: none; opacity: 0.55; } }
 
 /* ---------- Guard break shards ---------- */
 .shards { position: absolute; left: 50%; top: 38%; width: 0; height: 0; pointer-events: none; z-index: 5; }
@@ -549,7 +554,7 @@ kbd {
 .arena-head { fill: var(--wax); stroke: #6d5f2f; stroke-width: 1; }
 .arena-candle-flame { position: absolute; overflow: visible; pointer-events: none; }
 /* The waxed where they fell: left in place, faded. */
-.figure-slot .is-remains { opacity: 0.55; }
+.figure-slot .is-remains { opacity: 0.65; }
 /* The phase-two scene: flames streaming into his hand, and his flare. */
 .ignite-trail { opacity: 0; animation: usurp-trail 0.7s ease-out both; }
 .ignite-trail-outer { fill: none; stroke: #e0782f; stroke-width: 5; stroke-linecap: round; }
@@ -574,3 +579,87 @@ kbd {
 .shockwave-ring { fill: none; stroke: #e0782f; stroke-width: 6; stroke-linecap: round; }
 .shockwave-ring-inner { fill: none; stroke: #f6d77a; stroke-width: 2.4; stroke-linecap: round; }
 @media (prefers-reduced-motion: reduce) { .blast-flash { animation-duration: 0.01s; } }
+/* The map viewer: the plan as a grid, with what is placed on it. */
+.mapviewer { height: 100%; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 12px; min-height: 0; }
+.mapviewer-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.mapviewer-info { margin: 0; min-height: 2.2em; font-size: 0.85rem; }
+.mapviewer-scroll { overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); min-height: 0; }
+.mapviewer-scroll svg { display: block; cursor: crosshair; }
+.mapviewer-ruler { fill: var(--muted); font-size: 9px; }
+.mapviewer-floor { fill: #34324a; stroke: var(--bg); stroke-width: 0.5; }
+.mapviewer-wall { fill: #15141b; stroke: var(--line); stroke-width: 0.5; }
+.mapviewer-ramp { fill: #4b4668; stroke: var(--bg); stroke-width: 0.5; }
+.mapviewer-below { fill: none; stroke: var(--line); stroke-width: 0.5; stroke-dasharray: 2 2; }
+.mapviewer-glyph { fill: var(--text); font-size: 10px; pointer-events: none; }
+.mapviewer-mark { pointer-events: none; }
+.mapviewer-mark text { fill: #15141b; font-size: 10px; font-weight: 700; }
+.mapviewer-mark.is-keeper circle { fill: var(--accent); }
+.mapviewer-mark.is-pickup circle { fill: var(--ok); }
+.mapviewer-mark.is-foe circle { fill: var(--danger); }
+.mapviewer-mark.is-seal circle { fill: #e8dfc4; }
+.mapviewer-picked { fill: none; stroke: var(--accent); stroke-width: 2; pointer-events: none; }
+.mapviewer-legend { margin: 0; }
+
+/* The fight's light: black beyond a circle around the player. Over the floor, under every figure (they are shaded by their own distance). */
+.scene-light { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+
+/* Remains: a body in pieces in a pool of blood. */
+.fig-gore-pool { fill: #5a0b10; opacity: 0.85; }
+.fig-gore-cut { fill: #8a1219; }
+.fig-gore-cut-line { fill: none; stroke: #8a1219; stroke-width: 1.6; stroke-linecap: round; }
+.fig-gore-eye { fill: var(--bg); }
+.fig-rib-bone { stroke: var(--ink-shade); stroke-width: 1.6; stroke-linecap: round; }
+.fig-wax-edge { fill: color-mix(in srgb, var(--wax) 55%, black); }
+.fig-cloak-fold { fill: none; stroke: #4f4b55; stroke-width: 1.2; stroke-linecap: round; }
+.fig-cloak-shade { fill: #58545f; }
+
+/* A fire attack's hit: flames flare up around the unit, then die away. */
+.flame-hit { position: absolute; transform: translate(-50%, -50%); pointer-events: none; z-index: 1999; }
+.flame-hit svg { width: 100%; height: 100%; overflow: visible; }
+.flame-hit-glow { fill: rgba(255, 140, 50, 0.45); filter: blur(5px); animation: flame-hit-glow 0.7s ease-out both; transform-box: fill-box; transform-origin: 50% 50%; }
+.flame-hit-tongue { animation: flame-hit-flare 0.8s ease-out both; transform-box: fill-box; transform-origin: 50% 100%; }
+@keyframes flame-hit-flare {
+  0% { transform: scale(0.2); opacity: 0; }
+  22% { transform: scale(1.1, 1.15); opacity: 1; }
+  100% { transform: translateY(-8px) scale(0.7, 1.5); opacity: 0; }
+}
+@keyframes flame-hit-glow { 0% { opacity: 0; transform: scale(0.5); } 25% { opacity: 1; } 100% { opacity: 0; transform: scale(1.3); } }
+@media (prefers-reduced-motion: reduce) { .flame-hit-tongue, .flame-hit-glow { animation-duration: 0.01s; } }
+.inventory-swap { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--accent); border-radius: 6px; font-size: 0.85rem; }
+.inventory-swap span { opacity: 0.8; }
+
+/* The inventory's places: two squares per row, an eternal one and an ordinary one; the one you wield is filled in. */
+.inv-rows { display: grid; gap: 12px; justify-items: center; }
+.inv-row { display: flex; gap: 14px; }
+.inv-slot {
+  position: relative; width: 78px; height: 78px; padding: 8px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel); color: var(--ink);
+}
+.inv-slot.is-equipped { background: color-mix(in srgb, var(--accent) 30%, var(--panel)); border-color: var(--accent); }
+.inv-slot.is-focused { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The eternal place carries a small mark in its corner. */
+.inv-slot.is-eternal::after { content: "\221E"; position: absolute; top: 3px; left: 6px; font-size: 0.8rem; color: var(--accent); opacity: 0.8; }
+.gear-icon { width: 100%; height: 100%; display: block; }
+.gear-icon.is-faded { opacity: 0.2; }
+.gear-sprite .icon-plate { fill: var(--armor, #6f7489); stroke: var(--ink); stroke-width: 1.2; stroke-linejoin: round; }
+.gear-sprite .icon-seam { fill: none; stroke: var(--ink); stroke-width: 1; opacity: 0.6; }
+.gear-sprite .icon-rivet { fill: var(--ink); }
+/* Everything you own for a slot, opened from the place you wield. */
+.inv-list { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+.inv-list-item { padding: 4px 8px; border-radius: 5px; font-size: 0.95rem; }
+.inv-list-item.is-equipped { color: var(--accent); }
+.inv-list-item.is-focused { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.inv-list-keys { font-size: 0.8rem; opacity: 0.65; margin-top: 4px; }
+
+/* Flat icons in the places; the real sprites in the list. */
+.gear-icon .flat { fill: var(--ink); }
+.inv-list-item { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+.gear-sprite { flex: none; }
+.gear-sprite.is-weapon { height: 30px; width: 76px; }
+/* In a square place the weapon is slanted to fill it. */
+.gear-sprite.is-weapon.is-tilted { width: 100%; height: 100%; }
+/* The armor: the player's own torso, cropped (the figure is 100 x 120; this shows about half of it, around the chest). */
+.gear-sprite.is-armor { position: relative; overflow: hidden; width: 38px; height: 38px; }
+.gear-sprite.is-armor > svg { position: absolute; left: -2%; top: 10%; width: 100%; height: auto; transform: scale(2); transform-origin: 52% 33%; }
+.inv-slot .gear-sprite.is-armor { width: 100%; height: 100%; }
+.inv-list-name { flex: 1; }

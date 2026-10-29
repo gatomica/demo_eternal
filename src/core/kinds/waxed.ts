@@ -12,6 +12,8 @@ export const WAXED: EnemyKind = {
   weapon: "baseline",
   armor: "none",
   variant: "waxed",
+  // Lit: its flame burns on its head (the Warden's phase two lights it, and raises it staggered if it has fallen).
+  flags: { lit: false },
   pattern: parsePattern("Waxed", `
     actions:
       Scratch:      attack, baseline
@@ -50,4 +52,7 @@ export const WAXED: EnemyKind = {
   flame: { stance: "Cradle Flame", action: "Clutch Flame" },
   // Where it falls, it stays: faded, for the rest of the fight.
   remains: true,
+  deathLook: "wax",
+  // Folded right down, hugging itself.
+  deathPose: "w-dead",
 };

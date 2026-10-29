@@ -149,6 +149,10 @@ interface TurnIndex {
   strike: Map<string, number>;
   /** The step where its Rest goes through (not cut short). */
   rest: Map<string, number>;
+  /** The step where it falls (for good, or to rise again). */
+  fall: Map<string, number>;
+  /** The step where a fallen ally rises again (the Warden's phase two). */
+  raised: Map<string, number>;
   /** The steps where it's attacked (whether the blow lands, is blocked or dodged). */
   targeted: Map<string, number[]>;
   /** The first step where it dodges an attack, or its own Maneuver happens. */
@@ -171,7 +175,7 @@ interface TurnIndex {
 
 export function indexTurn(steps: Step[]): TurnIndex {
   const ix: TurnIndex = {
-    strike: new Map(), rest: new Map(), targeted: new Map(), dodge: new Map(), hit: new Map(), maneuver: new Map(),
+    strike: new Map(), rest: new Map(), fall: new Map(), raised: new Map(), targeted: new Map(), dodge: new Map(), hit: new Map(), maneuver: new Map(),
     interrupted: new Set(), usurp: new Map(), backUp: new Map(), phaseTwoBy: new Map(), phaseTwo: -1,
   };
   const first = (m: Map<string, number>, id: string, i: number) => { if (!m.has(id)) m.set(id, i); };
@@ -193,6 +197,8 @@ export function indexTurn(steps: Step[]): TurnIndex {
         if (ev.result === "interrupted") ix.interrupted.add(ev.who);
         if (ev.result === "recovered") first(ix.backUp, ev.who, i);
       } else if (ev.kind === "revive") first(ix.backUp, ev.who, i);
+      else if (ev.kind === "fall") first(ix.fall, ev.who, i);
+      else if (ev.kind === "raised") first(ix.raised, ev.who, i);
     }
     const usurp = usurpOf(st);
     if (usurp) first(ix.usurp, usurp.who, i);
@@ -226,6 +232,9 @@ export function effectsOf(step: Step | undefined, youManeuvered: boolean): Map<s
         add(ev.attacker, "fx-attack");
         add(ev.target, ev.result === "dodged" ? "fx-dodge" : ev.result === "blocked" ? "fx-block" : "fx-hit");
         break;
+      case "splash":
+        add(ev.target, "fx-hit");
+        break;
       case "stagger":
         add(ev.who, "fx-break");
         break;
@@ -250,6 +259,7 @@ export function effectsOf(step: Step | undefined, youManeuvered: boolean): Map<s
 /** The enemy a step is about, so the bottom-right bar can follow the action. */
 export function involvedEnemy(step: Step | undefined): string | undefined {
   for (const ev of step?.events ?? []) {
+    if (ev.kind === "splash") continue; // (the bar stays on whoever the blow was aimed at)
     const ids = ev.kind === "attack" ? [ev.target, ev.attacker] : [ev.who];
     const enemy = ids.find(id => id !== "player");
     if (enemy) return enemy;

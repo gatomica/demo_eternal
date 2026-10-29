@@ -29,6 +29,7 @@ export function resolveAttacks(t: Turn, rng: Rng) {
     group.forEach(({ attacker, target }, n) => {
       if (n > 0) t.endStep(); // each attack is its own beat
       strike(t, attacker, target);
+      shockwave(t, attacker);
     });
 
     // After the group lands: falls and staggers take effect before the next, slower group.
@@ -56,6 +57,26 @@ function loseHealth(t: Turn, target: Fighter, amount: number) {
   if (dummy) return;
   if (!sparring) target.hp -= amount;
   else if (target === t.p) target.hp = Math.max(1, target.hp - amount);
+}
+
+/**
+ * A shockwave (`#shockwave`: the Warden's flaming slam, his flame blast) sweeping through the fight
+ * after the blow: the attacker's allies take it as a direct hit, with no Block or dodge to answer it.
+ */
+function shockwave(t: Turn, attacker: Fighter) {
+  if (attacker === t.p || t.cancelled.has(attacker.id)) return;
+  const self = attacker as Enemy;
+  if (!self.intent.tags?.includes("shockwave") || kindOf(self).shockwave?.(self) === false) return;
+  const dmg = attackDamage(self, t.weightOf(self));
+  for (const ally of t.alive) {
+    if (ally === self || !ally.alive || t.out.has(ally.id) || t.isReviving(ally)) continue;
+    const resisted = dmg * resistance(ally, null);
+    t.tire(ally, resisted);
+    const through = dmg - resisted;
+    if (through > 0) t.hurt.add(ally.id);
+    loseHealth(t, ally, through);
+    t.emit({ kind: "splash", attacker: self.id, target: ally.id, damage: through, fatigue: resisted });
+  }
 }
 
 /** One attack landing: passing through someone reviving, dodged, blocked, or hitting. */
@@ -93,7 +114,6 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
     return;
   }
   const blocking = t.isBlocking(target, attacker);
-  if (blocking) t.blockedSomething.add(target.id);
   const resisted = dmg * resistance(target, blocking ? t.weightOf(target) : null);
   // On a Block, everything resisted goes back to the attacker; unless the attack is ranged,
   // when it simply stops there.
@@ -103,9 +123,9 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   if (through > 0) t.hurt.add(target.id);
   loseHealth(t, target, through);
   const sentBack = blocking && ranged ? 0 : resisted;
-  t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, grit });
-  // A direct hit may do more, by the attacker's own rules (the Warden's flail waxes, or burns).
   const self = attacker !== p ? (attacker as Enemy) : undefined;
+  t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, grit, fire: !!self?.intent.tags?.includes("fire") });
+  // A direct hit may do more, by the attacker's own rules (the Warden's flail waxes, or burns).
   const onHit = self && kindOf(self).onDirectHit;
   if (!blocking && self && onHit) {
     onHit({

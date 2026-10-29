@@ -23,13 +23,16 @@ export interface BarValues {
 
 const barPct = (x: number, maxHP: number) => `${(Math.max(0, x) / maxHP) * 100}%`;
 
-function Segments({ v, maxHP }: { v: BarValues; maxHP: number }) {
+function Segments({ v, maxHP, preview = 0 }: { v: BarValues; maxHP: number; preview?: number }) {
   const hp = Math.max(0, v.hp);
   // Fatigue fills current health and can't spill past it, even for a moment mid-turn.
   const fatigue = Math.min(Math.max(0, v.fatigue), hp);
+  // A cost about to be paid takes its share of the room that is left, flickering beside the Fatigue.
+  const cost = Math.min(Math.max(0, preview), hp - fatigue);
   return (
     <>
-      <i className="bar-room" style={{ width: barPct(hp - fatigue, maxHP) }} />
+      <i className="bar-room" style={{ width: barPct(hp - fatigue - cost, maxHP) }} />
+      {cost > 0 && <i className="bar-preview" style={{ width: barPct(cost, maxHP) }} />}
       <i className="bar-fatigue" style={{ width: barPct(fatigue, maxHP) }} />
       <i className="bar-death" style={{ width: barPct(v.death, maxHP) }} />
     </>
@@ -45,9 +48,11 @@ function Segments({ v, maxHP }: { v: BarValues; maxHP: number }) {
  * `mirrored` anchors the bar on the right and fills it right to left, for enemies.
  * A stagger bursts into shards.
  */
-export function HealthBar({ fighter, before, className, mirrored }: {
+export function HealthBar({ fighter, before, className, mirrored, preview }: {
   fighter: Fighter;
   before?: BarValues;
+  /** Fatigue about to be paid (an action you are hovering): shown flickering on the bar, before it is committed. */
+  preview?: number;
   className?: string;
   mirrored?: boolean;
 }) {
@@ -86,7 +91,7 @@ export function HealthBar({ fighter, before, className, mirrored }: {
     >
       {/* The trail only shows health that was just lost, in a light red, sliding away. */}
       <span className="bar-layer bar-trail"><i className="bar-lost" style={{ width: barPct(trail.hp, maxHP) }} /></span>
-      <span className="bar-layer bar-now"><Segments v={now} maxHP={maxHP} /></span>
+      <span className="bar-layer bar-now"><Segments v={now} maxHP={maxHP} preview={preview} /></span>
       {flash > 0 && <span key={`flash-${flash}`} className="bar-flash" />}
       {shatter > 0 && <Shards key={`shatter-${shatter}`} count={8} small />}
     </div>

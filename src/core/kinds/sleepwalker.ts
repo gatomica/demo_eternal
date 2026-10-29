@@ -11,6 +11,8 @@ export const SLEEPWALKER: EnemyKind = {
   maxHP: 20,
   weapon: "normal",
   armor: "none", // none for now; some may wear armor later
+  // On the map it gets up again when you rest by a keeper.
+  respawns: true,
   pattern: parsePattern("Depraved Sleepwalker", `
     actions:
       Weapon Strike: attack                  // whatever weapon it carries

@@ -1,9 +1,11 @@
 # Turn-based soulslike demo
 
 A Vite + React 19 + TypeScript browser game, hosted on Netlify (`npm run build`, publishes `dist/`).
-Three screens from the main menu: **Test combat** (pick a loadout and an encounter), **Exploration**
-(walk a multi-floor map; touching an enemy starts its fight) and the **Model viewer** (one enemy,
-its stances and actions, played against a dummy that never gets hurt).
+Screens from the main menu: **Test combat** (pick a loadout and an encounter), **Exploration**
+(walk a multi-floor map; touching an enemy starts its fight), the **Model viewer** (one enemy, its
+stances and actions, played against a dummy that never gets hurt; or "You": the player with any weapon
+and armor, any pose held, and your actions played against a dummy Sleepwalker) and the **Map viewer**
+(each level's plan as a grid, with keepers, gear, enemies and seals marked; click a tile to copy its address).
 
 The design doc is `docs/enemies.md`. Read it before changing rules or enemies, and
 keep it up to date when a rule, enemy or map change is decided or built.
@@ -36,12 +38,13 @@ keep it up to date when a rule, enemy or map change is decided or built.
   phases, `viewAt`, the per-turn step index), `selection.ts`, `ActionWheel.tsx`, `fight.ts`
   (`newFight`: your loadout, health and revives).
 - `screens/`: the main menu, Test combat, the Model viewer (`viewerModel.ts`: what it shows and
-  plays) and `Journeying` (exploration plus its fights). `ui/`: keys (`input.ts`), menus,
+  plays, for an enemy and for the player), the Map viewer (`MapViewer.tsx`, reads `explore/` data) and
+  `Journeying` (exploration plus its fights). `ui/`: keys (`input.ts`), menus,
   pickers, the setup screen.
 - `render/`: drawing. `camera.ts` (floor plan, camera, formations, shots), `poses.ts` (`POSES`,
   which pose a fighter shows; checks every kind's poses exist), `StickFigure.tsx` (stick figures,
   wax looks), `looks.ts` (what a `variant` draws differently: its own figure, candle arm, scenes),
-  `rig.ts` (the true bone lengths, `RIG`, and `fitTorso`/`fitLimbs`, which re-solve a pose to them when a figure is drawn), `Scene.tsx` (the field, figures, darkness, flames), `effects.tsx` (projectiles, shockwaves),
+  `rig.ts` (the true bone lengths, `RIG`, and `fitTorso`/`fitLimbs`, which re-solve a pose to them when a figure is drawn), `Scene.tsx` (the field, figures, darkness, flames, and the fight's light: `LightFall`, tuned by `LIGHT` in `camera.ts`), `effects.tsx` (projectiles, shockwaves),
   `HealthBar.tsx`, `geom.ts`.
 - `warden/`: the Warden's figure. `skeleton.ts` (`WARDEN_POSES`, built with `pose(...)` and its
   flags, `flailOf`), `parts.tsx` (cloak, hood, beard, flame, flail, candle arm), `trails.tsx`,
@@ -53,16 +56,18 @@ keep it up to date when a rule, enemy or map change is decided or built.
   figures, `MAP_FIGURES` by kind), `foes.ts` (`MAP_FOES`, chasing), `keepers.ts` (`KEEPERS`, rest
   points; the guide fades in at each), `tutorial.ts` (the guide's teaching: state, lines, the
   knot), `seals.ts` (the wax closing the start room), `gear.ts` (inventory, drops, losing it all on
-  a fall), `pickups.ts` (gear lying on the floor, e.g. the broken sword), `save.ts` (progress in localStorage), `Inventory.tsx`, `Dialogue.tsx`, `tuning.ts`, `Exploration.tsx`. The tutorial fight is
+  a fall), `pickups.ts` (gear lying on the floor, e.g. the broken sword), gear lying where enemies fell (`Journey.ground`, `GroundItem` in `pickups.ts`), the beaten enemies' remains (`Journey.corpses`, drawn by `MAP_REMAINS` in `figures.ts`; the sleepwalkers get up when you rest, per `respawns`), `save.ts` (progress in localStorage), `Inventory.tsx`, `Dialogue.tsx`, `tuning.ts`, `Exploration.tsx`. The tutorial fight is
   the `start-waxed` map enemy; its coach steps, tips and script are in `combat/training.ts`
   (`CombatScreen`'s `coach` prop).
+- `audio/sfx.ts`: the combat's sounds, synthesized with Tone.js (no files; loaded on the first sound); `sfxFor(event)` maps a
+  combat event to a sound and `CombatScreen` plays it as the step's blow lands. Muted from the main menu.
 - `index.css`: all styles.
 
 ### Adding an enemy
 
 1. Write it in `core/kinds/<name>.ts` (pattern in the doc's notation, poses, hooks) and list it in
    `ENEMY_KINDS` (`core/bestiary.ts`). The game refuses it at load if its pattern or poses are broken.
-2. New poses go in `render/poses.ts`; a figure of its own goes behind a `variant` in `render/looks.ts`.
+2. New poses go in `render/poses.ts`; a figure of its own goes behind a `variant` in `render/looks.ts`. What lies where it dies is `render/Remains.tsx` (pieces), or the kind's `deathLook: "wax"`.
 3. Give it a map figure in `MAP_FIGURES` (`explore/figures.ts`): the type checker asks for one.
 
 ## Conventions

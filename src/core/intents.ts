@@ -42,31 +42,24 @@ function chooseIntent(e: Enemy, state: CombatState, rng: Rng): Intent {
 
   const available = (a: ActionDef) => isAvailable(kind, e, state, a);
   // Something it must pick on from (a boss's second phase) overrides what it just did.
-  const memory = e.nextFrom ? { action: e.nextFrom, outcome: "done" as const } : e.last ? { action: e.last.name, outcome: e.last.outcome } : null;
+  const memory = e.nextFrom ? { action: e.nextFrom, outcome: "done" as const } : e.last ? { action: e.last.name, outcome: e.last.outcome, avoid: e.last.flinchedFrom } : null;
   e.nextFrom = undefined;
   const picked = choose(kind.pattern, memory, available, rng);
-  // A fixed rule overrides the action (the stance still shows as picked).
-  const fixed = kind.forced?.(e, state, rng);
-  if (fixed) {
-    const a = kind.pattern.actions.get(fixed.action.toLowerCase());
-    if (a) {
-      const intent = describe(picked?.stance.name, a);
-      if (fixed.target && fixed.target !== "player") {
-        // Aimed at an ally: it moves toward them, which pushes you away.
-        intent.target = fixed.target;
-        if (a.type === "maneuver") intent.dir = "retreat";
-      }
-      return intent;
-    }
-  }
   if (!picked) return { type: "rest", dir: lineDir, forced: false };
-  return describe(picked.stance.name, picked.action);
+  const intent = describe(picked.stance.name, picked.action);
+  // Some actions are aimed at an ally: it moves toward them, which pushes you away.
+  const target = kind.aim?.(e, state, picked.action.name, rng);
+  if (target && target !== "player") {
+    intent.target = target;
+    if (picked.action.type === "maneuver") intent.dir = "retreat";
+  }
+  return intent;
 }
 
-/** Every enemy's next intent. Those with fixed rules decide last, so they can react to the rest. */
+/** Every enemy's next intent. Those that `decidesLast` go after the rest, so they can react to them. */
 export function chooseIntents(state: CombatState, rng: Rng) {
   const order = [...state.enemies.filter(e => e.alive)].sort(
-    (a, b) => Number(!!ENEMY_KINDS[a.kind].forced) - Number(!!ENEMY_KINDS[b.kind].forced),
+    (a, b) => Number(!!ENEMY_KINDS[a.kind].decidesLast) - Number(!!ENEMY_KINDS[b.kind].decidesLast),
   );
   for (const e of order) e.intent = chooseIntent(e, state, rng);
 }

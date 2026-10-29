@@ -302,29 +302,82 @@ export function drawKeeper(g: CanvasRenderingContext2D, x: number, y: number, T:
   g.beginPath(); g.ellipse(X(0), Y(-0.13), 0.022 * T, 0.045 * T * flick, 0, 0, Math.PI * 2); g.fill();
 }
 
+/** The ground under a body: a pool of the given color, flat on the floor. */
+function pool(g: CanvasRenderingContext2D, x: number, y: number, T: number, rx: number, ry: number, color: string) {
+  g.fillStyle = color;
+  g.beginPath(); g.ellipse(x, y, rx * T, ry * T, 0, 0, Math.PI * 2); g.fill();
+}
+
+const BLOOD = "#5a0b10", BLOOD_CUT = "#8a1219";
+
 /**
- * A waxed that has been beaten, lying on the floor where it fell: toppled on its side, bound
- * shins out behind, its wax head resting on the stones.
+ * A sleepwalker that has been beaten: its body in pieces on the floor, as in a fight. A few short
+ * stumps (two with torn red ends), a split ribcage, its head half sunk into the ground, a small
+ * pool of blood.
  */
-export function drawFallenWaxed(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
+export function drawRemains(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
   const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
   const foot = 0.36;
-  g.fillStyle = COLORS.shadow;
-  g.beginPath(); g.ellipse(X(0), Y(foot), 0.4 * T, 0.09 * T, 0, 0, Math.PI * 2); g.fill();
   g.lineCap = "round"; g.lineJoin = "round";
-  // The bound shins, flat to the right.
-  g.strokeStyle = WAXED_LOOK.wax!; g.lineWidth = Math.max(3, 0.12 * T);
-  g.beginPath(); g.moveTo(X(0.08), Y(foot - 0.05)); g.lineTo(X(0.36), Y(foot - 0.02)); g.stroke();
-  // Torso and arms lying along the floor.
-  g.strokeStyle = WAXED_LOOK.ink; g.lineWidth = Math.max(2, 0.075 * T);
-  g.beginPath(); g.moveTo(X(0.08), Y(foot - 0.05)); g.lineTo(X(-0.14), Y(foot - 0.08)); g.stroke();
-  g.beginPath(); g.moveTo(X(-0.1), Y(foot - 0.08)); g.lineTo(X(-0.2), Y(foot + 0.01)); g.stroke();
-  g.beginPath(); g.moveTo(X(-0.06), Y(foot - 0.07)); g.lineTo(X(-0.02), Y(foot + 0.02)); g.stroke();
-  // The head, a lump of wax.
-  g.fillStyle = WAXED_LOOK.wax!;
-  g.beginPath(); g.ellipse(X(-0.26), Y(foot - 0.07), 0.15 * T, 0.12 * T, 0, 0, Math.PI * 2); g.fill();
-  g.strokeStyle = "rgba(0,0,0,0.35)"; g.lineWidth = 1; g.stroke();
+  pool(g, X(0), Y(foot - 0.02), T, 0.26, 0.07, BLOOD);
+  g.strokeStyle = SLEEPWALKER_LOOK.ink; g.lineWidth = Math.max(2, 0.07 * T);
+  const stump = (x1: number, y1: number, x2: number, y2: number, torn: boolean) => {
+    g.beginPath(); g.moveTo(X(x1), Y(y1)); g.lineTo(X(x2), Y(y2)); g.stroke();
+    if (torn) { g.fillStyle = BLOOD_CUT; g.beginPath(); g.ellipse(X(x2), Y(y2), 0.03 * T, 0.06 * T, 0.5, 0, Math.PI * 2); g.fill(); }
+  };
+  stump(0.1, foot - 0.04, 0.2, foot - 0.07, true);
+  stump(0.28, foot - 0.01, 0.36, foot, false);
+  stump(-0.3, foot - 0.03, -0.18, foot, true);
+  stump(-0.08, foot + 0.02, 0.02, foot, false);
+  // The ribcage, split open.
+  g.beginPath(); g.moveTo(X(-0.14), Y(foot - 0.08)); g.lineTo(X(-0.02), Y(foot - 0.14)); g.lineTo(X(0.05), Y(foot - 0.09)); g.stroke();
+  // The head, sunk half into the ground.
+  g.fillStyle = SLEEPWALKER_LOOK.ink;
+  g.beginPath(); g.arc(X(0.3), Y(foot - 0.08), 0.1 * T, Math.PI, 0); g.fill();
+  pool(g, X(0.3), Y(foot - 0.08), T, 0.12, 0.025, BLOOD);
 }
+
+/**
+ * A waxed that has been beaten, as in a fight: sealed whole in wax, folded right down on its
+ * knees, hunched over itself, hugging itself.
+ */
+export function drawDeadWaxed(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
+  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
+  const foot = 0.36, wax = WAXED_LOOK.wax!;
+  g.lineCap = "round"; g.lineJoin = "round";
+  g.fillStyle = COLORS.shadow;
+  g.beginPath(); g.ellipse(X(0), Y(foot), 0.36 * T, 0.08 * T, 0, 0, Math.PI * 2); g.fill();
+  // The bound legs behind it, the folded body over them, the head bowed to its knees.
+  g.strokeStyle = wax; g.lineWidth = Math.max(3, 0.13 * T);
+  g.beginPath(); g.moveTo(X(-0.05), Y(foot - 0.06)); g.lineTo(X(-0.34), Y(foot - 0.03)); g.stroke();
+  g.fillStyle = wax;
+  g.beginPath(); g.ellipse(X(0.03), Y(foot - 0.13), 0.22 * T, 0.14 * T, -0.15, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(X(0.2), Y(foot - 0.12), 0.1 * T, 0.09 * T, 0, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = "rgba(0,0,0,0.35)"; g.lineWidth = 1; g.stroke();
+  // The arms wrapped round itself.
+  g.strokeStyle = WAXED_LOOK.ink; g.lineWidth = Math.max(2, 0.05 * T);
+  g.beginPath(); g.moveTo(X(-0.1), Y(foot - 0.2)); g.quadraticCurveTo(X(0.08), Y(foot - 0.26), X(0.16), Y(foot - 0.12)); g.stroke();
+}
+
+/** The Warden, beaten: his cloak lying in a low pyramid over a thick pool of wax. */
+export function drawCloakRemains(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
+  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
+  const foot = 0.36, wax = WAXED_LOOK.wax!;
+  g.lineJoin = "round";
+  pool(g, X(0), Y(foot - 0.02), T, 0.46, 0.13, "#6b5b25");
+  pool(g, X(0), Y(foot - 0.06), T, 0.46, 0.13, wax);
+  g.fillStyle = "#6c6871"; g.strokeStyle = "#4f4b55"; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(X(-0.34), Y(foot - 0.05)); g.lineTo(X(0), Y(foot - 0.3)); g.lineTo(X(0.02), Y(foot + 0.02)); g.closePath(); g.fill(); g.stroke();
+  g.fillStyle = "#58545f";
+  g.beginPath(); g.moveTo(X(0.02), Y(foot + 0.02)); g.lineTo(X(0), Y(foot - 0.3)); g.lineTo(X(0.36), Y(foot - 0.05)); g.closePath(); g.fill(); g.stroke();
+}
+
+/** What lies where each kind of enemy fell. */
+export const MAP_REMAINS: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number) => void> = {
+  sleepwalker: drawRemains,
+  waxed: drawDeadWaxed,
+  warden: drawCloakRemains,
+};
 
 /**
  * A broken sword lying on the floor: a hilt and a stub of blade, the snapped tip a little way

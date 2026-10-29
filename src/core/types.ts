@@ -71,11 +71,13 @@ export interface LastAction {
   /** The action's name, for picking the next stance. */
   name?: string;
   /**
-   * done: it happened. undone: it didn't (a Rest cut short by a hit, a Block with nothing to
-   * block, an action cancelled before it happened). recover: it was the forced Rest after
+   * done: it happened (a Block counts even if it had nothing to block). undone: it didn't (a Rest cut
+   * short by a hit, an action cancelled before it happened). recover: it was the forced Rest after
    * being staggered.
    */
   outcome: "done" | "undone" | "recover";
+  /** A Rest cut short by a hit (it flinched): the stance it was resting from, which its recovery avoids. */
+  flinchedFrom?: string;
 }
 
 export interface Fighter {
@@ -126,7 +128,7 @@ export interface Enemy extends Fighter {
   /** True during its protected revive turn. */
   reviving: boolean;
   /** How it left the fight, once it has. */
-  fate?: "fallen" | "encased" | "candle";
+  fate?: "fallen" | "encased";
 }
 
 export interface CombatConfig {
@@ -160,6 +162,8 @@ export type CombatEvent =
       ranged: boolean;
       /** The attacker was already dropped or staggered by a tied attack, and grits through to finish its own. */
       grit: boolean;
+      /** A fire attack (`#fire`): where it hits, flames lick the target. */
+      fire?: boolean;
     }
   | { kind: "canceled"; who: string; action: ActionType; reason: "staggered" | "fallen" | "no target" }
   | { kind: "stagger"; who: string }
@@ -173,14 +177,18 @@ export type CombatEvent =
   | { kind: "defeat"; who: string }
   /** A flaming flail's direct hit: `who` takes `damage` more. */
   | { kind: "burned"; who: string; damage: number }
+  /** A lit ally is staggered at the end of the turn and dies: its flame streams into the hand of `by`, who is not staggered himself. */
+  | { kind: "drained"; who: string; by: string }
+  /** A shockwave from `attacker` hits its ally `target`: `damage` health lost, `fatigue` taken. */
+  | { kind: "splash"; attacker: string; target: string; damage: number; fatigue: number }
   /** A direct waxing hit: `who` is now Waxed (`bonus`: extra Fatigue, if it already was). */
   | { kind: "waxed"; who: string; bonus: number }
   /** Usurp Flame: `who` took `target`'s flame. */
   | { kind: "usurp"; who: string; target: string }
   /** Sealed whole in wax, out of the fight for good. */
   | { kind: "encased"; who: string }
-  /** Burnt into a human candle as the Warden's flame breaks free. */
-  | { kind: "candle"; who: string }
+  /** A fallen ally rises again, lit (the Warden's phase two); `by`: whose staggering sent a flame to raise it. */
+  | { kind: "raised"; who: string; by?: string }
   /** A status of an enemy's own changed, e.g. Sealed. */
   | { kind: "flag"; who: string; flag: string; on: boolean }
   /** A boss enters a new phase. */
@@ -197,7 +205,7 @@ export interface FighterView {
   waxed?: boolean;
   encased?: boolean;
   /** How an enemy left the fight, once it has. */
-  fate?: "fallen" | "encased" | "candle";
+  fate?: "fallen" | "encased";
 }
 
 /**

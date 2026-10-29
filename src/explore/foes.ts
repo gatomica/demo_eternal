@@ -26,8 +26,24 @@ export interface MapFoe {
   fight: EnemySetup[];
   /** It never notices you or moves: you walk up to it. */
   still?: boolean;
-  /** Once beaten it stays where it fell, lying on the floor, for good. */
-  lies?: boolean;
+  /** Which of the original group's members are still standing, when some are dead for good (`fight` holds only those). */
+  members?: number[];
+}
+
+/** Where a beaten enemy lies on the map. */
+export interface Corpse { kind: KindId; x: number; y: number; alt: number }
+
+/** The key of member `i` of a map enemy's original group, for the corpses. */
+export const memberKey = (id: string, i: number) => `${id}#${i}`;
+
+/**
+ * A map enemy as it stands now: its group without the members that lie dead (the ones that don't
+ * come back), or null if none is left.
+ */
+export function livingDef(def: MapFoe, corpses: Record<string, Corpse>): MapFoe | null {
+  const members = def.fight.map((_, i) => i).filter(i => !corpses[memberKey(def.id, i)]);
+  if (!members.length) return null;
+  return members.length === def.fight.length ? def : { ...def, fight: members.map(i => def.fight[i]), members };
 }
 
 /** The Warden's fight, as Test combat has it (his escorts, and the waxed whose flame he takes first). */
@@ -37,7 +53,7 @@ const WARDEN_FIGHT = ENCOUNTERS.find(e => e.id === "warden")!.enemies;
 export const MAP_FOES: MapFoe[] = [
   // The start room: a waxed lying in the corner, the guide's lesson. It scratches and rests on a script.
   {
-    id: TUTORIAL_FOE, kind: "waxed", home: { x: 4.5, y: 6.5, z: 2 }, still: true, lies: true,
+    id: TUTORIAL_FOE, kind: "waxed", home: { x: 4.5, y: 6.5, z: 2 }, still: true,
     fight: [{ kind: "waxed", line: "front", script: TRAINING_SCRIPT }],
   },
   // Ground floor. In the hall: a lone waxed, then a pair further in.

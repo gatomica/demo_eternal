@@ -1,15 +1,16 @@
 /**
  * Scene.tsx — the battlefield: the floor and every figure, seen through the camera.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Variant } from "../core/bestiary";
 import type { ArmorTier, Side, WeaponTier } from "../core/types";
-import { type Cam, ease, figureBox, HORIZON, lerpAngle, lerpCam, lerpVec, NEAR, planningCamera, project, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, type Vec } from "./camera";
-import { ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
+import { type Cam, darkAt, ease, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, focusOf, NEAR, planningCamera, project, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec } from "./camera";
+import { ClangBurst, FlameHit, ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
 import type { Pt } from "./geom";
 import { Blood, Shards } from "./HealthBar";
 import { lookOf } from "./looks";
 import { flameOf, type PoseName } from "./poses";
+import { CloakRemains, Remains } from "./Remains";
 import { StickFigure } from "./StickFigure";
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "../warden/arena";
 import { IGNITE } from "../warden/scenes";
@@ -42,6 +43,8 @@ export interface SceneFigure {
   waxCaked?: boolean;
   /** Sealed whole in wax (its flame taken by Usurp Flame). */
   encased?: boolean;
+  /** It has fallen: its body in "pieces" on the floor (drawn instead of the figure), or sealed in "wax". */
+  dead?: "pieces" | "wax" | "cloak";
   /** The Warden: phase two's look (black wax, burning inside) whatever his arm. */
   phase2Look?: boolean;
   /** The Warden: his flail is on fire. */
@@ -56,6 +59,8 @@ export interface SceneFigure {
   disabled: boolean;
   label: string;
   onPick: () => void;
+  /** Drawn right below it (its health bar, while it is the target). */
+  bar?: ReactNode;
 }
 
 /** Enemies seen from the front face left, so their drawing is mirrored (unless seen straight on). */
@@ -73,14 +78,14 @@ const rand = (seed: number, i: number) => {
  * Draws the floor and every figure through the camera. When a new shot arrives, everyone (and
  * the camera) moves from wherever they are right now to the new spots, over the shot's duration.
  */
-export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena, arenaLit, ignite }: {
+export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [], arena, arenaLit, ignite, light }: {
   figures: SceneFigure[];
   shot: SceneShot;
   projectiles?: Projectile[];
   /** The light dying (0 to 1, over `ms`), all but one figure's flame, which keeps burning. */
   dark?: { level: number; ms: number; flame?: string };
-  /** A flame streaming from one figure, arching over the other, into its candle hand. */
-  usurpTrail?: { from: string; to: string; key: string };
+  /** Flames streaming from figures, each arching over another, into its candle hand. */
+  usurpTrails?: { from: string; to: string; key: string }[];
   /** The Warden's arena: sleepwalkers sealed into its floor and walls. */
   arena?: boolean;
   /** The sealed sleepwalkers' candles (and the waxed remains') burn. */
@@ -90,6 +95,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
    * and a seed for its randomness.
    */
   ignite?: { who: string; start?: number; seed: number };
+  /** A fight's limited light: only the floor near the player is lit, the back line just inside its edge. */
+  light?: boolean;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -106,10 +113,13 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
   // Tween state lives in refs; a frame counter re-renders while anything is moving.
   // The camera moves from where it was (`from`) to the shot's camera. A riding camera that was
   // already riding just turns (`fromYaw` to the new yaw) while it follows its figure.
-  const cam = useRef<{ from: Cam; to: ShotCamera; fromYaw: number | null }>({
+  // A camera between two fighters that was already between those two keeps tracking them as they move
+  // (`tracking`), instead of easing from where it was.
+  const cam = useRef<{ from: Cam; to: ShotCamera; fromYaw: number | null; tracking: boolean }>({
     from: shotCamera(shot),
     to: shot.camera,
     fromYaw: "follow" in shot.camera ? shot.camera.yaw : null,
+    tracking: "between" in shot.camera,
   });
   const pos = useRef(new Map<string, Tween<Vec>>());
   const timing = useRef({ start: 0, ms: 0 });
@@ -123,7 +133,14 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
     return t ? lerpVec(t.from, t.to, k) : undefined;
   };
   const camNow = (k = ease(progress())): Cam => {
-    const { from, to, fromYaw } = cam.current;
+    const { from, to, fromYaw, tracking } = cam.current;
+    if ("between" in to) {
+      // Centered between the two wherever they are right now: pushed, knocked back or dodging.
+      const a = posNow(to.between[0], k), b = posNow(to.between[1], k);
+      if (!a || !b) return from;
+      const centered = trackingCamera(to.yaw, a, b);
+      return tracking ? centered : lerpCam(from, centered, k);
+    }
     if (!("follow" in to)) return lerpCam(from, to, k);
     const at = posNow(to.follow, k);
     if (!at) return from;
@@ -140,11 +157,12 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
     // Keep riding (and turning from the current angle) if the camera was riding the same figure.
     const stillRiding = "follow" in prev && "follow" in shot.camera && prev.follow === shot.camera.follow;
     const fromYaw = stillRiding && "follow" in prev ? lerpAngle(cam.current.fromYaw ?? prev.yaw, prev.yaw, k) : null;
+    const tracking = "between" in prev && "between" in shot.camera && prev.between[0] === shot.camera.between[0] && prev.between[1] === shot.camera.between[1];
     for (const [id, to] of Object.entries(shot.positions)) {
       const t = pos.current.get(id);
       pos.current.set(id, { from: t ? lerpVec(t.from, t.to, k) : to, to });
     }
-    cam.current = { from: nowCam, to: shot.camera, fromYaw };
+    cam.current = { from: nowCam, to: shot.camera, fromYaw, tracking };
     timing.current = { start: performance.now(), ms: shot.ms };
     let raf = 0;
     const tick = () => {
@@ -176,9 +194,9 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
   const placed = figures
     .map(f => {
       const p = posNow(f.id);
-      return p && w ? { f, box: figureBox(c, p, w, h, f.scale) } : null;
+      return p && w ? { f, box: figureBox(c, p, w, h, f.scale), at: p } : null;
     })
-    .filter((x): x is { f: SceneFigure; box: ReturnType<typeof figureBox> } => !!x && x.box.depth > NEAR)
+    .filter((x): x is { f: SceneFigure; box: ReturnType<typeof figureBox>; at: Vec } => !!x && x.box.depth > NEAR)
     .sort((a, b) => b.box.depth - a.box.depth); // far first, so nearer figures draw on top
   // The arena's sealed sleepwalkers, fixed in the world.
   // (Only in the Warden's arena; never right on top of the camera.)
@@ -186,6 +204,16 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
     ? ARENA_PROPS.map(pr => ({ pr, box: figureBox(c, pr.pos, w, h, PROP_SCALE[pr.kind]) })).filter(x => x.box.depth > 3)
     : [];
   const proj = (p: Vec) => project(c, p, w, h);
+  /**
+   * How much of its brightness a figure keeps in a fight's light: by how far it stands from the
+   * camera's subject (you, or the middle of the two fighting), not by where its drawing falls on screen, so a figure inside the light is never
+   * darkened by the dark beyond it (its head rising above the edge of the circle, say).
+   */
+  const lightAt = (p: Vec) => {
+    if (!light) return 1;
+    const me = focusOf(c);
+    return 1 - darkAt(Math.hypot(p.x - me.x, p.z - me.z));
+  };
   /** The floor point under a screen x on a figure standing at `at` (its feet's depth). */
   const floorAt = (at: Vec, sx: number): Vec => {
     const { sx: fx, ppm } = proj(at);
@@ -226,13 +254,13 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
       <div className="scene-floor" style={{ top: `${HORIZON * 100}%` }} />
       {w > 0 && <FloorGrid cam={c} w={w} h={h} />}
       {props.map(({ pr, box }) => (
-        <div key={pr.id} className={`arena-slot ${coversFigure(box) ? "is-see-through" : ""}`} style={{ left: box.x, top: box.y, width: box.w, height: box.h, zIndex: 1000 - Math.round(box.depth * 10), filter: `brightness(${Math.max(0.55, Math.min(1, 1.05 - box.depth * 0.04))})` }}>
+        <div key={pr.id} className={`arena-slot ${coversFigure(box) ? "is-see-through" : ""}`} style={{ left: box.x, top: box.y, width: box.w, height: box.h, zIndex: 1000 - Math.round(box.depth * 10), filter: `brightness(${Math.max(0.55, Math.min(1, 1.05 - box.depth * 0.04)) * lightAt(pr.pos)})` }}>
           <SealedSleeper kind={pr.kind} flip={pr.flip} lit={propLit} />
         </div>
       ))}
-      {placed.map(({ f, box }) => (
+      {placed.map(({ f, box, at }) => (
+        <Fragment key={f.id}>
         <button
-          key={f.id}
           className={`figure-slot ${f.selected ? "is-target" : ""}`}
           data-fig={f.id}
           aria-label={f.label}
@@ -246,15 +274,21 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
             height: box.h,
             zIndex: 1000 - Math.round(box.depth * 10),
             // Distance haze: the further away, the dimmer.
-            filter: `brightness(${Math.max(0.68, Math.min(1, 1.12 - box.depth * 0.06))})`,
+            filter: `brightness(${Math.max(0.68, Math.min(1, 1.12 - box.depth * 0.06)) * lightAt(at)})`,
           }}
         >
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} encased={f.encased} />
+            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} /> : f.dead === "cloak" ? <CloakRemains /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} encased={f.encased} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}
           </div>
         </button>
+        {f.bar && (
+          <div className="figure-bar" style={{ left: box.x + box.w / 2, top: box.y + (box.h * 114) / 120 + 8 }}>
+            {f.bar}
+          </div>
+        )}
+        </Fragment>
       ))}
       {/* The waxed remains burn as candles once the arena is lit. */}
       {placed.filter(({ f }) => f.candle).map(({ f, box }) => {
@@ -264,6 +298,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
           <LoneFlame key={`candle-${f.id}`} className="arena-candle-flame" at={[fx, fy]} sz={sz} zIndex={1001 - Math.round(box.depth * 10)} />
         );
       })}
+      {light && w > 0 && <LightFall cam={c} center={focusOf(c)} w={w} h={h} />}
       {dark && <div className="scene-dark" style={{ opacity: dark.level, transition: `opacity ${dark.ms}ms ease-in` }} />}
       {dark?.flame && (() => {
         const t = placed.find(x => x.f.id === dark.flame);
@@ -276,7 +311,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
           <LoneFlame className="scene-lone-flame" at={[fx, fy]} sz={sz} />
         );
       })()}
-      {usurpTrail && (() => {
+      {usurpTrails.map(usurpTrail => {
         const a = placed.find(x => x.f.id === usurpTrail.from), b = placed.find(x => x.f.id === usurpTrail.to);
         if (!a || !b) return null;
         const from = toScreen(a.box, flameOf(a.f.pose), isMirrored(a.f));
@@ -308,7 +343,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
             </g>
           </svg>
         );
-      })()}
+      })}
       {ignite && igniter && (() => {
         const t = igniteT;
         const [hx, hy] = toScreen(igniter.box, handOf(igniter.f), isMirrored(igniter.f));
@@ -350,6 +385,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
         const a = thrower?.box;
         const b = placed.find(x => x.f.id === pr.to)?.box;
         if (!a || !b) return null;
+        // Flames licking a unit a fire attack has hit.
+        if (pr.kind === "flamehit") return <FlameHit key={pr.key} cx={b.x + b.w / 2} cy={b.y + b.h * 0.6} size={b.h} />;
         // From the thrower's chest height to the target's, and on through it.
         const sx = a.x + a.w / 2, sy = a.y + a.h * 0.42;
         const tx = b.x + b.w / 2, ty = b.y + b.h * 0.45;
@@ -359,6 +396,12 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
         const size = Math.max(a.h, b.h) * (pr.kind === "wax" ? 0.12 : pr.kind === "fan" ? 1.1 : 0.45);
         const flight = (Math.atan2(dy, dx) * 180) / Math.PI;
         const angle = pr.kind === "fan" ? 0 : flight; // the fan's lean is drawn into its shape
+        if (pr.kind === "clang") {
+          // A blocked blow clangs: a starburst of white spikes at the point where the weapons met,
+          // on the blocker's side facing the attacker, at chest height.
+          const bx = a.x + a.w / 2 + Math.sign(tx - (a.x + a.w / 2)) * a.w * 0.45, by = a.y + a.h * 0.42;
+          return <ClangBurst key={pr.key} cx={bx} cy={by} reach={a.h * 0.38} />;
+        }
         if (pr.kind === "impact") {
           // A melee blow into the ground: no fire, just a small white ring kicked out flat across
           // the floor from the fist.
@@ -372,9 +415,9 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
                 const A = posNow(pr.from), B = posNow(pr.to);
                 if (!A || !B) return null;
                 const at = floorAt(A, ax);
-                // A flaming flail's burns, like a small Flame Blast.
+                // A flaming flail's burns, as big as a Flame Blast's: out through the target, with flames as tall.
                 return pr.fiery
-                  ? <Shockwave center={at} reach={1.8} toward={Math.atan2(B.z - at.z, B.x - at.x)} flame={1} proj={proj} />
+                  ? <Shockwave center={at} reach={Math.hypot(B.x - at.x, B.z - at.z) * 1.25} toward={Math.atan2(B.z - at.z, B.x - at.x)} flame={1.4} proj={proj} />
                   : <Shockwave center={at} reach={1.5} toward={Math.atan2(B.z - at.z, B.x - at.x)} flame={0.8} proj={proj} impact />;
               })()}
             </div>
@@ -477,6 +520,46 @@ function FloorGrid({ cam, w, h }: { cam: Cam; w: number; h: number }) {
   return (
     <svg className="scene-grid" width={w} height={h} aria-hidden="true">
       <path d={paths.join("")} />
+    </svg>
+  );
+}
+
+/**
+ * The fight's light: black closing in from beyond a circle on the floor around what the camera is on
+ * (you while you plan, the middle of the two fighting during an attack). The
+ * circle is drawn in perspective (so it is an ellipse on screen), in many thin rings that each
+ * add a little darkness, so it fades smoothly: clear near the player, dim and dark at the back
+ * line, black from the edge on. That hides the far floor and the horizon. It lies under the
+ * figures, which are shaded by their own distance instead (see `lightAt`), so no sprite inside
+ * the light is darkened by it.
+ */
+function LightFall({ cam, center, w, h }: { cam: Cam; center: Vec; w: number; h: number }) {
+  const STEP = 0.25, POINTS = 72, BIG = 60000;
+  /** The ring of floor at distance `r` from the player, as screen points (what lies behind the camera is pinned to its near edge). */
+  const ring = (r: number) => {
+    const pts: string[] = [];
+    for (let i = 0; i < POINTS; i++) {
+      const a = (i / POINTS) * Math.PI * 2;
+      const { u, v } = toCamera(cam, { x: center.x + r * Math.cos(a), z: center.z + r * Math.sin(a) });
+      const { sx, sy } = screenOf(u, Math.max(v, NEAR), w, h);
+      pts.push(`${i ? "L" : "M"}${sx.toFixed(1)} ${sy.toFixed(1)}`);
+    }
+    return `${pts.join("")}Z`;
+  };
+  const outside = `M${-BIG} ${-BIG}H${BIG}V${BIG}H${-BIG}Z`;
+  const layers: { r: number; alpha: number }[] = [];
+  let before = 0;
+  for (let r = LIGHT.clear + STEP; r < LIGHT.edge + 1e-6; r += STEP) {
+    const now = darkAt(Math.min(r, LIGHT.edge));
+    // This ring has to add just enough on top of those inside it to reach the darkness wanted at r.
+    layers.push({ r: Math.min(r, LIGHT.edge), alpha: before >= 1 ? 0 : 1 - (1 - now) / (1 - before) });
+    before = now;
+  }
+  return (
+    <svg className="scene-light" width={w} height={h} aria-hidden="true">
+      {layers.map(({ r, alpha }) => (
+        <path key={r} d={`${outside}${ring(r)}`} fillRule="evenodd" fill="#000" fillOpacity={alpha} />
+      ))}
     </svg>
   );
 }

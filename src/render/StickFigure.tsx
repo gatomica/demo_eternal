@@ -27,7 +27,7 @@ import type { CandleArm, WardenPoseName } from "../warden/skeleton";
  * ============================================================ */
 
 /** Weapons are drawn along +x from the grip at (0, 0). */
-function Weapon({ tier }: { tier: WeaponTier }) {
+export function Weapon({ tier }: { tier: WeaponTier }) {
   switch (tier) {
     case "baseline": // bare hands
       return null;

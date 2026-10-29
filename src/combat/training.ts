@@ -82,7 +82,7 @@ export function tipAfter(s: CombatState): Tip | null {
     return { warn: false, text: "That hurt: the blow took Health, and what your armor resisted became Fatigue. Blocking or dodging turns more of it into Fatigue instead of damage." };
   }
   if (struck?.result === "blocked") {
-    return { warn: false, text: "Blocked. Most of the blow became Fatigue, sent back at the attacker. A Block only answers attacks from its target and from the back line." };
+    return { warn: false, text: "Blocked. Most of the blow became Fatigue, sent back at the attacker. A Block only answers attacks from its target." };
   }
   if (struck?.result === "dodged") {
     return { warn: false, text: "Dodged: no Health lost, but a dodge still costs some Fatigue, more the heavier you are." };
