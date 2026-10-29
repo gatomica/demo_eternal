@@ -17,8 +17,8 @@ export const WAXED: EnemyKind = {
       Scratch:      attack, baseline
       Hurl Wax:     attack, light, ranged
       Brace:        block, baseline
-      Drag Forward: maneuver, advance
-      Slither Back: maneuver, retreat
+      Drag Forward: maneuver, advance, *Far   // crawls in only when far away
+      Slither Back: maneuver, retreat, *Close // backs off only when close
       Clutch Flame: rest
     stances:
       All > Hands Raised      > Scratch
@@ -27,6 +27,7 @@ export const WAXED: EnemyKind = {
       All > Crawling          > Drag Forward, Slither Back
       All > Cradle Flame      > Clutch Flame
   `),
+  modelPoses: { front: "w-t", back: "w-t-b" },
   stancePoses: {
     "Hands Raised": "w-hands",
     "Wax on Hand": "w-wax-hand",

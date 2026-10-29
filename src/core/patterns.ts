@@ -13,40 +13,37 @@
  *     Hurl Wax:      attack, light, ranged
  *     Drag Forward:  maneuver, advance
  *     Wax Guard:     block, light, *Sealed
+ *     Stride:        maneuver, retreat, *Hurt, *!Close
  *   stances:
  *     All > Hands Raised > Scratch
  *     Rising Flail > Flail Spinning Overhead > Flail Slam
- *     Flail Swing / Wind Up Flail > Flail Spinning Behind > Rising Flail / Wax Guard, Stride
+ *     Flail Swing / Wind Up Flail > Flail Spinning Behind > Stride, Wax Guard, Rising Flail
  *
  * - An action line is `Name: kind, modifiers…`. Kinds: attack, block, maneuver, rest.
  *   Modifiers: a weight (baseline, light, normal, heavy), `ranged`, a Maneuver direction
  *   (`advance` closes in on you, `retreat` backs off, `by-line` does whichever its line calls
- *   for), `*Condition` (only available while that condition holds), and `#tag` (a rule it
- *   triggers, e.g. `#waxing`: a direct hit leaves the target Waxed).
+ *   for), `*Condition` (only available while that condition holds; `*!Condition` while it
+ *   doesn't; several must all hold), and `#tag` (a rule it triggers, e.g. `#waxing`: a direct
+ *   hit leaves the target Waxed). Conditions: see conditions.ts.
  * - A stance line is `Comes from > Stance > Leads to`.
  *   - Comes from: action names (and `Recover`, or an event the kind declares, like the Warden's
  *     `Second Phase`: right after he enters it) separated by `/` or `,`, or `All`.
- *   - Leads to: `/` separates kinds of action, `,` separates actions of the same kind.
+ *   - Leads to: the actions it allows, in order of priority, separated by `,` or `/`.
  * - Recover is the turn after being staggered (or reviving). `Recover >` stances are also the
  *   ones an enemy opens a fight with.
  *
- * PICKING (every choice is even)
+ * PICKING
  * 1. Next stance, evenly among those the last action leads to. If the last action didn't
  *    happen (a Rest cut short, a Block with nothing to block, a cancelled action), or it was the
  *    Recover after a stagger: evenly among the Recover stances.
- * 2. Within the stance: a kind evenly among the kinds it offers, then an action of that kind
- *    evenly. Actions whose conditions don't hold are skipped.
+ * 2. Within the stance: the first action, in the order written, whose conditions hold. Nothing
+ *    random: write an action with no conditions last, as the one it falls back on.
  * 3. Safety net: if none of the stance's actions are available, the enemy acts as if it just
  *    Recovered and picks again from the Recover stances.
  */
 import type { ActionType, WeaponTier } from "./types";
 
 export const ACTION_KINDS: ActionType[] = ["attack", "block", "maneuver", "rest"];
-
-/** Which kind of action counts as which: Attack, Defense (Block and Maneuver) or Rest. */
-export const KIND_GROUP: Record<ActionType, "attack" | "defense" | "rest"> = {
-  attack: "attack", block: "defense", maneuver: "defense", rest: "rest",
-};
 
 const WEIGHTS: WeaponTier[] = ["baseline", "light", "normal", "heavy"];
 
@@ -58,7 +55,7 @@ export interface ActionDef {
   ranged: boolean;
   /** For a Maneuver: closes in on you, backs off, or whichever its current line calls for. */
   dir?: "advance" | "retreat" | "by-line";
-  /** Conditions that must all hold for it to be available. */
+  /** Conditions that must all hold for it to be available (lowercase; a leading `!` negates). */
   needs: string[];
   /** Rules it triggers (`#tag`), e.g. "waxing". */
   tags: string[];
@@ -68,8 +65,8 @@ export interface StanceDef {
   name: string;
   /** Actions it can follow ("Recover" included), or "all". */
   from: "all" | Set<string>;
-  /** The actions it allows, grouped by kind (`/` in the notation). */
-  groups: ActionDef[][];
+  /** The actions it allows, in order of priority: the first available one is taken. */
+  actions: ActionDef[];
 }
 
 export interface Pattern {
@@ -110,7 +107,7 @@ export function parsePattern(label: string, src: string, { events = [] }: { even
         if ((WEIGHTS as string[]).includes(w)) def.weight = w as WeaponTier;
         else if (w === "ranged") def.ranged = true;
         else if (w === "advance" || w === "retreat" || w === "by-line") def.dir = w;
-        else if (w.startsWith("*")) def.needs.push(w.slice(1));
+        else if (w.startsWith("*")) def.needs.push(w.slice(1).replace(/^!\s*/, "!"));
         else if (w.startsWith("#")) def.tags.push(w.slice(1));
         else fail(`action "${name}": unknown modifier "${w}"`);
       }
@@ -144,20 +141,15 @@ export function parsePattern(label: string, src: string, { events = [] }: { even
         else fromSet.add(find(n, where).name.toLowerCase());
       }
     }
-    const groups = to.split("/").map(g => g.split(",").map(n => find(n, where)));
-    for (const g of groups) {
-      const kinds = new Set(g.map(a => KIND_GROUP[a.type]));
-      if (kinds.size > 1) fail(`${where}: "${g.map(a => a.name).join(", ")}" mixes kinds of action; separate kinds with "/"`);
-    }
-    const kinds = groups.map(g => KIND_GROUP[g[0].type]);
-    if (new Set(kinds).size !== kinds.length) fail(`${where}: the same kind of action appears in two groups; join them with ","`);
-    return { name, from: fromSet, groups };
+    const list = to.split(/[/,]/).map(n => find(n, where));
+    if (new Set(list).size !== list.length) fail(`${where}: an action is listed twice`);
+    return { name, from: fromSet, actions: list };
   });
 
   // No dead ends: Recover, and every action a stance can lead to, must lead to some stance.
   const leadsSomewhere = (n: string) => stances.some(s => s.from === "all" || s.from.has(n));
   if (!leadsSomewhere("recover")) fail(`no stance comes from Recover (or All), so it can't open a fight or recover from a stagger`);
-  for (const s of stances) for (const g of s.groups) for (const a of g) {
+  for (const s of stances) for (const a of s.actions) {
     if (!leadsSomewhere(a.name.toLowerCase())) fail(`"${a.name}" (from stance "${s.name}") doesn't lead to any stance`);
   }
   if (new Set(stances.map(s => s.name.toLowerCase())).size !== stances.length) fail(`a stance name is used twice`);
@@ -190,11 +182,9 @@ export function nextStances(p: Pattern, last: PatternMemory | null): StanceDef[]
   return any.length ? any : p.after.get("recover")!;
 }
 
-/** Within a stance: a kind evenly among the available ones, then an action of that kind evenly. */
-export function pickAction(stance: StanceDef, available: (a: ActionDef) => boolean, rng: () => number): ActionDef | null {
-  const groups = stance.groups.map(g => g.filter(available)).filter(g => g.length);
-  if (!groups.length) return null;
-  return pick(pick(groups, rng), rng);
+/** Within a stance: the first action, in the order written, that is available. */
+export function pickAction(stance: StanceDef, available: (a: ActionDef) => boolean): ActionDef | null {
+  return stance.actions.find(available) ?? null;
 }
 
 /**
@@ -208,11 +198,11 @@ export function choose(
   rng: () => number,
 ): { stance: StanceDef; action: ActionDef } | null {
   const stance = pick(nextStances(p, last), rng);
-  const action = pickAction(stance, available, rng);
+  const action = pickAction(stance, available);
   if (action) return { stance, action };
   // Safety net: act as if it just Recovered.
-  const open = nextStances(p, null).filter(s => s.groups.some(g => g.some(available)));
+  const open = nextStances(p, null).filter(s => s.actions.some(available));
   if (!open.length) return null;
   const again = pick(open, rng);
-  return { stance: again, action: pickAction(again, available, rng)! };
+  return { stance: again, action: pickAction(again, available)! };
 }

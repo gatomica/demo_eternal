@@ -133,16 +133,13 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
       return (f as Enemy).intent.type === "block";
     },
     /**
-     * A Maneuver dodges like a Block blocks: every attack from the back line, plus the attack of
-     * its own target, even from the front line. Other front-line melee still hits. Ranged attacks
-     * can always be dodged. (An enemy's target is you when it closes in.)
+     * A Maneuver dodges every attack, whatever its line, its target or its range. (Only you attack
+     * enemies, so an enemy's Maneuver dodges you.)
      */
     isDodging: (f, attacker) => {
       if (t.out.has(f.id)) return false;
-      const ranged = t.isRanged(attacker);
-      if (f === p) return act?.type === "maneuver" && (ranged || locked.get(attacker.id) === "back" || act.target === attacker.id);
-      const e = f as Enemy;
-      return e.intent.type === "maneuver" && attacker === p && (ranged || locked.get(e.id) === "back" || e.intent.dir === "advance");
+      if (f === p) return act?.type === "maneuver";
+      return (f as Enemy).intent.type === "maneuver" && attacker === p;
     },
   };
   return t;

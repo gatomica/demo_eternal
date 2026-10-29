@@ -8,7 +8,7 @@ import { CombatScreen } from "../combat/CombatScreen";
 import { ENEMY_KINDS, type KindId, type StatusToggle } from "../core/bestiary";
 import { nextStances } from "../core/patterns";
 import type { CombatState } from "../core/types";
-import { applyShow, LINE_TOGGLE, STAGGERED, VIEWER_KINDS, viewerActions, viewerFight, type ViewerShow } from "./viewerModel";
+import { applyShow, figureAngleOf, LINE_TOGGLE, MODEL, MODEL_ANGLES, STAGGERED, VIEWER_KINDS, viewerActions, viewerFight, type ViewerShow } from "./viewerModel";
 import { cycle, useKeys } from "../ui/input";
 import { Picker } from "../ui/Picker";
 
@@ -117,22 +117,33 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
       <div className="viewer-section">
         <span className="picker-label">Stance</span>
         <div className="picker-options">
-          {[...kind.pattern.stances.map(st => st.name), STAGGERED].map(name => (
+          {[...kind.pattern.stances.map(st => st.name), STAGGERED, MODEL].map(name => (
             <button key={name} className="chip" aria-pressed={name === show.stance} onClick={() => setShow(prev => ({ ...prev, stance: name, action: undefined, next: undefined }))}>
               {name}
             </button>
           ))}
         </div>
       </div>
+      {show.stance === MODEL ? (
+        <div className="viewer-section">
+          <span className="picker-label">Angle</span>
+          <div className="picker-options">
+            {MODEL_ANGLES.map(a => (
+              <button key={a.id} className="chip" aria-pressed={(show.angle ?? "front34") === a.id} onClick={() => setShow(prev => ({ ...prev, angle: a.id }))}>
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
       <div className="viewer-section">
         <span className="picker-label">Actions from this stance</span>
         <div className="picker-options">
           {viewerActions(kindName, shown, show.stance).flatMap(({ action: a, available, fixed }) => [
             <button
               key={a.name}
-              className="chip viewer-action"
-              disabled={!available}
-              title={available ? `Play ${a.name}` : `Not available: needs ${a.needs.join(", ")}`}
+              className={`chip viewer-action${available ? "" : " viewer-unmet"}`}
+              title={available ? `Play ${a.name}` : `Play ${a.name} anyway (in a fight it needs ${a.needs.map(n => `*${n}`).join(", ")})`}
               onClick={e => { e.currentTarget.blur(); play(a.name); }}
             >
               ▶ {a.name} <span className="viewer-kind">{fixed ? "fixed rule" : a.type}</span>
@@ -142,8 +153,7 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
               ? [
                   <button
                     key={`${a.name}-flinch`}
-                    className="chip viewer-action"
-                    disabled={!available}
+                    className={`chip viewer-action${available ? "" : " viewer-unmet"}`}
                     title={`Play ${a.name}, broken by a blow`}
                     onClick={e => { e.currentTarget.blur(); play(a.name, true); }}
                   >
@@ -154,6 +164,7 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
           ])}
         </div>
       </div>
+      )}
     </aside>
   );
 
@@ -164,6 +175,7 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
       panel={panel}
       playSignal={playSignal}
       attackOnPlay={!!show.interrupt}
+      figureAngle={show.stance === MODEL ? figureAngleOf(show.angle ?? "front34") : undefined}
       onTurnPlayed={afterTurn}
       onRetry={onRetry}
       onChangeLoadout={onBack}

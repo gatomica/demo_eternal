@@ -3,7 +3,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Variant } from "../core/bestiary";
-import type { ArmorTier, WeaponTier } from "../core/types";
+import type { ArmorTier, Side, WeaponTier } from "../core/types";
 import { type Cam, ease, figureBox, HORIZON, lerpAngle, lerpCam, lerpVec, NEAR, planningCamera, project, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, type Vec } from "./camera";
 import { ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
 import type { Pt } from "./geom";
@@ -18,6 +18,14 @@ import type { CandleArm, WardenPoseName } from "../warden/skeleton";
 export interface SceneFigure {
   id: string;
   view: "front" | "back";
+  /** Seen straight on, not at a 3/4 angle, and so not mirrored (the Model viewer). */
+  straight?: boolean;
+  /** An enemy, whichever way it's seen. */
+  foe?: boolean;
+  /** The hand that holds its weapon (default right). */
+  hand?: Side;
+  /** Label its hands and feet R and L (the Model viewer's Model stance). */
+  sides?: boolean;
   pose: PoseName;
   weapon: WeaponTier;
   armor: ArmorTier;
@@ -49,6 +57,9 @@ export interface SceneFigure {
   label: string;
   onPick: () => void;
 }
+
+/** Enemies seen from the front face left, so their drawing is mirrored (unless seen straight on). */
+const isMirrored = (f: SceneFigure) => f.view === "front" && !f.straight;
 
 interface Tween<T> { from: T; to: T }
 
@@ -196,9 +207,9 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
       const i = sources.length;
       sources.push({ id, at, seen, kindle: IGNITE.kindle + rand(ignite.seed, i) * 1200, draw: IGNITE.draw + rand(ignite.seed + 1, i) * 1400 });
     };
-    for (const { f, box } of placed) if (f.flame) add(f.id, toScreen(box, flameOf(f.pose), f.view === "front"), true);
+    for (const { f, box } of placed) if (f.flame) add(f.id, toScreen(box, flameOf(f.pose), isMirrored(f)), true);
     for (const { pr, box } of props) add(pr.id, toScreen(box, PROP_FLAME[pr.kind], !!pr.flip), true);
-    const [hx, hy] = toScreen(igniter.box, handOf(igniter.f), igniter.f.view === "front");
+    const [hx, hy] = toScreen(igniter.box, handOf(igniter.f), isMirrored(igniter.f));
     const far = Math.max(w, h) * 0.8;
     for (let k = 0; k < 10; k++) {
       const a = (k / 10) * Math.PI * 2 + rand(ignite.seed + 2, k);
@@ -239,7 +250,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
           }}
         >
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            <StickFigure view={f.view} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} encased={f.encased} />
+            <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} encased={f.encased} />
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}
           </div>
@@ -247,7 +258,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
       ))}
       {/* The waxed remains burn as candles once the arena is lit. */}
       {placed.filter(({ f }) => f.candle).map(({ f, box }) => {
-        const [fx, fy] = toScreen(box, flameOf(f.pose), f.view === "front");
+        const [fx, fy] = toScreen(box, flameOf(f.pose), isMirrored(f));
         const sz = box.h * 0.13;
         return (
           <LoneFlame key={`candle-${f.id}`} className="arena-candle-flame" at={[fx, fy]} sz={sz} zIndex={1001 - Math.round(box.depth * 10)} />
@@ -257,7 +268,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
       {dark?.flame && (() => {
         const t = placed.find(x => x.f.id === dark.flame);
         if (!t) return null;
-        const [fx, fy] = toScreen(t.box, flameOf(t.f.pose), t.f.view === "front");
+        const [fx, fy] = toScreen(t.box, flameOf(t.f.pose), isMirrored(t.f));
         // The size of the figure's own flame (the Warden's candle is a little smaller), so it
         // hands over to it seamlessly as the light comes back.
         const sz = t.box.h * (lookOf(t.f.variant)?.loneFlame ?? 0.16);
@@ -268,8 +279,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
       {usurpTrail && (() => {
         const a = placed.find(x => x.f.id === usurpTrail.from), b = placed.find(x => x.f.id === usurpTrail.to);
         if (!a || !b) return null;
-        const from = toScreen(a.box, flameOf(a.f.pose), a.f.view === "front");
-        const hand = toScreen(b.box, handOf(b.f), b.f.view === "front");
+        const from = toScreen(a.box, flameOf(a.f.pose), isMirrored(a.f));
+        const hand = toScreen(b.box, handOf(b.f), isMirrored(b.f));
         // Arching up over him: the control point well above both.
         const ctl: Pt = [(from[0] + hand[0]) / 2, Math.min(from[1], hand[1]) - b.box.h * 0.22];
         const N = 28, w = b.box.h * 0.05;
@@ -300,7 +311,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
       })()}
       {ignite && igniter && (() => {
         const t = igniteT;
-        const [hx, hy] = toScreen(igniter.box, handOf(igniter.f), igniter.f.view === "front");
+        const [hx, hy] = toScreen(igniter.box, handOf(igniter.f), isMirrored(igniter.f));
         const drawn = sources.filter(src => t >= src.draw).length / Math.max(1, sources.length);
         const flame = (key: string, at: Pt, sz: number, cls = "") => <LoneFlame key={key} className={`scene-lone-flame ${cls}`} at={at} sz={sz} />;
         return (
@@ -352,7 +363,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
           // A melee blow into the ground: no fire, just a small white ring kicked out flat across
           // the floor from the fist.
           const o = pr.origin;
-          const ox = o ? (thrower!.f.view === "front" ? 100 - o[0] : o[0]) / 100 : 0.5;
+          const ox = o ? (isMirrored(thrower!.f) ? 100 - o[0] : o[0]) / 100 : 0.5;
           const ax = a.x + a.w * ox, ay = o ? a.y + (a.h * o[1]) / 120 : a.y + a.h * 0.95;
           return (
             <div key={pr.key}>
@@ -376,7 +387,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrail, arena
           // flames there, dying away around the sides, nothing behind him and nothing inside.
           // It all comes from his fist striking the ground (or his feet, without one).
           const o = pr.origin;
-          const ox = o ? (thrower!.f.view === "front" ? 100 - o[0] : o[0]) / 100 : 0.5;
+          const ox = o ? (isMirrored(thrower!.f) ? 100 - o[0] : o[0]) / 100 : 0.5;
           const ax = a.x + a.w * ox, ay = o ? a.y + (a.h * o[1]) / 120 : a.y + a.h * 0.95;
           const bx = tx;
           const fx = o ? ax : ax + (bx - ax) * 0.2, fy = o ? ay - a.h * 0.12 : (a.y + a.h * 0.45) + (ty - (a.y + a.h * 0.45)) * 0.2;

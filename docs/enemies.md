@@ -18,7 +18,7 @@ Tutorial-area enemy roster and boss, as agreed in brainstorming. Items marked **
 
 **Stances are menus.** During planning, an enemy's stance shows the set of actions it might take. Reading the stance narrows the options; knowing what it just did narrows them further.
 
-**Every choice is even.** Whenever an enemy picks from a set of options (a stance, a kind of action, an action within a kind), each option is equally likely. Nothing weights the odds, not even its Fatigue.
+**Stances are random, actions are not.** The next stance is picked evenly among those the last action leads to; nothing weights the odds, not even Fatigue. Within the stance, the enemy takes the **first action in its list that it can take** (see Picking), so what it does depends on its state and yours, never on chance.
 
 **Enemies can overreach.** Unless a kind is written with an explicit restriction, an enemy may pick any action, including an attack it can't afford, which staggers it.
 
@@ -33,8 +33,9 @@ Tutorial-area enemy roster and boss, as agreed in brainstorming. Items marked **
   - **A Maneuver has a target.** It pulls its target closer (front line) and pushes its *opponents* away (back line), never its allies. Falling back is a Maneuver with no target. An enemy's Maneuver either closes in on you (you're its target) or backs off.
   - **Distance is settled per enemy, between you and it.** If only one of you Maneuvered, that one decides. If you both did and agree, it happens. If one wants closer and the other farther, both play the move but the distance stays.
   - **A melee attack closes in on its target only if the target didn't Maneuver.** You can't drag in an enemy that's backing off, and an enemy can't follow you when you fall back, even if its attack hits you.
-  - **Dodging works like Blocking:** a Maneuver dodges every attack from the back line, plus its own target's attack even from the front line. Every other front-line melee attack hits. Ranged attacks are always dodged.
+  - **Dodging is global (built):** a Maneuver dodges every attack on it, from either line, whoever it targets, melee or ranged. A retreating dodge goes back and away from the attacker; an advancing one steps past the attack, to the attacker's side of the screen. The dodge starts late in the attacker's approach (about 0.14 s in), timed to be clear just as the blow arrives, so the target is already out of the way when the attack animation lands; its pose changes only when it starts to dodge.
   - **Cost:** a Maneuver itself is free, so even heavy builds can reposition on safe turns. A dodged attack does no damage and becomes Fatigue instead: (1 + armor weight + weapon weight) / 16 of its damage, by **true weight** (what you carry, whatever the action).
+  - **Maneuver sprites (built):** a unit that dodged an attack this turn holds its dodge pose, then takes the sprite of its next stance as the repositioning step (its Maneuver) starts, and walks to its new spot in that. One that didn't dodge takes its Maneuver sprite from the repositioning step.
 
     | Weights | None / Baseline | Light | Normal | Heavy |
     |---|---|---|---|---|
@@ -61,9 +62,9 @@ Every enemy is a loop: **stance** (shown to you) → **action** (hidden, unless 
 - Each **action** lists the stances it can lead to next turn.
 - Actions come in three **kinds**: **Attack**, **Defense** (Block or Maneuver) and **Rest**. Each named action also carries its own numbers (weight tier for attacks and Blocks, ranged or melee, special effects).
 
-**Picking (the global rule, all even):**
+**Picking (the global rule):**
 1. Next stance: evenly among the stances the last action leads to.
-2. Within the stance: first a kind, evenly among the kinds it offers; then an action of that kind, evenly.
+2. Within the stance: the **first action in the order written** whose conditions hold. Nothing is random here; write an action with no conditions last, as the fallback.
 
 **Recover** is the turn after being staggered, or after reviving. It is not the same as a voluntary Rest.
 - `Recover >` stances are also the stances an enemy can **open a fight** with.
@@ -81,15 +82,16 @@ Effects tied to an action (like the Warden becoming Sealed after Clutch Arm) als
 
 **Notation.** Enemies are written in this notation in the game's code (one file per kind in `src/core/kinds/`) and parsed when the game loads, so the doc and the game read the same.
 - `A / B > Stance > X / Y` means: after action A or B, the enemy can take this stance; from it, it can do X or Y.
-- `/` separates kinds of action; `,` separates actions of the same kind.
-- So `> Rising Flail / Wax Guard, Stride` is Attack 50%, Defense 50% (Wax Guard or Stride, 25% each).
+- A stance's actions are an ordered list (`,` or `/`, they mean the same): the first available one is taken. `> Stride, Wax Guard, Rising Flail` is Stride if it can, else Wax Guard, else Rising Flail.
 - `All >` means the stance can follow any action. `Recover` can be listed like an action.
 - Actions are declared first, one per line: `Name: kind, modifiers`.
   - Kinds: `attack`, `block`, `maneuver`, `rest`.
   - Weight: `baseline`, `light`, `normal`, `heavy` (default: the enemy's weapon).
   - `ranged`.
   - **Every Maneuver says its direction:** `advance` (closes in on you; you're its target), `retreat` (backs off), or `by-line` (closes in from the back line, backs off from the front).
-  - `*Condition`: only available while that condition holds (e.g. `*Sealed`).
+  - `*Condition`: only available while that condition holds (e.g. `*Sealed`); `*!Condition` while it doesn't. Several must all hold.
+    - Common to every enemy: `*Hurt` (below half health), `*Tired` (Fatigue above half its health), `*Close` (front line), `*Far` (back line), `*PlayerStaggered`, `*PlayerReviving`, `*PlayerWaxed`.
+    - Its own statuses work by name (`*Sealed`, `*Phase2`...), and a kind can write conditions of its own.
   - `#tag`: a rule the action triggers, e.g. `#waxing` (a direct hit leaves the target Waxed).
   - `//` starts a comment.
 
@@ -101,15 +103,17 @@ stances:
   Stride > Flail Clutched > Flail Swing / Chain Guard
 ```
 
-- **The parser refuses broken patterns** when the game loads: an unknown action name (typos), a Maneuver without a direction, mixed kinds after a `,`, the same kind in two `/` groups, no stance coming from Recover, or an action that leads to no stance (a dead end).
-- **The game also refuses broken kinds** when it loads: a `*Condition` with no rule written for it, a pose for a stance or action that isn't in the pattern, a pose that doesn't exist, or a fixed-rule action that isn't in the pattern.
+- **The parser refuses broken patterns** when the game loads: an unknown action name (typos), a Maneuver without a direction, an action listed twice in a stance, no stance coming from Recover, or an action that leads to no stance (a dead end).
+- **The game also refuses broken kinds** when it loads: a `*Condition` that doesn't exist, a pose for a stance or action that isn't in the pattern, a pose that doesn't exist, or a fixed-rule action that isn't in the pattern.
+
+**(proposal) Restoring variety with the new picking.** Existing patterns are untouched, so every stance with several actions is now deterministic (the Warden's, for one). Ideas, not built:
+- Warden, Wax Arm Back: `Flame Blast *Phase2, Wax Punch`.
 
 ### Sleepwalker in this format
 
-Action names are placeholders **(proposal)**; the user will name them.
+See section 6 for its stances and actions.
 
-| Action | Kind |
-|---|---|
+---|---|
 | Slash | Attack |
 | Parry | Block |
 | Step | Maneuver |
@@ -146,8 +150,8 @@ Sleepwalkers that wardens have tried to soothe back to sleep. Always **on their 
 | Scratch | Attack | Baseline |
 | Hurl Wax | Attack | Light, ranged |
 | Brace | Block | Baseline (no bonus Resistance) |
-| Drag Forward | Maneuver | Advance |
-| Slither Back | Maneuver | Retreat |
+| Drag Forward | Maneuver | Advance; only when far (`*Far`) |
+| Slither Back | Maneuver | Retreat; only when close (`*Close`) |
 | Clutch Flame | Rest | |
 
 ```
@@ -158,7 +162,7 @@ All > Crawling          > Drag Forward, Slither Back
 All > Cradle Flame      > Clutch Flame
 ```
 
-- Each stance 20%. Crawling is the only one with two actions: Drag Forward or Slither Back, 10% each. It attacks even when the attack will stagger it.
+- Each stance 20%. Crawling is the only one with two actions, picked by distance **(built)**: Drag Forward when far, Slither Back when close. It attacks even when the attack will stagger it.
 - **Looks (built):** kneeling, shins bound in wax and laid flat behind, head a lump of wax (no face). Hands Raised: both hands up, clawing. Wax on Hand: leaning back, a wax lump held behind the shoulder. Cowering Sideways: twisted away, arms over the head. Crawling: on its hands. Cradle Flame: a small flame cupped at the chest; Clutch Flame folds over it. Staggered: toppled forward onto its head.
 - On the map it crawls slowly after you on its hands once it sees you.
 - Assumed (unconfirmed): Scratch is the "Lunge" in Hands Raised; Hurl Wax has no extra effect.
@@ -172,10 +176,38 @@ All > Cradle Flame      > Clutch Flame
 
 ## 6. The Sleepwalker — standard enemy (built)
 
-Reused across the whole game.
+Reused across the whole game. A hunched, desperate wretch dragging a weapon too heavy for it: its own poses, nothing like the player's trained stances. It shows only its stance while you plan; the action is revealed as the turn plays out, and distance and exhaustion decide it (first available action, in order).
 
-| Stance | Look | Can lead to | Safe answer | Greedy answer |
-|---|---|---|---|---|
+**Gear:** a normal weapon and, for now, no armor (some may wear armor later); it drops the weapon it carries.
+
+```
+actions:
+  Weapon Strike: attack                 // whatever weapon it carries
+  Parry:         block, *Close
+  Charge:        maneuver, advance, *Far
+  Backstep:      maneuver, retreat, *Close
+  Despair:       rest
+stances:
+  All > Charging   > Charge, Weapon Strike
+  All > Struggling > Backstep, Despair
+  All > Guarded    > Parry, Weapon Strike
+```
+
+| Stance | Look | Does | Safe answer |
+|---|---|---|---|
+| **Charging** | Head thrust out, weapon trailing behind, free hand grasping | Charge if you're far, else Weapon Strike | Far: nothing is coming at you but the Charge. Close: Block or dodge the strike |
+| **Struggling** | Hunched and swaying, a hand pressed to the head | Backstep if you're close, else Despair (Rest) | Close: it backs off. Far: it rests, a free hit |
+| **Guarded** | Shoulders up, head tucked, weapon braced across the body | Parry (Block) if you're close, else Weapon Strike | Close: it blocks, so don't attack into it. Far: it comes at you |
+| **Staggered** | Kneeling on one knee (the right knee raised, the left shin laid back up the screen), hunched right over and dejected, arms limp out to his sides, eyes on the ground | Forced Rest | Free hit |
+
+**Odds (built):** each stance a third of the time; the action follows from the situation, never chance.
+
+**Looks (first drafts, to tune with the user):** Idle: slumped, the weapon's tip dragging. Weapon Strike: hauled overhead in both hands, then a cross strike, the weapon swept down across the body to end low on the far side (with the swing trail). Parry: braced wide, the weapon swatted out. Charge: a stumbling lunge, a foot kicked up. Backstep: recoiling, weapon thrust out, free arm flailing. Despair: sinking, both hands clutching the head, the weapon slipping to the ground. Staggered and flinch still use the generic poses.
+
+**How it plays:**
+- First playtest of the old random version: far more engaging with the uncertainty, but very few safe turns. To be re-playtested now that actions are conditional.
+
+---|---|---|---|---|
 | **Ready** | En garde: knees bent, blade levelled at you | Attack, Block, Maneuver | Block | — (attacking risks a block that sends damage back, or a dodge; resting gets punished) |
 | **Intimidating** | Open stance | Rest, Attack | Block | Attack (catches the rest, trades if it attacks; weapon speed decides) |
 | **Cautious** | Low, leaning back, blade held crosswise before the face | Rest, Block, Maneuver | Rest (it never attacks) | Attack (hoping to catch its rest) |
@@ -211,7 +243,7 @@ Reused across the whole game.
 
 **Poses fine-tuned with the user** (in the model viewer): Idle, Wax Shoulder In, Wax Arm Back, Flail Spinning Behind; actions Fan Flames (swat + flat fan of flame flying through you), Flame Blast (kneels and punches the ground; a near-straight flame-coloured trail follows the fist; the fireball flash bursts at the impact, then the shockwave ring of tall flames), Wax Punch (the same kneeling punch with the cold wax fist and a wax-coloured trail; melee; a small white impact ring where it lands); stance Kneeling (flail hand on the raised knee, handle up; wax hand at his side holding the chain, head hanging below it; the cloak runs flat over the raised thigh, then drops); Clutch Arm (its own rest pose: hunched, the wax fist gripping the flail head and pulling it up, then straight into Wax Shoulder In, flame out unless in phase 2, with a wide wax trail from the old head position through his wax hand to the flail head); Wax Guard (holds whatever stance he's in; only as a blow lands does he swat it away with Fan Flames' backhand, a wax trail and no fire, then settles into his next stance; in the Model viewer, playing a Block makes the player attack so there's something to block); Chain Guard (as the blow lands: braced, the flail hand holding the handle up in front, the wax hand gripping the chain pulled taut diagonally across his front, the head swinging below the fist). All Blocks and Maneuvers, for every fighter, hold their stance until the blow lands, then block or dodge; a block jolts both fighters apart and they stay there; a dodge, seen from the camera, steps 1.5 m back and 1.5 m across the screen (away from the attacker) when retreating, 1.2 m across when closing in, and keeps its maneuver pose to the end of the turn, walking off in it; Stride (his back to you, spun on his right leg and crouched low, the wax arm trailing, the flail arm leading the spin with the flail flung out level behind him, just the tip of his beak past the hood); stance Flail Clutched (Wax Arm Back, but the wax fist has hauled the flail up by its chain, crossing over his cloak, the head hanging below); Flail Swing (Wind Up Flail's pose, but its first spin trail is the blow, a level sweep across his front through you, then two spins behind him into Flail Spinning Behind); Flail Spinning Overhead (handle up and away from you, the flail a level blur of chains above him); Rising Flail (hips nearly front-on, shoulders twisted flail-first, leaning back onto his left leg, Wax Arm Back's head; first trail swung up from below behind his cloak, then two level spins overhead, snapping to Flail Spinning Overhead on the third); Flail Slam (Kneeling's body, Wax Arm Back's head, wax elbow above the shoulder, flail arm down and back over his torso, the flail slanting along the floor, a trail bringing the head down from overhead and a white impact shockwave where it lands); Arm Over Chest (wax arm folded up across his chest, elbow low; flail held a little up with the handle almost level, the flail hanging in the air). Maneuvers: the maneuver pose only comes with a dodge or the actual move (hit while holding the stance, it stays), and is kept through the walk to the new spot. Usurp Flame (fine-tuned): a scene plays before the turn's final step: the light dies (0.9 s) as the camera settles between him and his target, only the target's flame still burning (the flame a waxed ally holds, or a candle above the player's head); he springs from a low Wax Arm Back crouch (looking at the flame) and dashes at it, wax hand raised, the camera closing in on both (0.6 s); black (0.5 s); the light returns (1 s) on him in Idle, his flame lit, as a flame trail streams from the target, arching over him into his hand; then the turn's repositioning plays. The dash's reaching hand is held low (a waxed-staggered player is about a waxed sleepwalker's height). A Rest broken by a blow shows the kind's flinch pose (flinch / w-flinch / wd-flinch) from the hit to the end of the turn. Staggered in phase one, his flame is out; whenever it goes out (stagger, Clutch Arm, Flame Blast) a puff of smoke leaves his hand, Wind Up Flail (its own rest pose: three timed spin trails, then straight into Flail Spinning Behind).
 **Still first-pass:** the staggered pose.
-**Resting keeps its stance** (done): an enemy that is going to Rest keeps its stance pose until the Rest actually happens, then shows its rest pose (if it has one). A Rest that gets interrupted never leaves the stance.
+**Rest windup (built):** an enemy that is going to Rest takes its Rest's **windup pose** from the start of the turn (if its action has one; otherwise it holds its stance), to show its intent, until the Rest actually happens; then it shows its rest pose (if it has one, 0.3 s) and settles into the next stance. A Rest that is interrupted never leaves the windup: it flinches out of it as the blow lands. The flinch is the windup knocked apart by the hit (the Sleepwalker's: thrown back off balance and hunched over, one foot off the ground, the hands torn off his head, held just clear of it). **Block windup (built):** a Block works the same way: from the start of the turn the unit takes its Block's windup pose (if its action has one; otherwise it holds its stance), and only takes its blocking pose as the blow lands. The Sleepwalker's Parry braces in Guarded's crouch with the blade raised steeper and the left hand on its middle. The Depraved Sleepwalker's Despair winds up in Struggling's pose with both hands clutching the sides of his head. **Minimum attack phase (built):** the attack phase of a turn lasts at least 0.5 s from the moment you commit, and everything that happens after the attacks (a Maneuver, a Rest...) waits for it, so a turn with no attacks still gives a moment to see what everyone is about to do, such as a Rest's windup pose (the model viewer too). The windup pose shows only while the turn plays, before the Rest goes through; the Rest animation itself (its rest pose) then starts instantly and lasts 0.5 s.
 
 **Built since:** wax showing on the player (caked, then encased when staggered), the encasing of the player and of waxed allies, the arena candles, his two health bars.
 
@@ -223,9 +255,9 @@ Reused across the whole game.
 
 **Later:** Overflow into Eternity on healing (the healing item and revives both heal to full), after Eternal weapons exist.
 
-**Built since:** Slither Back has its own sprite (sat down, dragging itself backwards on its rear, hands planted behind, bound legs out toward you); a clean hit (not blocked or dodged) flashes the target red; a Maneuver hit anyway (front line) keeps its stance as it's hit, only taking its maneuver sprite on a successful dodge or for the repositioning. An attack that leaves its user staggered (or down) still plays out in full (a strike that spins on into its next stance, like Rising Flail, still snaps to the pose it ends in, flame unchanged), and only drops to the staggered pose once its step is over.
+**Built since:** Slither Back has its own sprite (sat down, dragging itself backwards on its rear, hands planted behind, bound legs out toward you); a clean hit (not blocked or dodged) flashes the target red; a Maneuvering unit holds its stance until it dodges or repositions (a Maneuver now dodges everything, so it is never hit). An attack that leaves its user staggered (or down) still plays out in full (a strike that spins on into its next stance, like Rising Flail, still snaps to the pose it ends in, flame unchanged), and only drops to the staggered pose once its step is over.
 
-**Tools built for this:** a **model viewer** (main menu) to pick an enemy, flip its statuses, set its stance and play any action from it; ranged attacks throw **projectiles** across the field; Rests can have their **own pose** for when they go through (shown briefly, 0.3 s, then the next stance).
+**Tools built for this:** a **model viewer** (main menu) to pick an enemy, flip its statuses, set its stance and play any action from it; a **Model stance** shows it in a T-pose from four angles (3/4 front, front, 3/4 back, back), drawn from the shared rig (every figure's bones have the same true lengths, with per-pose adjustments); its hands and feet are tagged R and L, so asymmetric designs and weapon hands (right by default, per kind) can be checked; ranged attacks throw **projectiles** across the field; Rests can have their **own pose** for when they go through (shown briefly, 0.3 s, then the next stance).
 
 ### The waxed escort (built)
 - The fight opens with **two waxed** on his side (in front), the Warden behind them.
@@ -373,4 +405,4 @@ No dead ends in either state: every stance always has an available action, and e
 ## 9. Open questions
 
 - **Player health:** 20 everywhere now (was 40), so the map's waxed (12) and sleepwalkers (20) hit relatively harder. Revisit after playtesting.
-- **Sleepwalker action names** (Slash, Parry, Step, Catch Breath are placeholders).
+- **Sleepwalker** redesigned (built): its own stances, actions and poses (section 6); staggered and flinch poses still generic.

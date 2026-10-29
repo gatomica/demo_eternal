@@ -11,11 +11,30 @@ export const FORCED_TURN_MS = 900;
 /** How long each step of a turn's playback stays on screen (after the impact, for attacks). */
 export const STEP_MS = 800;
 
-/** How long a Rest's own pose shows before the fighter settles into its next stance. */
+/** How long a strike pose that spins on into the next stance shows before it hands off (its trails still fading). */
 export const REST_POSE_MS = 300;
+
+/**
+ * How long a Rest's own animation (its rest pose) shows, from the moment the Rest goes through, before the fighter
+ * settles into its next stance. It starts instantly: the windup pose only shows before it, while the turn plays.
+ */
+export const REST_ANIM_MS = 500;
+
+/**
+ * The attack phase of a turn lasts at least this long (from the moment you commit): everything that happens after the
+ * attacks (a Maneuver, a Rest...) waits for it. A turn with no attacks therefore still gives a moment to see what
+ * everyone is about to do (a Rest's windup pose, a Maneuver's stance) before it happens.
+ */
+export const MIN_ATTACK_PHASE_MS = 500;
 
 /** How long an attacker takes to close in on its target before the blow lands. */
 export const APPROACH_MS = 320;
+
+/**
+ * How far into an attacker's approach a dodge starts: late, so the target gets clear in the last moments before the
+ * blow arrives, and only then changes to its dodge pose.
+ */
+export const DODGE_DELAY_MS = 140;
 
 /** How long a clean hit takes to knock its target back. */
 export const KNOCK_MS = 260;
@@ -34,7 +53,7 @@ export const KNOCKBACK = 0.45;
 /** How far a Block jolts the blocker and the attacker apart. */
 export const BLOCK_PUSH = 0.3;
 
-/** How far a dodge carries someone: back if retreating, sideways if closing in. */
+/** How far a dodge carries someone: back (and away) if retreating, sideways past the attack if closing in. */
 export const DODGE_BACK = 1.5;
 
 export const DODGE_SIDE = 1.2;
@@ -66,11 +85,21 @@ export interface Playback {
   action: PlayerAction | null;
 }
 
-const isAttackStep = (st: Step | undefined) => !!st?.events.some(ev => ev.kind === "attack");
+export const isAttackStep = (st: Step | undefined) => !!st?.events.some(ev => ev.kind === "attack");
 
 export const usurpOf = (st: Step | undefined) => st?.events.find((ev): ev is Extract<Step["events"][number], { kind: "usurp" }> => ev.kind === "usurp");
 
 export const phaseTwoOf = (st: Step | undefined) => st?.events.find((ev): ev is Extract<Step["events"][number], { kind: "phase" }> => ev.kind === "phase" && ev.phase === 2);
+
+/**
+ * The phase step `index` starts in, `elapsed` ms into the turn: the first step after the attacks holds ("approach",
+ * nothing happening yet) until the attack phase has lasted MIN_ATTACK_PHASE_MS.
+ */
+export function phaseAt(steps: Step[], index: number, elapsed: number): Playback["phase"] {
+  const phase = phaseFor(steps[index]);
+  const afterAttacks = steps.slice(0, index).every(isAttackStep);
+  return phase === "impact" && afterAttacks && elapsed < MIN_ATTACK_PHASE_MS ? "approach" : phase;
+}
 
 export const phaseFor = (st: Step | undefined): Playback["phase"] => (phaseTwoOf(st) ? "ignite" : usurpOf(st) ? "usurp" : isAttackStep(st) ? "approach" : "impact");
 
@@ -126,6 +155,8 @@ interface TurnIndex {
   dodge: Map<string, number>;
   /** The first step where a blow lands on it cleanly. */
   hit: Map<string, number>;
+  /** The step where its Maneuver happens (the repositioning), moving it or not. */
+  maneuver: Map<string, number>;
   /** Its Rest was broken by a blow. */
   interrupted: Set<string>;
   /** The step where it takes a flame (Usurp Flame). */
@@ -140,7 +171,7 @@ interface TurnIndex {
 
 export function indexTurn(steps: Step[]): TurnIndex {
   const ix: TurnIndex = {
-    strike: new Map(), rest: new Map(), targeted: new Map(), dodge: new Map(), hit: new Map(),
+    strike: new Map(), rest: new Map(), targeted: new Map(), dodge: new Map(), hit: new Map(), maneuver: new Map(),
     interrupted: new Set(), usurp: new Map(), backUp: new Map(), phaseTwoBy: new Map(), phaseTwo: -1,
   };
   const first = (m: Map<string, number>, id: string, i: number) => { if (!m.has(id)) m.set(id, i); };
@@ -153,7 +184,10 @@ export function indexTurn(steps: Step[]): TurnIndex {
         ix.targeted.set(ev.target, hits);
         if (ev.result === "dodged") first(ix.dodge, ev.target, i);
         if (ev.result === "hit") first(ix.hit, ev.target, i);
-      } else if (ev.kind === "maneuver") first(ix.dodge, ev.who, i);
+      } else if (ev.kind === "maneuver") {
+        first(ix.dodge, ev.who, i);
+        first(ix.maneuver, ev.who, i);
+      }
       else if (ev.kind === "rest") {
         if (ev.result === "rested") first(ix.rest, ev.who, i);
         if (ev.result === "interrupted") ix.interrupted.add(ev.who);

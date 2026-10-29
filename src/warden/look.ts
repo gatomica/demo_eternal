@@ -11,8 +11,8 @@ export const WARDEN_LOOK: VariantLook = {
   figure: {
     owns: s => "ball" in s,
     shadow: { rx: 28, ry: 3.2 },
-    draw: ({ s, front, arm, lingerFrom, smokeAgo, phase2Look, flailFire }) =>
-      createElement(WardenFigure, { s: s as WardenSkeleton, front, arm: arm ?? "lit", lingerFrom, smokeAgo, phase2Look, flailFire }),
+    draw: ({ s, front, straight, sides, arm, lingerFrom, smokeAgo, phase2Look, flailFire }) =>
+      createElement(WardenFigure, { s: s as WardenSkeleton, front, straight, sides, arm: arm ?? "lit", lingerFrom, smokeAgo, phase2Look, flailFire }),
   },
   candleArm: true,
   igniteScene: true,

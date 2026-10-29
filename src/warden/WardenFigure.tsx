@@ -13,14 +13,19 @@
  * front at a 3/4 angle while facing left, his right arm is the far one and the candle arm the
  * near one, so the flail sits behind his body and the candle arm in front of it.
  */
-import { add, lerp, limb, type Pt } from "../render/geom";
+import { add, lerp, limb } from "../render/geom";
 import { Beard, CandleArmEl, ChainInHand, Cloak, Flail, HeadInHand, Hood, SmokePuff, Stain } from "./parts";
-import { type CandleArm, FlailFire, ripArmpit, sweepAt, WARDEN_POSES, type WardenPoseName, type WardenSkeleton } from "./skeleton";
+import { type CandleArm, FlailFire, straightOn, sweepAt, WARDEN_POSES, wardenMounts, type WardenPoseName, type WardenSkeleton } from "./skeleton";
+import { SideTags } from "../render/SideTags";
 import { Burst, FlameTrail, PunchTrail, RewaxTrail, SlamTrail, SpinTrail } from "./trails";
 
-export function WardenFigure({ s, front, arm, lingerFrom, smokeAgo, phase2Look, flailFire }: {
+export function WardenFigure({ s: pose, front, straight, sides, arm, lingerFrom, smokeAgo, phase2Look, flailFire }: {
   s: WardenSkeleton;
   front: boolean;
+  /** Seen straight on (the Model viewer): level shoulders, nothing turned, his arms and legs fitted again. */
+  straight?: boolean;
+  /** Label his hands and feet R and L (the Model stance). */
+  sides?: boolean;
   arm: CandleArm;
   /** The rest pose he has just left: its trails keep fading (he has already moved on). */
   lingerFrom?: WardenPoseName;
@@ -31,28 +36,9 @@ export function WardenFigure({ s, front, arm, lingerFrom, smokeAgo, phase2Look, 
   /** The flail is on fire. */
   flailFire?: boolean;
 }) {
-  const [nx, ny] = s.neck;
-  // Turning his candle side toward you swings that shoulder forward and the flail shoulder back.
-  // The shoulders can twist further than the hips and legs (shoulderTurn).
-  const turn = s.shoulderTurn ?? s.turn ?? 0;
-  // Turned the other way (flail shoulder toward you), the shoulders line up with the camera: the
-  // flail shoulder in front of the torso, the candle shoulder hidden behind it.
-  const away = Math.max(0, -turn);
-  const toward = Math.max(0, turn);
-  const nearShoulder: Pt = [nx - 3 + 9 * toward + away, ny + 4 - toward - 3 * away];
-  const farShoulder: Pt = [nx + 3 - 9 * toward - away, ny + 2 + 3 * away];
-  // Facing you (front view), his right (flail) arm is the far one and the candle arm the near one.
-  // From behind, the shoulders sit either side of his back: the flail one on the side he faces,
-  // the candle one on the side toward you.
-  const back = (k: number): Pt => {
-    const [hx, hy] = s.hip;
-    const len = Math.hypot(hx - nx, hy - ny) || 1;
-    let n: Pt = [-(hy - ny) / len, (hx - nx) / len];
-    if (n[0] > 0) n = [-n[0], -n[1]]; // toward the way he faces
-    return add([nx, ny + 3], n, k);
-  };
-  const flailShoulder = s.backView ? back(6) : front ? farShoulder : nearShoulder;
-  const candleShoulder = s.backView ? back(-6) : s.shoulderAtRip ? ripArmpit(s) : front ? nearShoulder : farShoulder;
+  const s = straight ? straightOn(pose, front) : pose;
+  const turn = straight ? 0 : s.shoulderTurn ?? s.turn ?? 0;
+  const { flailShoulder, candleShoulder } = wardenMounts(s, front, straight);
   const sleeveEnd = lerp(flailShoulder, s.weaponArm.elbow, 0.75);
   // Usually the flail arm is the far one (behind the body) and the candle arm the near one.
   // Turned flail shoulder first, they swap: the candle arm goes behind, the flail arm in front.
@@ -140,6 +126,8 @@ export function WardenFigure({ s, front, arm, lingerFrom, smokeAgo, phase2Look, 
       {s.burst && arm !== "out" && <Burst s={s} kind={s.burst} />}
       {s.swat && <FlameTrail wax width={6} at={sweepAt(s)} />}
       {lingerFrom && WARDEN_POSES[lingerFrom].rewaxTrail && <RewaxTrail from={WARDEN_POSES[lingerFrom]} s={s} fire={arm === "scorched"} />}
+      {/* His flail is in his right hand; the candle arm is his left. */}
+      {sides && <SideTags s={s} hand="right" flip={front && !straight} />}
     </g>
     </FlailFire.Provider>
   );

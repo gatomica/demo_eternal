@@ -10,6 +10,7 @@
   --ok: #8fb48a;
 
   --ink: #ece9f4;        /* stick figure body */
+  --ink-shade: #6b6780; /* the shading on the ribcage */
   --ink-far: #9a97a8;    /* limbs on the far side: darker, never see-through */
   --metal: #b9bccb;      /* blades and plates */
   --grip: #8a6b4a;       /* hafts and handles */
@@ -378,6 +379,12 @@ kbd {
 /* ---------- Stick figure ---------- */
 .figure { width: 100%; height: 100%; display: block; overflow: visible; }
 .fig-limb { fill: none; stroke: var(--ink); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+.fig-ribcage { fill: var(--ink); }
+.fig-rib { fill: var(--ink-shade); }
+/* Debugging, dev server only: the right arm and leg (see StickFigure.tsx). */
+.fig-limb.dbg-far { stroke: #3b82f6; }
+.fig-limb.dbg-lead { stroke: #ef4444; }
+.fig-limb.dbg-both { stroke: #a855f7; }
 .fig-head { fill: var(--ink); }
 .fig-wax-bind { fill: none; stroke: var(--wax); stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
 .fig-wax-head { fill: var(--wax); stroke: color-mix(in srgb, var(--wax) 70%, black); stroke-width: 1; }
@@ -488,7 +495,9 @@ kbd {
 .viewer-change { padding: 4px 10px; font-size: 0.78rem; }
 .viewer-section { display: grid; gap: 6px; padding: 6px 0; }
 .viewer-toggle[aria-pressed="true"] { border-color: var(--accent); }
-.viewer-action:disabled, .viewer-toggle:disabled { opacity: 0.4; cursor: not-allowed; }
+.viewer-toggle:disabled { opacity: 0.4; cursor: not-allowed; }
+/* An action whose conditions don't hold right now: dimmed, but still playable to see how it looks. */
+.viewer-action.viewer-unmet { opacity: 0.5; }
 .viewer-kind { opacity: 0.6; font-size: 0.7rem; margin-left: 4px; }
 
 /* ---------- Projectiles: thrown across the field as a ranged attack lands ---------- */

@@ -4,6 +4,7 @@
 import { createContext } from "react";
 import { add, lerp, type Pt } from "../render/geom";
 import type { Skeleton } from "../render/poses";
+import { type BoneAdjust, fitLimbs, type Mounts, rigged } from "../render/rig";
 
 /** The flail is on fire (phase two, after Clutch Arm): its head burns, its trails are flame. */
 export const FlailFire = createContext(false);
@@ -89,7 +90,7 @@ const pose = (
   body: Limbs,
   flail: { elbow: Pt; hand: Pt; ball: Pt },
   candle: { elbow: Pt; hand: Pt },
-  extra: Partial<Omit<WardenSkeleton, keyof Skeleton | "ball">> = {},
+  extra: Partial<Omit<WardenSkeleton, "head" | "neck" | "hip" | "leadLeg" | "rearLeg" | "weaponArm" | "freeArm" | "weapon" | "ball">> = {},
 ): WardenSkeleton => ({
   ...body,
   weaponArm: { elbow: flail.elbow, hand: flail.hand },
@@ -106,9 +107,11 @@ export type WardenPoseName =
   | "wd-spin-behind" | "wd-spin-over" | "wd-kneel"
   | "wd-swing" | "wd-rising" | "wd-slam" | "wd-punch" | "wd-fan" | "wd-blast"
   | "wd-chain-guard" | "wd-wax-guard" | "wd-stride" | "wd-usurp" | "wd-clutch-arm" | "wd-fallen"
-  | "wd-wound-up" | "wd-wax-swat" | "wd-usurp-dash" | "wd-flinch";
+  | "wd-wound-up" | "wd-wax-swat" | "wd-usurp-dash" | "wd-flinch"
+  | "wd-t" | "wd-t-b";
 
-export const WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
+/** The poses as written; `WARDEN_POSES` (below) is these fitted to the rig. */
+export const RAW_WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
   /* ---------- Stances ---------- */
   // Idle: chest out and leaning back, chin raised, looking down his beak at everyone. Both
   // hands held a little out from his sides; the flail's head rests on the ground beside him.
@@ -314,6 +317,20 @@ export const WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     { elbow: [66, 72], hand: [79, 62] },
     { handle: 8, headInHand: true, rewaxTrail: true },
   ),
+  // The T-pose, for the Model viewer: standing straight, both arms out (the rig lays them out), the
+  // flail hanging from his hand by its handle. `wd-t-b` is seen from behind.
+  "wd-t": pose(
+    { head: [50, 22], neck: [50, 33], hip: [50, 65], ...legs([50, 89.5], [50, 114], [50, 89.5], [50, 114]) },
+    { elbow: [36, 35], hand: [22, 35], ball: [22, 90] },
+    { elbow: [64, 35], hand: [78, 35] },
+    { handle: 90, faceFront: 0.5, armsOut: -1, legsDown: true },
+  ),
+  "wd-t-b": pose(
+    { head: [50, 22], neck: [50, 33], hip: [50, 65], ...legs([50, 89.5], [50, 114], [50, 89.5], [50, 114]) },
+    { elbow: [64, 35], hand: [78, 35], ball: [78, 90] },
+    { elbow: [36, 35], hand: [22, 35] },
+    { handle: 90, backView: true, faceBack: true, armsOut: 1, legsDown: true },
+  ),
   // Staggered: fallen to a knee, propped on the flail's handle, head hanging.
   "wd-fallen": pose(
     { head: [66, 58], neck: [60, 66], hip: [44, 86], ...legs([58, 98], [62, 114], [40, 112], [24, 114]) },
@@ -388,3 +405,90 @@ export function sweepAt(s: WardenSkeleton) {
     return [u * u * from[0] + 2 * u * t * mid[0] + t * t * to[0], u * u * from[1] + 2 * u * t * mid[1] + t * t * to[1]];
   };
 }
+
+/**
+ * Where his arms and legs hang from, on the page: the flail (right) shoulder and the candle (left)
+ * shoulder, which turning (`turn`, `shoulderTurn`) swings around, and his hips (no offset under the cloak).
+ * Turning his candle side toward you swings that shoulder forward and the flail shoulder back; turned the
+ * other way (flail shoulder toward you), the shoulders line up with the camera. Facing you, his flail arm
+ * is the far one and the candle arm the near one; from behind, the shoulders sit either side of his back.
+ */
+export function wardenMounts(s: WardenSkeleton, front: boolean, straight = false): Mounts & { flailShoulder: Pt; candleShoulder: Pt } {
+  const [nx, ny] = s.neck;
+  // Straight on, the shoulders sit level either side of the neck: the flail (right) one toward -x
+  // from the front (his right is the page's left), +x from behind (the pose says which: `armsOut`).
+  if (straight) {
+    const side = s.armsOut ?? (s.backView ? 1 : -1);
+    const flailShoulder: Pt = [nx + 6 * side, ny + 2];
+    const candleShoulder: Pt = [nx - 6 * side, ny + 2];
+    return { weaponShoulder: flailShoulder, freeShoulder: candleShoulder, leadHip: s.hip, rearHip: s.hip, across: 1, flailShoulder, candleShoulder };
+  }
+  const turn = s.shoulderTurn ?? s.turn ?? 0;
+  const away = Math.max(0, -turn);
+  const toward = Math.max(0, turn);
+  const nearShoulder: Pt = [nx - 3 + 9 * toward + away, ny + 4 - toward - 3 * away];
+  const farShoulder: Pt = [nx + 3 - 9 * toward - away, ny + 2 + 3 * away];
+  const back = (k: number): Pt => {
+    const [hx, hy] = s.hip;
+    const len = Math.hypot(hx - nx, hy - ny) || 1;
+    let n: Pt = [-(hy - ny) / len, (hx - nx) / len];
+    if (n[0] > 0) n = [-n[0], -n[1]]; // toward the way he faces
+    return add([nx, ny + 3], n, k);
+  };
+  const flailShoulder = s.backView ? back(6) : front ? farShoulder : nearShoulder;
+  const candleShoulder = s.backView ? back(-6) : s.shoulderAtRip ? ripArmpit(s) : front ? nearShoulder : farShoulder;
+  return { weaponShoulder: flailShoulder, freeShoulder: candleShoulder, leadHip: s.hip, rearHip: s.hip, across: 0.72, flailShoulder, candleShoulder };
+}
+
+/**
+ * How each pose departs from the rig's true bone lengths (rig.ts), as multiples of them: the poses
+ * were tuned by eye before the rig, so these keep every look (his punch really does reach).
+ */
+const WARDEN_ADJUST: Partial<Record<WardenPoseName, BoneAdjust>> = {
+  "wd-idle": { torso: 1.101, leadShin: 0.987, weaponUpper: 1.278, weaponFore: 0.931, freeUpper: 1.04, freeFore: 0.895 },
+  "wd-shoulder": { torso: 1.036, leadThigh: 1.061, rearThigh: 1.049, rearShin: 0.97, weaponUpper: 1.286, weaponFore: 1.313, freeUpper: 0.61, freeFore: 2.023 },
+  "wd-wound-up": { torso: 1.012, leadThigh: 1.023, leadShin: 0.904, rearThigh: 0.981, rearShin: 0.865, weaponUpper: 0.972, weaponFore: 0.647, freeUpper: 1.397, freeFore: 0.505 },
+  "wd-arm-back": { torso: 0.92, leadShin: 0.906, rearThigh: 1.393, rearShin: 1.041, weaponUpper: 1.116, weaponFore: 1.074, freeUpper: 1.163, freeFore: 0.576 },
+  "wd-arm-chest": { torso: 0.977, leadShin: 0.953, rearThigh: 0.961, rearShin: 0.953, weaponUpper: 0.863, weaponFore: 0.714, freeUpper: 1.374, freeFore: 1.418 },
+  "wd-clutch-flail": { torso: 0.92, leadShin: 0.906, rearThigh: 1.393, rearShin: 1.041, weaponUpper: 1.116, weaponFore: 1.074, freeUpper: 1.264, freeFore: 0.836 },
+  "wd-spin-behind": { torso: 0.963, leadThigh: 0.974, leadShin: 0.826, rearThigh: 0.97, rearShin: 0.75, weaponUpper: 1.429, weaponFore: 0.972, freeUpper: 1.427, freeFore: 0.505 },
+  "wd-spin-over": { torso: 1.063, weaponFore: 0.884, freeUpper: 0.773, freeFore: 0.769 },
+  "wd-kneel": { torso: 0.872, leadThigh: 0.753, leadShin: 1.064, rearThigh: 1.169, rearShin: 0.658, weaponUpper: 1.015, weaponFore: 0.731, freeUpper: 1.062, freeFore: 1.163 },
+  "wd-swing": { torso: 1.012, leadThigh: 1.023, leadShin: 0.904, rearThigh: 0.981, rearShin: 0.865, weaponUpper: 0.972, weaponFore: 0.647, freeUpper: 1.397, freeFore: 0.505 },
+  "wd-rising": { torso: 1.07, leadShin: 0.931, rearThigh: 1.167, rearShin: 0.891, freeUpper: 1.03, freeFore: 0.769 },
+  "wd-slam": { torso: 0.872, leadThigh: 0.753, leadShin: 1.064, rearThigh: 1.169, rearShin: 0.658, weaponUpper: 1.403, weaponFore: 1.739, freeUpper: 1.189, freeFore: 0.909 },
+  "wd-punch": { torso: 0.882, leadThigh: 0.705, leadShin: 0.987, rearThigh: 0.891, rearShin: 0.736, weaponUpper: 1.951, weaponFore: 0.958, freeUpper: 1.716, freeFore: 1.821 },
+  "wd-fan": { torso: 1.024, leadThigh: 1.071, leadShin: 0.932, rearThigh: 1.043, rearShin: 0.883, weaponUpper: 1.216, freeUpper: 1.578, freeFore: 0.953 },
+  "wd-wax-swat": { torso: 1.024, leadThigh: 1.071, leadShin: 0.932, rearThigh: 1.043, rearShin: 0.883, weaponUpper: 1.216, freeUpper: 1.578, freeFore: 0.953 },
+  "wd-blast": { torso: 0.882, leadThigh: 0.705, leadShin: 0.987, rearThigh: 0.891, rearShin: 0.736, weaponUpper: 1.951, weaponFore: 0.958, freeUpper: 1.716, freeFore: 1.821 },
+  "wd-chain-guard": { torso: 1.012, leadThigh: 1.064, leadShin: 1.033, rearThigh: 1.046, weaponUpper: 1.04, freeUpper: 1.674, freeFore: 0.61 },
+  "wd-wax-guard": { torso: 1.031, leadThigh: 1.061, leadShin: 0.921, rearThigh: 1.046, rearShin: 0.921, weaponUpper: 1.172, weaponFore: 0.904, freeUpper: 1.329, freeFore: 1.857 },
+  "wd-stride": { torso: 0.965, leadThigh: 0.816, leadShin: 0.727, rearThigh: 0.924, rearShin: 0.77, weaponUpper: 0.742, weaponFore: 1.178, freeUpper: 1.1, freeFore: 0.904 },
+  "wd-usurp": { torso: 0.895, leadThigh: 0.925, leadShin: 0.78, rearThigh: 1.407, rearShin: 0.883, weaponUpper: 1.129, weaponFore: 1.074, freeUpper: 0.961, freeFore: 0.678 },
+  "wd-flinch": { torso: 1.022, leadThigh: 1.098, leadShin: 0.879, rearThigh: 0.902, rearShin: 0.84, weaponUpper: 0.833, weaponFore: 0.958, freeUpper: 0.869, freeFore: 1.03 },
+  "wd-usurp-dash": { torso: 0.94, leadThigh: 1.11, leadShin: 0.97, rearThigh: 1.078, rearShin: 0.913, weaponUpper: 1.288, weaponFore: 0.958, freeUpper: 1.288, freeFore: 1.088 },
+  "wd-clutch-arm": { torso: 0.88, leadThigh: 0.883, leadShin: 0.793, rearThigh: 0.826, rearShin: 0.763, weaponUpper: 1.197, weaponFore: 1.071, freeUpper: 1.629, freeFore: 1.172 },
+  "wd-fallen": { torso: 0.8, leadThigh: 0.753, leadShin: 0.673, rearThigh: 1.074, rearShin: 0.658, weaponUpper: 1.145, weaponFore: 1.154, freeUpper: 0.884, freeFore: 1.317 },
+};
+
+/** In a T-pose the flail hangs straight down from his hand. */
+const hangingFrom = (s: WardenSkeleton): Pt => add(s.weaponArm.hand, [0, 80]);
+
+/** A pose seen straight on, not at a 3/4 angle: the arms and legs fitted again from level shoulders. */
+export function straightOn(s: WardenSkeleton, front: boolean): WardenSkeleton {
+  const { skeleton } = fitLimbs(s, wardenMounts(s, front, true));
+  const fitted = { ...s, ...skeleton };
+  return s.armsOut ? { ...fitted, ball: hangingFrom(fitted) } : fitted;
+}
+
+/** Every pose, fitted to the rig once when the game loads. */
+export const WARDEN_POSES = Object.fromEntries(
+  Object.entries(RAW_WARDEN_POSES).map(([name, raw]) => [
+    name,
+    rigged<WardenSkeleton>(
+      { ...raw, adjust: WARDEN_ADJUST[name as WardenPoseName] },
+      fitted => wardenMounts(fitted as WardenSkeleton, true),
+      (fitted, by) => ({ ...fitted, ball: fitted.armsOut ? hangingFrom(fitted) : add(fitted.ball, by) }),
+    ),
+  ]),
+) as Record<WardenPoseName, WardenSkeleton>;

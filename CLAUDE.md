@@ -12,7 +12,7 @@ keep it up to date when a rule, enemy or map change is decided or built.
 
 - `npm run dev`: dev server.
 - `npm run build`: production build (what Netlify runs). Type errors fail it, so run it after changes.
-- `npx tsc --noEmit`: type-check only.
+- `npx tsc -b`: type-check only. (Plain `npx tsc --noEmit` checks nothing here: the root tsconfig only has project references.)
 
 ## Source map (`src/`)
 
@@ -24,6 +24,7 @@ keep it up to date when a rule, enemy or map change is decided or built.
     `endTurn`) sharing a `Turn` (`turn.ts`); a turn resolves into `steps`, each with the events and
     an `after` snapshot of every fighter, which the screen plays back. `statuses.ts`: when Waxed
     and encased come and go.
+  - `conditions.ts`: the `*Condition`s actions can name (`*Hurt`, `*Tired`, `*Close`, `*!Far`, statuses...).
   - `patterns.ts`: how enemies pick their next stance and action, parsed from the same notation
     as the design doc (`Comes from > Stance > Leads to`, action lines with `*Condition` and `#tag`).
   - `bestiary.ts`: `EnemyKind` (stats, pattern, poses, flags, hooks: `forced`, `afterTurn`,
@@ -40,7 +41,7 @@ keep it up to date when a rule, enemy or map change is decided or built.
 - `render/`: drawing. `camera.ts` (floor plan, camera, formations, shots), `poses.ts` (`POSES`,
   which pose a fighter shows; checks every kind's poses exist), `StickFigure.tsx` (stick figures,
   wax looks), `looks.ts` (what a `variant` draws differently: its own figure, candle arm, scenes),
-  `Scene.tsx` (the field, figures, darkness, flames), `effects.tsx` (projectiles, shockwaves),
+  `rig.ts` (the true bone lengths, `RIG`, and `fitTorso`/`fitLimbs`, which re-solve a pose to them when a figure is drawn), `Scene.tsx` (the field, figures, darkness, flames), `effects.tsx` (projectiles, shockwaves),
   `HealthBar.tsx`, `geom.ts`.
 - `warden/`: the Warden's figure. `skeleton.ts` (`WARDEN_POSES`, built with `pose(...)` and its
   flags, `flailOf`), `parts.tsx` (cloak, hood, beard, flame, flail, candle arm), `trails.tsx`,
@@ -68,9 +69,25 @@ keep it up to date when a rule, enemy or map change is decided or built.
 
 - Comments explain the rule or the look in plain words (why, and what the player sees). Keep that
   style; JSDoc on exported things and non-obvious helpers.
+- The sprites are drawn in 2D but oriented in 3D, seen from a 3/4 angle. "Front" means closer to the
+  screen (lower on screen), "back" means away from it (higher), never the left or right of the
+  screen. A figure faces +x in its poses (toward the player once an enemy is mirrored), so a
+  shoulder or hip turned to the front or back is a change in depth (a few px of `y`, a layer
+  in front of or behind the body), not a long move along `x`.
+- Figures keep their size through the rig (`render/rig.ts`): a pose gives each bone a direction, and the
+  bone's length is the rig's true length, so a pose's elbow, hand, knee or foot may sit a little off
+  where it's written. To shorten a bone for perspective (a forearm pointing at the camera, a crouch), or
+  stretch one on purpose (a punch's reach), set `adjust` on the pose, as a multiple of the true length
+  (`adjust: { weaponFore: 0.7 }`), never a length of its own; change `RIG` only to resize every figure.
+  Every enemy is rigged, the Warden's poses once at load (`warden/skeleton.ts`).
+- Sides are explicit in the rig: a pose's `weaponArm` is the arm on the kind's `weaponHand` (default right),
+  and its `leadLeg` is the `leadSide` leg (default left; `sw-chop` leads with the right). `sided()` in
+  `render/rig.ts` maps the slots to a figure's right and left; use it (never near/far) to put anything on a
+  particular limb. The Model stance tags hands and feet R and L.
 - Poses are tuned by eye with the user, often over many rounds. When changing one pose, leave every
   other pose exactly as it is.
-- Visual changes: check them in the Model viewer (each stance, each action, Staggered, Flinch) and
+- Visual changes: check them in the Model viewer (each stance, each action, Staggered, Flinch, and the
+  Model stance: a T-pose seen 3/4 front, straight front, 3/4 back and straight back, to check proportions) and
   in a real Test combat fight. Mid-turn timing bugs (a pose flashing for a frame, a status shown too
   early) usually come from `viewAt` / step snapshots vs. the final `fight` state in `combat/CombatScreen.tsx`.
 - Map plans: no floor should hang over another (except the original bridge over the hall); stairs

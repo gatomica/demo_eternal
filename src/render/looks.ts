@@ -13,6 +13,10 @@ import type { Skeleton } from "./poses";
 export interface OwnFigureProps {
   s: Skeleton;
   front: boolean;
+  /** Seen straight on, not at a 3/4 angle (the Model viewer). */
+  straight?: boolean;
+  /** Label the hands and feet R and L (the Model stance). */
+  sides?: boolean;
   arm?: CandleArm;
   lingerFrom?: WardenPoseName;
   smokeAgo?: number;

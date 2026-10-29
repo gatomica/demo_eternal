@@ -90,6 +90,9 @@ export const WARDEN: EnemyKind = {
   arena: true,
   // He attacks straight out of whatever stance he's in (no wind-up pose of its own).
   attacksFromStance: true,
+  // The flail is in his right hand; the candle arm is his left.
+  weaponHand: "right",
+  modelPoses: { front: "wd-t", back: "wd-t-b" },
   stancePoses: {
     Idle: "wd-idle",
     "Wax Shoulder In": "wd-shoulder",

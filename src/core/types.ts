@@ -12,6 +12,9 @@ export type ArmorTier = "none" | Tier;
 
 export type Line = "front" | "back";
 
+/** A figure's own left or right, whichever way it faces. */
+export type Side = "left" | "right";
+
 export type ActionType = "attack" | "block" | "maneuver" | "rest";
 
 export type Status = "playing" | "won" | "lost";
@@ -46,6 +49,11 @@ export interface Intent {
   projectile?: "fan" | "blast" | "wax" | "impact";
   /** For a Rest: the pose once it actually happens, at the end of the turn. */
   restPose?: string;
+  /**
+   * For a Rest or a Block: the pose it takes from the start of the turn, to show its intent: until the Rest happens
+   * (or is broken), or until the blow it blocks lands.
+   */
+  windupPose?: string;
   /** For a Block: it holds its stance, and only takes this pose as an attack on it lands. */
   guardPose?: string;
   /** The weight of this Attack or Block, when the action has its own. Otherwise the fighter's weapon. */

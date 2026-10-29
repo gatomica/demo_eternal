@@ -2,6 +2,7 @@
  * intents.ts — how each enemy picks what it does next: stance, then action (see patterns.ts).
  */
 import { ENEMY_KINDS, type KindId } from "./bestiary";
+import { isAvailable } from "./conditions";
 import { type ActionDef, choose } from "./patterns";
 import type { ActionType, CombatState, Enemy, Intent, Line, Rng } from "./types";
 
@@ -14,7 +15,7 @@ export function describeAction(kindName: KindId, line: Line, stance: string | un
   return {
     type: a.type, dir, forced: false, stance, action: a.name,
     pose: stance ? kind.stancePoses[stance] ?? poses?.act : poses?.act,
-    actPose: poses?.act, strikePose: poses?.strike, projectile: poses?.projectile, restPose: poses?.rest, guardPose: poses?.guard,
+    actPose: poses?.act, strikePose: poses?.strike, projectile: poses?.projectile, restPose: poses?.rest, windupPose: poses?.windup, guardPose: poses?.guard,
     weight: a.weight, ranged: a.ranged || undefined, tags: a.tags.length ? a.tags : undefined,
   };
 }
@@ -39,7 +40,7 @@ function chooseIntent(e: Enemy, state: CombatState, rng: Rng): Intent {
     return a ? describe(undefined, a) : { type: step as ActionType, dir: lineDir, forced: false };
   }
 
-  const available = (a: ActionDef) => a.needs.every(n => kind.conditions?.[n]?.(e, state) ?? false);
+  const available = (a: ActionDef) => isAvailable(kind, e, state, a);
   // Something it must pick on from (a boss's second phase) overrides what it just did.
   const memory = e.nextFrom ? { action: e.nextFrom, outcome: "done" as const } : e.last ? { action: e.last.name, outcome: e.last.outcome } : null;
   e.nextFrom = undefined;

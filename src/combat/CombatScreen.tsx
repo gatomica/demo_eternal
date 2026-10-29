@@ -4,7 +4,7 @@
 import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ActionWheel, type Anchor } from "./ActionWheel";
 import type { CoachStep, Tip } from "./training";
-import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_SIDE, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, KNOCK_MS, KNOCKBACK, NUDGE_MS, OPENING_LEAD_IN, phaseFor, phaseTwoOf, type Playback, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt } from "./playback";
+import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_SIDE, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, phaseAt, phaseFor, phaseTwoOf, type Playback, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt } from "./playback";
 import { defaultSelection, rowsOf, sameSel, type Selection, type Wheel, type WheelOption } from "./selection";
 import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveTurn } from "../core/resolve";
@@ -38,7 +38,7 @@ const barValues =(f: { hp: number; fatigue: number; death: number }): BarValues 
 /** How an enemy's look draws it differently (its kind's variant). */
 const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 
-export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, changeLabel, exitLabel, wonText, onTurnPlayed, coach }: {
+export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, changeLabel, exitLabel, wonText, onTurnPlayed, coach, figureAngle }: {
   initial: CombatState;
   /** A scene to play before the first turn (it leaves the fight as `initial`). */
   opening?: Opening;
@@ -50,6 +50,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   playSignal?: number;
   /** The model viewer: you attack it this turn (to break its Rest). */
   attackOnPlay?: boolean;
+  /** The model viewer's Model stance: how the enemy is seen (3/4 or straight on, from the front or behind). */
+  figureAngle?: { view: "front" | "back"; straight: boolean; sides?: boolean };
   /** The pause menu's label for onChangeLoadout. */
   changeLabel?: string;
   /** The pause menu's label for onExit. */
@@ -246,7 +248,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     }
     const attack = step?.events.find(ev => ev.kind === "attack");
     if (!attack || attack.kind !== "attack") {
-      if (playback.index !== playback.steps.length - 1) return; // stay put until the final step
+      if (playback.index !== playback.steps.length - 1 || playback.phase === "approach") return; // stay put until the final step plays
       // The final step: re-frame you where you ended up, or follow you if you Maneuvered.
       const act = playback.action;
       // You walk whenever your Maneuver happened, even if it changed no distance.
@@ -264,10 +266,41 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     const a = w.pos[attack.attacker];
     const t = w.pos[attack.target];
     if (!a || !t) return;
+    /** Where a dodge carries the target. */
+    const dodgeTo = () => {
+      // A dodge gets out of the way: further back, and away from the attacker, if they were retreating; if they
+      // were closing in, past the attack to the attacker's side.
+      const retreating = attack.target === "player"
+        ? playback.action?.type === "maneuver" && playback.action.target === "self"
+        : playback.from.enemies.find(e => e.id === attack.target)?.intent.dir === "retreat";
+      // Seen from the camera: "back" is straight away from the camera, "to the side" straight
+      // across the screen: away from the attacker when retreating, toward its side when closing in.
+      // A retreating dodge goes just as far each way.
+      const cam = shotCamera(shot);
+      const cd = Math.hypot(t.x - cam.x, t.z - cam.z) || 1;
+      const back = { x: (t.x - cam.x) / cd, z: (t.z - cam.z) / cd };
+      let side = { x: -back.z, z: back.x };
+      if (side.x * (t.x - a.x) + side.z * (t.z - a.z) < 0) side = { x: -side.x, z: -side.z }; // away from the attacker
+      return retreating
+        ? { x: t.x + (back.x + side.x) * DODGE_BACK, z: t.z + (back.z + side.z) * DODGE_BACK }
+        : { x: t.x - side.x * DODGE_SIDE, z: t.z - side.z * DODGE_SIDE };
+    };
+    let cleanup: (() => void) | undefined;
     if (playback.phase === "approach") {
       // A melee attacker closes in (a ranged one stays put), and the camera moves in on the two.
       const at = attack.ranged ? a : closeIn(a, t, STRIKE_GAP);
-      shoot({ ...w.pos, [attack.attacker]: at }, actionCamera(shotCamera(shot), at, t), APPROACH_MS);
+      const camera = actionCamera(shotCamera(shot), at, t);
+      shoot({ ...w.pos, [attack.attacker]: at }, camera, APPROACH_MS);
+      if (attack.result === "dodged") {
+        // A target that dodges gets clear late in the approach, timed to be gone just as the blow arrives (the
+        // blow lands where it was), and only then takes its dodge pose.
+        const to = dodgeTo();
+        const timer = window.setTimeout(() => {
+          shoot({ ...world.current.pos, [attack.target]: to }, camera, APPROACH_MS - DODGE_DELAY_MS);
+          setDodgeStarted(stepKey);
+        }, DODGE_DELAY_MS);
+        cleanup = () => window.clearTimeout(timer);
+      }
     } else if (attack.result === "hit") {
       // A clean hit knocks the target back, and it stays there.
       shoot({ ...w.pos, [attack.target]: pushedAway(a, t, KNOCKBACK) }, shot.camera, KNOCK_MS);
@@ -276,24 +309,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       const knocked = { ...w.pos, [attack.target]: pushedAway(a, t, BLOCK_PUSH) };
       if (!attack.ranged) knocked[attack.attacker] = pushedAway(t, a, BLOCK_PUSH);
       shoot(knocked, shot.camera, KNOCK_MS);
-    } else if (attack.result === "dodged") {
-      // A dodge gets out of the way: further back if they were retreating, to the side if they
-      // were closing in.
-      const retreating = attack.target === "player"
-        ? playback.action?.type === "maneuver" && playback.action.target === "self"
-        : playback.from.enemies.find(e => e.id === attack.target)?.intent.dir === "retreat";
-      // Seen from the camera: "back" is straight away from the camera, "to the side" straight
-      // across the screen, away from the attacker. A retreating dodge goes just as far each way.
-      const cam = shotCamera(shot);
-      const cd = Math.hypot(t.x - cam.x, t.z - cam.z) || 1;
-      const back = { x: (t.x - cam.x) / cd, z: (t.z - cam.z) / cd };
-      let side = { x: -back.z, z: back.x };
-      if (side.x * (t.x - a.x) + side.z * (t.z - a.z) < 0) side = { x: -side.x, z: -side.z };
-      const to = retreating
-        ? { x: t.x + (back.x + side.x) * DODGE_BACK, z: t.z + (back.z + side.z) * DODGE_BACK }
-        : { x: t.x + side.x * DODGE_SIDE, z: t.z + side.z * DODGE_SIDE };
-      shoot({ ...w.pos, [attack.target]: to }, shot.camera, KNOCK_MS);
     }
+    // (A dodge already got out of the way during the approach, so there's nothing more to move at the impact.)
+    return cleanup;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playback?.index, playback?.phase, !!playback, selId, fight, usurpStage, igniteState]);
 
@@ -342,13 +360,14 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
 
   /** Resolve the turn, then play it back step by step. */
   const play = (action: PlayerAction) => {
+    turnStart.current = performance.now();
     if (coach && !forced && coach.steps[coachStep]?.matches(action)) setCoachStep(coachStep + 1);
     const next = resolveTurn(fight, action);
     const pose: PoseName = forced ? "kneel" : action.type; // staggered or reviving: down on one knee
     setFight(next);
     setPlayback(
       next.lastTurn.length
-        ? { from: fight, steps: next.lastTurn, index: 0, phase: phaseFor(next.lastTurn[0]), playerPose: pose, action: forced ? null : action }
+        ? { from: fight, steps: next.lastTurn, index: 0, phase: phaseAt(next.lastTurn, 0, 0), playerPose: pose, action: forced ? null : action }
         : null,
     );
     closeWheel();
@@ -430,15 +449,19 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playback?.index, playback?.phase, !!playback]);
 
+  // When the turn being played started (for MIN_ATTACK_PHASE_MS). Never set for an opening scene, which isn't held.
+  const turnStart = useRef(-Infinity);
   // Advance the playback one step at a time.
   useEffect(() => {
     if (!playback || paused || playback.phase === "usurp" || playback.phase === "ignite") return;
+    // Someone's Rest goes through this turn (its animation sets how long the last step lasts).
+    const resting = !!turnIx && playback.from.enemies.some(e => turnIx.rest.has(e.id));
     const timer = window.setTimeout(
       () => {
         const pb = playback;
         if (pb.phase === "approach") return setPlayback({ ...pb, phase: "impact" });
         const index = pb.index + 1;
-        if (index < pb.steps.length) return setPlayback({ ...pb, index, phase: phaseFor(pb.steps[index]) });
+        if (index < pb.steps.length) return setPlayback({ ...pb, index, phase: phaseAt(pb.steps, index, performance.now() - turnStart.current) });
         // Anyone who dodged is still walking to their new spot: they keep their pose until there.
         const walking = lastDodgers.current;
         if (Object.keys(walking).length) setWalkOff(walking);
@@ -446,7 +469,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         onTurnPlayed?.(fightRaw); // same render as the playback ending, so nothing flickers
         setPlayback(null);
       },
-      playback.phase === "approach" ? APPROACH_MS : STEP_MS,
+      // An attacker closes in; the first step after the attacks holds until the attack phase has lasted
+      // MIN_ATTACK_PHASE_MS. The last step stays long enough for a Rest's animation, if one goes through.
+      playback.phase === "approach"
+        ? isAttackStep(step) ? APPROACH_MS : Math.max(0, MIN_ATTACK_PHASE_MS - (performance.now() - turnStart.current))
+        : playback.index === playback.steps.length - 1 && resting
+          ? Math.max(STEP_MS, REST_ANIM_MS)
+          : STEP_MS,
     );
     return () => window.clearTimeout(timer);
   }, [playback, paused]);
@@ -510,7 +539,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    */
   const turnSteps = playback?.steps;
   const turnIx = useMemo(() => (turnSteps ? indexTurn(turnSteps) : null), [turnSteps]);
-  const stepOf = (m: "strike" | "rest" | "dodge" | "usurp" | "backUp" | "phaseTwoBy", id: string) => turnIx?.[m].get(id) ?? -1;
+  const stepOf = (m: "strike" | "rest" | "dodge" | "maneuver" | "usurp" | "backUp" | "phaseTwoBy", id: string) => turnIx?.[m].get(id) ?? -1;
   /** This turn's step `i` has played: it's behind us, or it's showing and its blow has landed. */
   const reached = (i: number) => !!playback && i >= 0 && (playback.index > i || (playback.index === i && impact));
   /** The step where someone's attack lands, or -1. */
@@ -520,6 +549,15 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   useEffect(() => {
     if (!playback) return;
     const t = window.setTimeout(() => setRestOver(stepKey), REST_POSE_MS);
+    return () => window.clearTimeout(t);
+  }, [stepKey]);
+  // The approach (step key) in which a target has started to dodge.
+  const [dodgeStarted, setDodgeStarted] = useState<string | null>(null);
+  // A Rest's own animation (its pose) starts the moment it goes through and lasts REST_ANIM_MS.
+  const [restPoseOver, setRestPoseOver] = useState<string | null>(null);
+  useEffect(() => {
+    if (!playback) return;
+    const t = window.setTimeout(() => setRestPoseOver(stepKey), REST_ANIM_MS);
     return () => window.clearTimeout(t);
   }, [stepKey]);
   /** The step where someone's Rest actually happened (not cut short), or -1. */
@@ -546,11 +584,17 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    * this one once it lands), or their own move has happened. From then on they stay in its pose.
    * (A blow that hits them instead doesn't: they didn't get out of the way.)
    */
-  const dodgedBefore = (id: string) => reached(stepOf("dodge", id));
+  const dodgedBefore = (id: string) => {
+    const i = stepOf("dodge", id);
+    // A dodge of an attack starts late in the attacker's approach, before the blow lands.
+    return reached(i) || (!!playback && i >= 0 && playback.index === i && isAttackStep(playback.steps[i]) && dodgeStarted === stepKey);
+  };
   /** The steps where someone is attacked (whether it lands, is blocked or dodged). */
   const targetedSteps = (id: string) => turnIx?.targeted.get(id) ?? [];
   interface Poses {
     telegraph: PoseName; down: PoseName; windUp: PoseName; strike: PoseName; idle: PoseName; rested?: PoseName;
+    /** A Rest's windup pose, shown first when the Rest is the turn's first step. */
+    windup?: PoseName;
     /** The strike pose hands off to the next stance a moment in (REST_POSE_MS), its trails still fading. */
     strikeHandsOff?: boolean;
     /** The pose it hands off to, if not `idle`. */
@@ -571,14 +615,22 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // A Maneuver only takes its pose when it gets out of the way (a dodge) or actually moves;
       // from then on it keeps it to the end of the turn, walking off to its new spot in it too.
       // Hit while it holds its stance, it just keeps holding it.
-      if (poses.guard.keepAfterDodge) return dodgedBefore(id) ? poses.guard.react : poses.guard.hold;
+      if (poses.guard.keepAfterDodge) {
+        // One that already dodged an attack this turn settles into its next stance as the repositioning step (its
+        // Maneuver) starts, whether or not it changes line, and walks to its new spot in that. One that didn't
+        // takes the Maneuver's pose from there instead.
+        const repositioning = stepOf("maneuver", id);
+        const dodged = stepOf("dodge", id);
+        if (repositioning >= 0 && dodged >= 0 && dodged < repositioning && playback.index >= repositioning) return poses.idle;
+        return dodgedBefore(id) ? poses.guard.react : poses.guard.hold;
+      }
       if (hits.includes(playback.index)) return impact ? poses.guard.react : poses.guard.hold;
       return hits.length && hits[0] < playback.index ? poses.idle : poses.guard.hold;
     }
     // A Rest that went through shows its own pose from the moment it happens, briefly.
     const rested = restStep(id);
-    if (poses.rested && rested >= 0 && playback.index >= rested) {
-      return playback.index === rested && restOver !== stepKey ? poses.rested : poses.idle;
+    if (poses.rested && reached(rested)) {
+      return playback.index === rested && restPoseOver !== stepKey ? poses.rested : poses.idle;
     }
     return poses.telegraph;
   };
@@ -606,11 +658,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     const now = fight.enemies.find(x => x.id === e.id);
     return now && standingAfter(e) ? poseForIntent(now) : idlePoseOf(e);
   };
-  // An enemy that's going to Rest holds its stance until the Rest actually happens.
+  // An enemy that's going to Rest winds up from the start of the turn (its Rest's windup pose, if it has one, else
+  // it holds its stance) until the Rest actually happens.
   const restTelegraph = (e: Enemy): PoseName => {
     if (!playback || e.intent.type !== "rest" || e.intent.forced || e.staggered) return actionPose(e);
     const at = restStep(e.id);
-    return at >= 0 && playback.index >= at ? actionPose(e) : poseForIntent(e);
+    if (reached(at)) return actionPose(e);
+    return e.intent.windupPose ? asPose(e.intent.windupPose, "rest") : poseForIntent(e);
   };
   /** Its strike pose spins on into its next stance (Flail Swing): it hands off partway through. */
   const handsOff = (e: Enemy) => !!handOffOf(e.intent.strikePose);
@@ -619,7 +673,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     !!playback && impact && handsOff(e) && strikeStep(e.id) === playback.index && restOver === stepKey;
   /** Its Rest's own pose has just given way to its next stance (still this step). */
   const restJustOver = (e: Enemy) =>
-    !!playback && !!e.intent.restPose && restStep(e.id) === playback.index && restOver === stepKey;
+    !!playback && !!e.intent.restPose && restStep(e.id) === playback.index && restPoseOver === stepKey;
   /**
    * The Warden's flags as shown. Once a Rest has gone through, his attack has landed and he has
    * moved on to his next stance, or he has taken a flame, they already show what that did (Flame
@@ -627,7 +681,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    */
   const shownFlags = (e: Enemy) => {
     const rest = restStep(e.id);
-    const rested = !!playback && rest >= 0 && playback.index >= rest && (rest < playback.index || restOver === stepKey);
+    const rested = !!playback && rest >= 0 && playback.index >= rest && (rest < playback.index || restPoseOver === stepKey);
     const struck = strikeStep(e.id);
     // (A strike that leaves him staggered plays out with the look he had; it only changes as he drops.)
     const attacked = !!playback && struck >= 0 && (playback.index > struck || (playback.index === struck && impact && handsOff(e) && restOver === stepKey && standingAfter(e)));
@@ -688,6 +742,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return posesNow.get(e.id)!;
   };
   const poseOfEnemy = (e: Enemy): PoseName => {
+    // One that has died (not one taken by a flame) falls in its down pose, the same as when it is staggered.
+    if (!e.alive && (e.fate ?? "fallen") === "fallen") return downPoseOf(e);
     // After his phase-two scene, he's already standing in his next stance (Idle).
     if (phaseTwoDone(e) && !ignite) return settledPose(e);
     // The phase-two scene: he stands in Idle, unseen in the dark until his flare.
@@ -711,7 +767,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // settles into its next stance.
     const guarding = (e.intent.type === "block" || e.intent.type === "maneuver") && !e.intent.forced;
     return playbackPose(e.id, e.staggered, {
-      guard: guarding ? { hold: poseForIntent(e), react: e.intent.guardPose ? asPose(e.intent.guardPose, "block") : actionPose(e), keepAfterDodge: e.intent.type === "maneuver" } : undefined,
+      // A Block winds up from the start of the turn (its windup pose, if it has one, else its stance) and only takes
+      // its blocking pose as the blow lands.
+      guard: guarding ? { hold: e.intent.type === "block" && e.intent.windupPose ? asPose(e.intent.windupPose, "block") : poseForIntent(e), react: e.intent.guardPose ? asPose(e.intent.guardPose, "block") : actionPose(e), keepAfterDodge: e.intent.type === "maneuver" } : undefined,
       telegraph: playback ? restTelegraph(e) : poseForIntent(e),
       // Some (the Warden) attack straight out of whatever stance they're in.
       down: downPoseOf(e), windUp: kindOf(e).attacksFromStance && e.intent.stance ? poseForIntent(e) : windUpPose(e), strike: strikePose(e), idle: settledPose(e),
@@ -720,6 +778,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // into the pose its strike ends in, and only drops once the step is over.
       handOff: handsOff(e) && !standingAfter(e) ? handOffOf(e.intent.strikePose) : undefined,
       rested: e.intent.restPose ? asPose(e.intent.restPose, "rest") : undefined,
+      windup: e.intent.type === "rest" && !e.intent.forced && e.intent.windupPose ? asPose(e.intent.windupPose, "rest") : undefined,
     });
   };
 
@@ -794,7 +853,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       .filter(e => e.alive || fx.get(e.id)?.classes.includes("fx-fall") || kindOf(e).remains)
       .map((e): SceneFigure => ({
         id: e.id,
-        view: "front",
+        view: figureAngle?.view ?? "front",
+        straight: figureAngle?.straight,
+        sides: figureAngle?.sides,
+        foe: true,
+        hand: kindOf(e).weaponHand,
         pose: !playback && walkOff?.[e.id] ? walkOff[e.id] : track(e.id, enemyPose(e)),
         weapon: e.weapon,
         armor: e.armor,

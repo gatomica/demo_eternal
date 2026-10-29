@@ -8,11 +8,12 @@
  *
  * (Kinds may look each other up with `kindOf`, but only ever import them through this file.)
  */
+import { conditionOf } from "./conditions";
 import type { ActionDef, Pattern } from "./patterns";
 import { SLEEPWALKER } from "./kinds/sleepwalker";
 import { WARDEN } from "./kinds/warden";
 import { WAXED } from "./kinds/waxed";
-import type { ArmorTier, CombatEvent, CombatState, Enemy, EnemySetup, Fighter, Intent, Line, Rng, TurnReport, WeaponTier } from "./types";
+import type { ArmorTier, CombatEvent, CombatState, Enemy, EnemySetup, Fighter, Intent, Line, Rng, Side, TurnReport, WeaponTier } from "./types";
 
 /** Special looks a kind can be drawn with: "waxed" (kneeling, sealed in wax), "warden" (his own figure). */
 export type Variant = "waxed" | "warden";
@@ -67,8 +68,17 @@ export interface EnemyKind {
    * moment an attack lands, `rest` once a Rest actually happens at the end of the turn, and the
    * `projectile` a ranged attack throws (or, for a melee one, `impact`: a shockwave where it lands).
    * `guard`: a Block that holds the stance and only takes this pose as an attack on it lands.
+   * `windup`: a Rest or a Block takes this pose from the start of the turn, to show its intent: a Rest until it goes
+   * through (then `rest`) or is broken by a blow (it flinches); a Block until the blow lands (then `guard`).
    */
-  actionPoses?: Record<string, { act?: string; strike?: string; rest?: string; projectile?: "fan" | "blast" | "wax" | "impact"; guard?: string }>;
+  actionPoses?: Record<string, { act?: string; strike?: string; rest?: string; windup?: string; projectile?: "fan" | "blast" | "wax" | "impact"; guard?: string }>;
+  /** The hand that holds its weapon (default right): the `weaponArm` of every pose is the arm on this side. */
+  weaponHand?: Side;
+  /**
+   * The T-poses the Model viewer shows it in, seen from the front and from behind (the weapon arm is on the
+   * other side of the page). Default: the standing T-pose (`t-pose`, `t-pose-b`).
+   */
+  modelPoses?: { front: string; back: string };
   /** Shown once its attack has landed (default "idle"), and while staggered (default "fallen"). */
   idlePose?: string;
   downPose?: string;
@@ -142,7 +152,7 @@ function checkKind(id: string, kind: EnemyKind) {
   const hasAction = (name: string) => actions.has(name.toLowerCase());
   const hasStance = (name: string) => stances.some(s => s.name === name);
   for (const a of actions.values()) {
-    for (const need of a.needs) if (!kind.conditions?.[need]) fail(`"${a.name}" needs *${need}, but no such condition is written`);
+    for (const need of a.needs) if (!conditionOf(kind, need)) fail(`"${a.name}" needs *${need}, but no such condition exists`);
   }
   for (const s of Object.keys(kind.stancePoses)) if (!hasStance(s)) fail(`a pose for stance "${s}", which isn't in its pattern`);
   for (const a of Object.keys(kind.actionPoses ?? {})) if (!hasAction(a)) fail(`poses for action "${a}", which isn't in its pattern`);
