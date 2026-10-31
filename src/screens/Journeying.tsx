@@ -9,7 +9,7 @@ import { CombatScreen } from "../combat/CombatScreen";
 import { newFight } from "../combat/fight";
 import { LESSON } from "../combat/lesson";
 import { ENCOUNTERS } from "../core/encounters";
-import type { CombatState, Opening } from "../core/types";
+import type { CombatState, EnemySetup, Opening } from "../core/types";
 import { Exploration, type Journey } from "../explore/Exploration";
 import { type MapFoe, wakeEnemies, withCorpses } from "../explore/foes";
 import { dropsOf, EMPTY_INVENTORY, gotNote, loadoutOf, lose } from "../explore/gear";
@@ -20,8 +20,15 @@ import { knotCharges, NEW_TUTORIAL } from "../explore/tutorial";
 /** `lesson`: the guide's tutorial fight (no map enemies; see combat/lesson.ts). */
 type Fight = { id: number; foes: MapFoe[]; state: CombatState; opening?: Opening; backTo: Journey; lesson?: boolean };
 
-/** The enemies of these map enemies, together. */
-const enemiesOf = (foes: MapFoe[]) => foes.flatMap(f => f.fight);
+/**
+ * The enemies of these map enemies, together. The one that touched you (the first map enemy's first) starts
+ * on the front line, everyone else behind it. (A fight with an opening scene, the Warden's, keeps its own lines.)
+ */
+function enemiesOf(foes: MapFoe[]): EnemySetup[] {
+  const all = foes.flatMap(f => f.fight);
+  if (all.some(e => e.offering)) return all;
+  return foes.flatMap((f, i) => f.fight.map((e, j) => ({ ...e, line: i === 0 && j === 0 ? "front" as const : "back" as const })));
+}
 
 /** The guide's lesson: its fight is the Test combat "tutorial" encounter, with what you wear (nothing, at first), and it can't be lost. */
 const lessonFight = (backTo: Journey) =>

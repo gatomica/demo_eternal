@@ -267,39 +267,11 @@ export function drawWardenMap(g: CanvasRenderingContext2D, x: number, y: number,
 }
 
 /**
- * A hooded keeper on the map: a tall robe and a deep hood, a small candle held before it. The
- * candle burns where you last rested.
+ * The guide on the map, wherever it appears to let you rest (see `drawGuideBody`). Its orb shines
+ * where you last rested.
  */
 export function drawKeeper(g: CanvasRenderingContext2D, x: number, y: number, T: number, lit: boolean, t: number) {
-  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
-  g.fillStyle = COLORS.shadow;
-  g.beginPath(); g.ellipse(X(0), Y(0.37), 0.24 * T, 0.08 * T, 0, 0, Math.PI * 2); g.fill();
-  // The robe, flaring to the floor.
-  g.fillStyle = "#4b4656";
-  g.beginPath();
-  g.moveTo(X(-0.11), Y(-0.22)); g.lineTo(X(0.11), Y(-0.22));
-  g.lineTo(X(0.2), Y(0.36)); g.lineTo(X(-0.2), Y(0.36)); g.closePath(); g.fill();
-  g.fillStyle = "#3d3946";
-  g.fillRect(X(-0.012), Y(-0.05), Math.max(1, 0.024 * T), 0.4 * T);
-  // The hood, peaked, its opening dark.
-  g.fillStyle = "#544e60";
-  g.beginPath();
-  g.moveTo(X(0), Y(-0.6)); g.quadraticCurveTo(X(0.19), Y(-0.38), X(0.15), Y(-0.17));
-  g.lineTo(X(-0.15), Y(-0.17)); g.quadraticCurveTo(X(-0.19), Y(-0.38), X(0), Y(-0.6)); g.fill();
-  g.fillStyle = "#121117";
-  g.beginPath(); g.ellipse(X(0), Y(-0.32), 0.075 * T, 0.1 * T, 0, 0, Math.PI * 2); g.fill();
-  // Hands together before it, a candle in them.
-  g.fillStyle = "#c9c2b0";
-  g.fillRect(X(-0.018), Y(-0.08), Math.max(2, 0.036 * T), 0.09 * T);
-  if (!lit) return;
-  const flick = 1 + Math.sin(t / 90) * 0.08 + Math.sin(t / 37) * 0.05;
-  const glow = g.createRadialGradient(X(0), Y(-0.12), 0, X(0), Y(-0.12), 0.45 * T);
-  glow.addColorStop(0, "rgb(255 190 110 / 0.35)");
-  glow.addColorStop(1, "rgb(255 190 110 / 0)");
-  g.fillStyle = glow;
-  g.beginPath(); g.arc(X(0), Y(-0.12), 0.45 * T, 0, Math.PI * 2); g.fill();
-  g.fillStyle = "#f2b45c";
-  g.beginPath(); g.ellipse(X(0), Y(-0.13), 0.022 * T, 0.045 * T * flick, 0, 0, Math.PI * 2); g.fill();
+  drawGuideBody(g, x, y, T, lit ? 1 : 0.25, t);
 }
 
 /** The ground under a body: a pool of the given color, flat on the floor. */
@@ -471,23 +443,72 @@ export function drawPickup(g: CanvasRenderingContext2D, x: number, y: number, T:
 const GUIDE_NAVY = "#1d2a4f";
 
 /**
- * The guide on the map: a short pointed navy cloak, tall hat and all, a glowing orb hanging in
- * front of it, a bare foot under the hem. (Not yet placed on the map.)
+ * The guide as the map shows it, like its model in a fight: a short navy cloak that is also a pointed
+ * hat (its tip as high as a player's head), a dark hollow for a face, a white orb of yarn hanging on
+ * black string that crosses in front of it, bare feet under the hem. `glow` (0..1): how brightly the
+ * orb shines; it burns bright by the place where you last rested.
  */
-function drawGuideMap(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
+function drawGuideBody(g: CanvasRenderingContext2D, x: number, y: number, T: number, glow: number, t: number) {
   const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
-  const foot = 0.36;
+  const hem = 0.36, tip = -0.5, half = 0.21;
+  // The shadow, and the bare feet barely out from under the hem.
   g.fillStyle = COLORS.shadow;
-  g.beginPath(); g.ellipse(X(0), Y(foot), 0.22 * T, 0.07 * T, 0, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(X(0), Y(hem + 0.01), 0.25 * T, 0.08 * T, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#e5cdb8";
+  g.beginPath(); g.ellipse(X(-0.065), Y(hem + 0.025), 0.035 * T, 0.022 * T, 0, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(X(0.07), Y(hem + 0.03), 0.035 * T, 0.022 * T, 0, 0, Math.PI * 2); g.fill();
+  // The cloak: straight sides from the hem to the tip of the hat, which curls a little.
   g.fillStyle = GUIDE_NAVY;
-  g.beginPath(); g.moveTo(X(-0.2), Y(foot - 0.02)); g.quadraticCurveTo(X(-0.12), Y(foot - 0.3), X(-0.04), Y(-0.4)); g.quadraticCurveTo(X(0.08), Y(foot - 0.3), X(0.2), Y(foot - 0.02)); g.closePath(); g.fill();
-  const glow = g.createRadialGradient(X(0.02), Y(0.04), 0, X(0.02), Y(0.04), 0.3 * T);
-  glow.addColorStop(0, "rgb(255 255 245 / 0.55)");
-  glow.addColorStop(1, "rgb(255 255 245 / 0)");
-  g.fillStyle = glow;
-  g.beginPath(); g.arc(X(0.02), Y(0.04), 0.3 * T, 0, Math.PI * 2); g.fill();
-  g.fillStyle = "#f7f5ee";
-  g.beginPath(); g.arc(X(0.02), Y(0.04), 0.075 * T, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = "#111a33"; g.lineWidth = Math.max(1, 0.02 * T); g.lineJoin = "round";
+  g.beginPath();
+  g.moveTo(X(-half), Y(hem));
+  g.lineTo(X(-0.082), Y(-0.28)); g.quadraticCurveTo(X(-0.05), Y(-0.42), X(-0.03), Y(tip));
+  g.quadraticCurveTo(X(0.045), Y(-0.42), X(0.082), Y(-0.28));
+  g.lineTo(X(half), Y(hem));
+  g.quadraticCurveTo(X(0), Y(hem + 0.05), X(-half), Y(hem));
+  g.closePath(); g.fill(); g.stroke();
+  // Folds running up from the hem.
+  g.strokeStyle = "#131d3a"; g.lineWidth = Math.max(1, 0.015 * T); g.lineCap = "round";
+  for (const [a, b] of [[-0.09, -0.05], [0.01, 0.01], [0.1, 0.06]]) { g.beginPath(); g.moveTo(X(a), Y(hem - 0.01)); g.lineTo(X(b), Y(0.02)); g.stroke(); }
+  // The face opening: a hollow.
+  g.fillStyle = "#03050c";
+  g.beginPath(); g.ellipse(X(0), Y(-0.15), 0.05 * T, 0.068 * T, 0, 0, Math.PI * 2); g.fill();
+  // The orb, hanging from the opening on its string.
+  const ox = 0, oy = 0.07, r = 0.078;
+  const pulse = glow * (0.85 + Math.sin(t / 420) * 0.15);
+  if (glow > 0) {
+    const halo = g.createRadialGradient(X(ox), Y(oy), 0, X(ox), Y(oy), 0.5 * T);
+    halo.addColorStop(0, `rgb(255 255 245 / ${0.45 * pulse})`);
+    halo.addColorStop(1, "rgb(255 255 245 / 0)");
+    g.fillStyle = halo;
+    g.beginPath(); g.arc(X(ox), Y(oy), 0.5 * T, 0, Math.PI * 2); g.fill();
+  }
+  g.strokeStyle = "#07070b"; g.lineWidth = Math.max(1, 0.014 * T);
+  const wrap = (tilt: number, front: boolean) => {
+    g.beginPath();
+    g.ellipse(X(ox), Y(oy), (r + 0.004) * T, r * 0.3 * T, tilt, front ? 0 : Math.PI, front ? Math.PI : Math.PI * 2);
+    g.stroke();
+  };
+  // The string from the opening to the orb's top, and the far halves of its two turns, behind the yarn.
+  g.beginPath(); g.moveTo(X(-0.016), Y(-0.1)); g.lineTo(X(-0.045), Y(oy - r * 0.8)); g.moveTo(X(0.016), Y(-0.1)); g.lineTo(X(0.045), Y(oy - r * 0.8)); g.stroke();
+  wrap(0.49, false); wrap(-0.49, false);
+  g.fillStyle = glow > 0 ? "#f7f5ee" : "#cfcbbd";
+  g.beginPath(); g.arc(X(ox), Y(oy), r * T, 0, Math.PI * 2); g.fill();
+  // The yarn: loops wound round it.
+  g.save();
+  g.beginPath(); g.arc(X(ox), Y(oy), r * T, 0, Math.PI * 2); g.clip();
+  g.strokeStyle = "#cfc9b4"; g.lineWidth = Math.max(1, 0.008 * T);
+  for (const k of [-0.5, -0.1, 0.3]) { g.beginPath(); g.ellipse(X(ox), Y(oy + k * r), r * T, r * 0.55 * T, 0, 0, Math.PI * 2); g.stroke(); }
+  for (const k of [-0.4, 0.4]) { g.beginPath(); g.ellipse(X(ox + k * r), Y(oy), r * 0.5 * T, r * T, 0, 0, Math.PI * 2); g.stroke(); }
+  g.restore();
+  // The near halves cross in front of it, in an X.
+  g.strokeStyle = "#07070b"; g.lineWidth = Math.max(1, 0.014 * T);
+  wrap(0.49, true); wrap(-0.49, true);
+}
+
+/** The guide as an enemy on the map (the lesson is not fought on the map; this is for the fight's map presence if it ever is). */
+function drawGuideMap(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
+  drawGuideBody(g, x, y, T, 1, performance.now());
 }
 
 /** How each kind of enemy is drawn on the map. */

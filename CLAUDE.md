@@ -9,6 +9,7 @@ and armor, any pose held, and your actions played against a dummy Sleepwalker) a
 
 The design doc is `docs/enemies.md`. Read it before changing rules or enemies, and
 keep it up to date when a rule, enemy or map change is decided or built.
+What is planned but not built is in `docs/todo.md`: read it when starting a task from it, and update it when something is built or decided.
 
 ## Commands
 

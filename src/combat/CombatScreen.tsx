@@ -411,17 +411,17 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playback?.index, playback?.phase, !!playback, selId, fight, usurpStage, igniteState]);
 
-  /** Where the selected figure will be on screen once the camera settles, for the wheel. */
+  /** Where the selected figure will be on screen once the camera settles, for the ring (the mark over it, and the wheel). */
   const [anchor, setAnchor] = useState<Anchor | null>(null);
   useLayoutEffect(() => {
-    if (!wheelOpen) return;
+    if (busy) return;
     const p = shot.positions[selId];
     const { w, h } = viewport;
     if (!p || !w) return setAnchor(null);
     const foe = fight.enemies.find(e => e.id === selId);
     const b = figureBox(shotCamera(shot), p, w, h, foe && kindOf(foe).scale);
     setAnchor({ x: b.x, y: b.y, w: b.w, h: b.h, hudW: w, hudH: h });
-  }, [wheelOpen, selId, shot, viewport]);
+  }, [busy, selId, shot, viewport]);
 
   /* ---------- moving the cursor ----------
    * W/S move between depths. A/D walk the whole lineup as it appears on screen, left to right:
@@ -1175,14 +1175,14 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         </div>
       )}
 
-      {/* The wheel's options surround your character. */}
-      {playing && !forced && !busy && wheelOpen && (
+      {/* The ring over whoever you have selected: a small mark while you plan, grown into the wheel when you focus. */}
+      {playing && !forced && !busy && (
         <ActionWheel
           wheel={wheel}
+          open={wheelOpen}
           highlight={highlight}
           center={wheelCenter}
           anchor={anchor}
-          aroundPlayer={sel.kind === "player"}
           onHighlight={d => { if (!lesson) setHighlight(d); }}
           onCommit={commit}
         />
