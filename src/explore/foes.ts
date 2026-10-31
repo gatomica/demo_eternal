@@ -8,12 +8,10 @@
  */
 import { ENEMY_KINDS, type KindId } from "../core/bestiary";
 import { ENCOUNTERS } from "../core/encounters";
-import { TRAINING_SCRIPT } from "../combat/training";
 import type { EnemySetup } from "../core/types";
 import type { Walker } from "./movement";
 import type { GroundItem } from "./pickups";
 import { openFloor } from "./seals";
-import { TUTORIAL_FOE } from "./tutorial";
 import { HALF_D, HALF_W } from "./tuning";
 import { WORLD } from "./world";
 
@@ -84,11 +82,6 @@ const WARDEN_FIGHT = ENCOUNTERS.find(e => e.id === "warden")!.enemies;
 
 /** The tutorial, roughly in the order you'll meet it. Levels: 0-1 below ground, 2 ground, 3-6 above. */
 export const MAP_FOES: MapFoe[] = [
-  // The start room: a waxed lying in the corner, the guide's lesson. It scratches and rests on a script.
-  {
-    id: TUTORIAL_FOE, kind: "waxed", home: { x: 4.5, y: 6.5, z: 2 }, still: true,
-    fight: [{ kind: "waxed", line: "front", script: TRAINING_SCRIPT }],
-  },
   // Ground floor. In the hall: a lone waxed, then a pair further in.
   { id: "hall-waxed", kind: "waxed", home: { x: 17.5, y: 4.5, z: 2 }, fight: [{ kind: "waxed" }] },
   { id: "hall-pair", kind: "waxed", home: { x: 21.5, y: 11.5, z: 2 }, fight: [{ kind: "waxed" }, { kind: "waxed" }] },

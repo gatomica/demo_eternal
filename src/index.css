@@ -91,17 +91,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dialogue-speaker { color: var(--accent); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; }
 .dialogue-text { margin: 0; font-size: 1.05rem; line-height: 1.5; }
 .dialogue-next { justify-self: end; font-size: 0.85rem; opacity: 0.7; }
-/* The guide's training in a fight: what to do next. */
-.coach {
-  position: absolute; z-index: 15; top: 64px; left: 50%; transform: translateX(-50%);
-  width: min(560px, calc(100% - 24px)); padding: 10px 14px; display: grid; gap: 4px; text-align: center;
-  background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line); border-radius: 10px;
-}
-.coach-title { font-size: 1rem; font-weight: 600; color: var(--accent); }
-.coach-count { margin-left: 6px; font-size: 0.75rem; font-weight: 400; opacity: 0.6; }
-.coach-text { margin: 0; font-size: 0.92rem; line-height: 1.45; }
-.coach-tip { margin: 4px 0 0; padding-top: 6px; border-top: 1px solid var(--line); font-size: 0.85rem; line-height: 1.4; opacity: 0.85; }
-.coach-tip.is-warning { color: #e0a85a; opacity: 1; }
 /* Resting: dark, then light again. */
 .explore-sleep { position: absolute; inset: 0; z-index: 20; background: #000; pointer-events: none; animation: explore-sleep 2.4s ease-in-out forwards; }
 @keyframes explore-sleep { 0% { opacity: 0; } 38% { opacity: 1; } 55% { opacity: 1; } 100% { opacity: 0; } }
@@ -325,11 +314,15 @@ kbd {
 /* The Fatigue an action would cost, before you commit to it: flickers beside the Fatigue you have. */
 .bar-preview { background: var(--sleep); animation: bar-preview 0.8s ease-in-out infinite alternate; }
 @keyframes bar-preview { from { opacity: 0.15; } to { opacity: 0.9; } }
+/* What a Rest would give back, before you take it: the Fatigue it clears flickers away, the Health it returns flickers in. */
+.bar-recover { background: var(--sleep); animation: bar-recover 0.8s ease-in-out infinite alternate; }
+@keyframes bar-recover { from { opacity: 0.9; } to { opacity: 0.1; } }
+.bar-heal { background: var(--flesh); animation: bar-preview 0.8s ease-in-out infinite alternate; }
 .bar-death { background: var(--void); }
 .bar-flash { position: absolute; inset: -1px; border-radius: 3px; background: #fff; pointer-events: none; animation: bar-flash 0.3s ease-out forwards; }
 @keyframes bar-flash { from { opacity: 0.85; } to { opacity: 0; } }
 .bar.is-staggered { border-color: var(--sleep); box-shadow: 0 0 6px rgb(243 241 248 / 0.45); }
-@media (prefers-reduced-motion: reduce) { .bar-trail > i { transition: none; } .bar-flash { animation: none; opacity: 0; } .bar-preview { animation: none; opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) { .bar-trail > i { transition: none; } .bar-flash { animation: none; opacity: 0; } .bar-preview, .bar-heal { animation: none; opacity: 0.55; } .bar-recover { animation: none; opacity: 0.45; } }
 
 /* ---------- Guard break shards ---------- */
 .shards { position: absolute; left: 50%; top: 38%; width: 0; height: 0; pointer-events: none; z-index: 5; }
@@ -683,3 +676,36 @@ kbd {
 .guide-glow-wide { fill: rgb(255 255 245 / 0.14); filter: blur(5px); }
 @keyframes guide-pulse { from { transform: scale(0.94); } to { transform: scale(1.06); } }
 @media (prefers-reduced-motion: reduce) { .guide-glow { animation: none; } }
+
+/* The guide's halo: rings of white light growing out of its orb, fading as they widen. */
+.halo-burst {
+  position: absolute; z-index: 2001; pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.04); opacity: 0;
+  animation: halo-grow 0.7s ease-out forwards;
+}
+.halo-svg { width: 100%; height: 100%; overflow: visible; }
+@keyframes halo-grow {
+  0% { transform: translate(-50%, -50%) scale(0.04); opacity: 1; }
+  70% { opacity: 0.9; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+}
+.halo-glow { fill: rgb(255 255 245 / 0.1); stroke: rgb(255 255 245 / 0.35); stroke-width: 6; filter: blur(2px); }
+.halo-ring { fill: none; stroke: #f7f5ee; stroke-width: 2.4; }
+.halo-ring.is-inner { stroke-width: 1.4; opacity: 0.8; }
+@media (prefers-reduced-motion: reduce) { .halo-burst { animation-duration: 0.01s; } }
+
+/* The guide's words in the tutorial fight: written a letter at a time at the bottom, the instruction under them. */
+.lesson {
+  position: absolute; z-index: 15; bottom: 22px; left: 50%; transform: translateX(-50%);
+  width: min(640px, calc(100% - 32px)); padding: 12px 18px 14px; display: grid; gap: 4px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--line); border-radius: 10px;
+}
+.lesson-speaker { color: var(--accent); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.lesson-say { margin: 0; min-height: 1.5em; font-size: 1.1rem; line-height: 1.5; }
+/* The rest of the words are already laid out, just not seen yet, so the box doesn't grow as they are written. */
+.lesson-unwritten { visibility: hidden; }
+.lesson-hint { margin: 2px 0 0; min-height: 1.4em; font-size: 0.88rem; line-height: 1.4; color: var(--accent); opacity: 0; transition: opacity 0.25s; }
+.lesson-hint.is-shown { opacity: 0.9; }
+.lesson-next { position: absolute; right: 14px; bottom: 10px; animation: lesson-blink 1s ease-in-out infinite alternate; }
+@keyframes lesson-blink { from { opacity: 0.35; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .lesson-next { animation: none; } .lesson-hint { transition: none; } }

@@ -72,7 +72,7 @@ export interface EnemyKind {
    * `windup`: a Rest or a Block takes this pose from the start of the turn, to show its intent: a Rest until it goes
    * through (then `rest`) or is broken by a blow (it flinches); a Block until the blow lands (then `guard`).
    */
-  actionPoses?: Record<string, { act?: string; strike?: string; rest?: string; windup?: string; projectile?: "fan" | "blast" | "wax" | "impact"; guard?: string }>;
+  actionPoses?: Record<string, { act?: string; strike?: string; rest?: string; windup?: string; projectile?: "fan" | "blast" | "wax" | "impact" | "halo"; guard?: string }>;
   /** The hand that holds its weapon (default right): the `weaponArm` of every pose is the arm on this side. */
   weaponHand?: Side;
   /**

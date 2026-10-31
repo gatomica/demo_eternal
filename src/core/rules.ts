@@ -55,6 +55,17 @@ export const attackDamage = (f: Fighter, weight: WeaponTier = f.weapon) => sixte
 export const restAmount = (f: Fighter) => sixteenths(REST_CLEARS, f.maxHP);
 
 /**
+ * What a Rest would give back right now (for the preview on the bar): the Fatigue it clears, and
+ * the Health that returns if it clears more than there is (half the excess; the lost Health, shown black).
+ */
+export function restRecovery(f: Fighter): { fatigue: number; heal: number } {
+  const amount = restAmount(f);
+  const fatigue = Math.min(f.fatigue, amount);
+  const excess = amount - f.fatigue;
+  return { fatigue, heal: excess > 0 ? Math.min(excess / 2, f.death) : 0 };
+}
+
+/**
  * Share of incoming damage turned into Fatigue (0..1). Armor alone when not blocking; a Block
  * adds the baseline and its weight's bonus.
  */

@@ -13,9 +13,6 @@ export interface Pickup {
 }
 
 export const PICKUPS: Pickup[] = [
-  // In the start room, near where you wake: the guide has you arm yourself before the Waxed. A
-  // broken blade is still a light weapon, and it is eternal: falling doesn't take it from you.
-  { id: "broken-sword", at: { x: 3.9, y: 3.4, z: 2 }, gear: { slot: "weapon", tier: "light", name: "Broken sword", eternal: true }, look: "broken-sword" },
   // Down in the cellar, the two big rooms along the way: eternal armor in the first (the cold
   // room, in its far corner), and eternal weapon in the deepest (the ossuary, past its sleepwalker).
   { id: "cellar-armor", at: { x: 13.5, y: 22.6, z: 1 }, gear: { slot: "armor", tier: "normal", eternal: true }, look: "armor" },

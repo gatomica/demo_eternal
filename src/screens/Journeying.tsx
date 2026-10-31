@@ -7,39 +7,33 @@
 import { useState } from "react";
 import { CombatScreen } from "../combat/CombatScreen";
 import { newFight } from "../combat/fight";
-import { TRAINING_STEPS, tipAfter } from "../combat/training";
+import { LESSON } from "../combat/lesson";
+import { ENCOUNTERS } from "../core/encounters";
 import type { CombatState, Opening } from "../core/types";
 import { Exploration, type Journey } from "../explore/Exploration";
 import { type MapFoe, wakeEnemies, withCorpses } from "../explore/foes";
-import { dropsOf, EMPTY_INVENTORY, gotNote, loadoutOf, lose, receive } from "../explore/gear";
-import { type GroundItem, PICKUPS } from "../explore/pickups";
+import { dropsOf, EMPTY_INVENTORY, gotNote, loadoutOf, lose } from "../explore/gear";
+import type { GroundItem } from "../explore/pickups";
 import { clearSave, loadJourney, saveJourney } from "../explore/save";
-import { knotCharges, NEW_TUTORIAL, TUTORIAL_FOE } from "../explore/tutorial";
+import { knotCharges, NEW_TUTORIAL } from "../explore/tutorial";
 
-type Fight = { id: number; foes: MapFoe[]; state: CombatState; opening?: Opening; backTo: Journey };
+/** `lesson`: the guide's tutorial fight (no map enemies; see combat/lesson.ts). */
+type Fight = { id: number; foes: MapFoe[]; state: CombatState; opening?: Opening; backTo: Journey; lesson?: boolean };
 
 /** The enemies of these map enemies, together. */
 const enemiesOf = (foes: MapFoe[]) => foes.flatMap(f => f.fight);
 
-/** Whether this is the guide's lesson. */
-const isLesson = (foes: MapFoe[]) => foes.some(f => f.id === TUTORIAL_FOE);
+/** The guide's lesson: its fight is the Test combat "tutorial" encounter, with what you wear (nothing, at first), and it can't be lost. */
+const lessonFight = (backTo: Journey) =>
+  newFight(ENCOUNTERS.find(e => e.id === "tutorial")!.enemies, loadoutOf(backTo.inventory), knotCharges(backTo.knot), { sparring: true });
 
-/** A fight as you are now: what you wear, the knot's revive, and the lesson's safety until it's learned. */
+/** A fight against these map enemies as you are now: what you wear and the knot's revive. */
 const fightFor = (foes: MapFoe[], backTo: Journey) =>
-  newFight(enemiesOf(foes), loadoutOf(backTo.inventory), knotCharges(backTo.knot), isLesson(foes) ? { sparring: true } : {});
+  newFight(enemiesOf(foes), loadoutOf(backTo.inventory), knotCharges(backTo.knot));
 
-/**
- * A new game that skips the tutorial, for testing: the lesson is behind you (the Waxed beaten, the
- * broken sword in hand), and all that is left is to rest with the guide.
- */
+/** A new game that skips the tutorial, for testing: the lesson is behind you, and all that is left is to rest with the guide. */
 function skippedTutorial(): Journey {
-  const sword = PICKUPS.find(p => p.id === "broken-sword")!;
-  return {
-    defeated: [TUTORIAL_FOE],
-    taken: [sword.id],
-    tutorial: { greeted: true, beaten: true, done: false, attempts: 0 },
-    inventory: receive(EMPTY_INVENTORY, [sword.gear]).inventory,
-  };
+  return { defeated: [], taken: [], tutorial: { greeted: true, beaten: true, done: false }, inventory: EMPTY_INVENTORY };
 }
 
 export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: boolean; skip?: boolean; onExit: () => void }) {
@@ -67,11 +61,19 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
         key={fight.id}
         initial={fight.state}
         opening={fight.opening}
-        coach={isLesson(foes) ? { steps: TRAINING_STEPS, tipAfter } : undefined}
-        onRetry={() => setFight(f => f && { ...f, id: f.id + 1, ...fightFor(f.foes, f.backTo) })}
+        lesson={fight.lesson ? LESSON : undefined}
+        wonText={fight.lesson ? "The lesson is over" : undefined}
+        onRetry={() => setFight(f => f && { ...f, id: f.id + 1, ...(f.lesson ? lessonFight(f.backTo) : fightFor(f.foes, f.backTo)) })}
         onExit={() => leave(backTo)}
         onDone={(won, charges) => {
-          const lesson = isLesson(foes);
+          if (fight.lesson) {
+            // The lesson can't be lost. Passed, the guide is relieved and asks you to rest with it.
+            setJourney(won ? { ...backTo, tutorial: { ...backTo.tutorial, beaten: true } } : backTo);
+            setFinale(won);
+            setFight(null);
+            setVisit(v => v + 1);
+            return;
+          }
           // A knot that kept you from fading is spent, whether you then won or not.
           const knot = backTo.knot && (charges > 0 ? "wound" : "unwound");
           if (won) {
@@ -87,11 +89,10 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
               // They lie where they fell.
               corpses: { ...backTo.corpses, ...backTo.fallen },
               fallen: undefined,
-              tutorial: lesson ? { ...backTo.tutorial, beaten: true } : backTo.tutorial,
               ground: [...(backTo.ground ?? []), ...dropped],
               found: dropped.length ? gotNote("Dropped", dropped.map(d => d.gear), []) : undefined,
             });
-            setFinale(lesson);
+            setFinale(false);
           } else {
             // Wake by the keeper you last rested by (or at the start). Your progress stays, but the
             // gear you carried is gone. Coming back counts as a rest: the sleepwalkers get up again
@@ -101,7 +102,7 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
               ...woke,
               taken: backTo.taken,
               rested: backTo.rested,
-              tutorial: lesson ? { ...backTo.tutorial, attempts: backTo.tutorial.attempts + 1 } : backTo.tutorial,
+              tutorial: backTo.tutorial,
               knot: backTo.knot && "wound",
               inventory: lose(backTo.inventory),
             });
@@ -118,6 +119,11 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
       journey={journey}
       finale={finale}
       onSave={saveJourney}
+      onLesson={backTo => {
+        saveJourney(backTo);
+        setFinale(false);
+        setFight(f => ({ id: (f?.id ?? 0) + 1, foes: [], ...lessonFight(backTo), backTo, lesson: true }));
+      }}
       onEncounter={(foes, backTo) => {
         saveJourney(backTo);
         setFinale(false);

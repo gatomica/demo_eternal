@@ -31,7 +31,7 @@ import { cornerNudge, slide, surfaceNear, type Walker } from "./movement";
 import { CHUNK, CHUNK_PAD_BOTTOM, CHUNK_PAD_TOP, makeCanvas, paintChunk } from "./paint";
 import { drawSeal, MELT_MS, SEALS, sealsUp, setSeals } from "./seals";
 import { seeThrough, sight } from "./sight";
-import { type After, TUTORIAL_FOE, DROP_DELAY_MS, DROP_MS, GIFT, GUIDE_WALK, guideTalk, type Knot, LANDING, PERCH, RELIEF, type Talk, type TutorialState } from "./tutorial";
+import { type After, DROP_DELAY_MS, DROP_MS, GIFT, GUIDE_WALK, guideTalk, type Knot, LANDING, PERCH, RELIEF, type Talk, type TutorialState } from "./tutorial";
 import { ACCEL, BODY_ABOVE_FEET, CAMERA_FOLLOW, COLORS, DEPTH_DIM, GHOST_ALPHA, GRAVITY, LADDER_SPEED, RISE, SIGHT_EASE, SPEED, STEP_TOLERANCE, STRIDE, TILES_TALL, VISION_FULL, VISION_RADIUS } from "./tuning";
 import { type Dir, FLOOR, groundBelow, isAir, isRamp, LADDER, LEVELS, tileAt, WORLD } from "./world";
 
@@ -65,15 +65,17 @@ export interface Journey {
   found?: string;
 }
 
-export function Exploration({ journey, finale = false, onEncounter, onSave, onExit }: {
+export function Exploration({ journey, finale = false, onEncounter, onLesson, onSave, onExit }: {
   journey: Journey;
-  /** Just back from beating the Waxed in the start room: the guide speaks its relief and asks you to rest with it. */
+  /** Just back from passing the guide's lesson: the guide speaks its relief and asks you to rest with it. */
   finale?: boolean;
   /**
    * A fight starts: the enemy that reached you, then any others chasing you that join in, and
    * where you were, to come back to afterwards.
    */
   onEncounter: (foes: MapFoe[], journey: Journey) => void;
+  /** The guide has spoken its last words before the lesson: the fight against it begins (`journey` is where to come back to). */
+  onLesson: (journey: Journey) => void;
   /** Your progress is worth keeping now (you rested, the guide gave you something). */
   onSave: (journey: Journey) => void;
   /** Back to the main menu, with where you stand. */
@@ -83,8 +85,8 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
   // The screen goes dark as a fight begins; input stops.
   const [entering, setEntering] = useState(false);
   const leaving = useRef(false);
-  const latest = useRef({ journey, onEncounter, onSave });
-  latest.current = { journey, onEncounter, onSave };
+  const latest = useRef({ journey, onEncounter, onLesson, onSave });
+  latest.current = { journey, onEncounter, onLesson, onSave };
   // Escape opens the inventory screen, which also holds the way back to the main menu.
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
@@ -245,15 +247,8 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
   };
 
   // The guide speaking: its lines, which one you're at, and what follows the last. The map
-  // stands still meanwhile. After the Waxed is beaten it opens on its own with the relief.
+  // stands still meanwhile. After the lesson it opens on its own with the relief.
   const [talk, setTalk] = useState<(Talk & { at: number }) | null>(() => (finale ? { ...RELIEF, at: 0 } : null));
-  // Waking after the Waxed has beaten you, the guide speaks to you.
-  useEffect(() => {
-    const j = latest.current.journey;
-    if (j.at || j.tutorial.beaten || j.tutorial.attempts === 0) return;
-    const t = window.setTimeout(() => { held.current = []; setTalk({ ...guideTalk(j.tutorial), at: 0 }); }, 1000);
-    return () => window.clearTimeout(t);
-  }, []);
   const talkRef = useRef(false);
   talkRef.current = talk !== null;
   // Set when the guide lets the wax go; the map's loop starts the melt.
@@ -266,6 +261,16 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
     tutorialRef.current = { ...tutorialRef.current, greeted: true };
   };
   const then = (after: After) => {
+    if (after === "fight") {
+      // The lesson: the screen fades out as for any fight.
+      leaving.current = true;
+      held.current = [];
+      setEntering(true);
+      const backTo = snapshot.current();
+      latest.current.onSave(backTo);
+      window.setTimeout(() => latest.current.onLesson(backTo), ENCOUNTER_FADE_MS);
+      return;
+    }
     if (after !== "melt") return;
     // The gift: the knot, and the wax goes.
     tutorialRef.current = { ...tutorialRef.current, done: true };
@@ -392,7 +397,6 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
       foes.splice(0, foes.length, ...spawn());
     };
     let grace = GRACE_MS;
-    let lastHint = -Infinity;
     let fadeTimer = 0;
     // What you could see last frame; enemies see you exactly where you see them.
     let seenLast: Float32Array[] | null = null;
@@ -422,7 +426,7 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
     // The guide: when you first wake it sits on the raised platform east of the room, then drops in,
     // walks to its place and begins the lesson. Every other time it is already there.
     const home = KEEPERS.find(k => k.id === GUIDE)!.at;
-    const firstWake = !begin.at && !begin.rested && !begin.tutorial.beaten && begin.tutorial.attempts === 0;
+    const firstWake = !begin.at && !begin.rested && !begin.tutorial.beaten;
     const guide = {
       x: firstWake ? PERCH.x : home.x, y: firstWake ? PERCH.y : home.y, alt: firstWake ? PERCH.z : home.z,
       phase: (firstWake ? "perch" : "home") as "perch" | "drop" | "walk" | "home", t: 0,
@@ -682,12 +686,6 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
 
       // Close enough: the fight begins, and everyone else chasing you piles in.
       if (grace <= 0 && sameLevel && dist < TOUCH && !leaving.current) {
-        // The guide's lesson isn't fought bare-handed: it waits until you have a weapon on.
-        if (f.def.id === TUTORIAL_FOE && !invRef.current.weapon) {
-          const now = performance.now();
-          if (now - lastHint > 4000) { lastHint = now; setNote({ text: "You can't fight it bare-handed. Find a weapon and equip it (Esc).", id: Date.now() }); }
-          return;
-        }
         leaving.current = true;
         held.current = [];
         setEntering(true);

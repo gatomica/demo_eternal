@@ -10,7 +10,7 @@ export interface Projectile {
   from: string;
   to: string;
   /** `clang`: a melee blow caught by a Block, so a starburst flashes where the blocker (`from`) meets the attacker (`to`). */
-  kind: "fan" | "blast" | "wax" | "impact" | "clang" | "flamehit";
+  kind: "fan" | "blast" | "wax" | "impact" | "halo" | "clang" | "flamehit";
   /** Changes every beat, so the flight replays. */
   key: string;
   /** A flaming flail's impact: its shockwave burns instead of white spikes. */
@@ -40,6 +40,23 @@ const FAN = (() => {
   const band = (f: Pt, b: Pt) => `M${L[0]} ${L[1]} Q${f[0]} ${f[1]} ${R[0]} ${R[1]} Q${b[0]} ${b[1]} ${L[0]} ${L[1]} Z`;
   return { tongues, band: band(front, back) };
 })();
+
+/**
+ * The guide's halo: rings of white light that grow out of the orb as their center, wider and wider
+ * until they have swept through the target, fading as they go. Not thrown: `diameter` is how wide
+ * they end (screen pixels), centered on (`cx`, `cy`).
+ */
+export function HaloBurst({ cx, cy, diameter }: { cx: number; cy: number; diameter: number }) {
+  return (
+    <div className="halo-burst" style={{ left: cx, top: cy, width: diameter, height: diameter }}>
+      <svg viewBox="-50 -50 100 100" className="halo-svg" aria-hidden="true">
+        <circle cx={0} cy={0} r={48} className="halo-glow" />
+        <circle cx={0} cy={0} r={46} className="halo-ring" vectorEffect="non-scaling-stroke" />
+        <circle cx={0} cy={0} r={36} className="halo-ring is-inner" vectorEffect="non-scaling-stroke" />
+      </svg>
+    </div>
+  );
+}
 
 /** The thrown thing itself, drawn pointing right (the scene rotates it to its flight). */
 export function ProjectileShape({ kind }: { kind: Projectile["kind"] }) {

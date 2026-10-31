@@ -46,7 +46,7 @@ export interface Intent {
   actPose?: string;
   strikePose?: string;
   /** What flies from it to its target, for a ranged attack. */
-  projectile?: "fan" | "blast" | "wax" | "impact";
+  projectile?: "fan" | "blast" | "wax" | "impact" | "halo";
   /** For a Rest: the pose once it actually happens, at the end of the turn. */
   restPose?: string;
   /**

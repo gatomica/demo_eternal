@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { CombatScreen } from "../combat/CombatScreen";
 import { type Loadout, newFight } from "../combat/fight";
+import { LESSON } from "../combat/lesson";
 import { ENCOUNTERS } from "../core/encounters";
 import type { CombatState, Opening } from "../core/types";
 import { SetupScreen } from "../ui/SetupScreen";
@@ -13,7 +14,7 @@ type Setup = Loadout & { encounterId: string };
 
 function startFight(setup: Setup) {
   const encounter = ENCOUNTERS.find(e => e.id === setup.encounterId)!;
-  return newFight(encounter.enemies, setup, encounter.charges);
+  return newFight(encounter.enemies, setup, encounter.charges, encounter.lesson ? { sparring: true } : {});
 }
 
 export function TestCombat({ onExit }: { onExit: () => void }) {
@@ -23,6 +24,7 @@ export function TestCombat({ onExit }: { onExit: () => void }) {
   const start = () => setRun(r => ({ id: (r?.id ?? 0) + 1, ...startFight(setup) }));
 
   if (!run) return <SetupScreen setup={setup} onChange={setSetup} onStart={start} onExit={onExit} />;
-  const wonText = ENCOUNTERS.find(e => e.id === setup.encounterId)?.wonText;
-  return <CombatScreen key={run.id} initial={run.state} opening={run.opening} onRetry={start} onChangeLoadout={() => setRun(null)} wonText={wonText} onExit={onExit} />;
+  const encounter = ENCOUNTERS.find(e => e.id === setup.encounterId);
+  const wonText = encounter?.wonText;
+  return <CombatScreen key={run.id} initial={run.state} opening={run.opening} onRetry={start} onChangeLoadout={() => setRun(null)} wonText={wonText} lesson={encounter?.lesson ? LESSON : undefined} onExit={onExit} />;
 }

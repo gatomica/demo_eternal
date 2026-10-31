@@ -4,12 +4,13 @@
 import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { play as playSfx, prepare as prepareSfx, sfxFor } from "../audio/sfx";
 import { ActionWheel, type Anchor } from "./ActionWheel";
-import type { CoachStep, Tip } from "./training";
 import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_SIDE, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt } from "./playback";
-import { defaultSelection, rowsOf, sameSel, type Selection, type Wheel, type WheelOption } from "./selection";
+import { LessonBox } from "./LessonBox";
+import { DETOUR, isWanted, type Beat, lessonAllows, lessonMet, typeDelay } from "./lesson";
+import { defaultSelection, moveSelection, rowsOf, sameSel, type Selection, type Wheel, type WheelOption } from "./selection";
 import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveTurn } from "../core/resolve";
-import { attackCost } from "../core/rules";
+import { attackCost, restRecovery } from "../core/rules";
 import type { CombatState, Enemy, Opening, PlayerAction } from "../core/types";
 import { behind, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
 import type { Projectile } from "../render/effects";
@@ -40,7 +41,7 @@ const barValues =(f: { hp: number; fatigue: number; death: number }): BarValues 
 /** How an enemy's look draws it differently (its kind's variant). */
 const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 
-export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, playerAction, playerHold, playerAngle, playerDead, light = true, changeLabel, exitLabel, wonText, onTurnPlayed, coach, figureAngle }: {
+export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, playerAction, playerHold, playerAngle, playerDead, light = true, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, figureAngle }: {
   initial: CombatState;
   /** A scene to play before the first turn (it leaves the fight as `initial`). */
   opening?: Opening;
@@ -69,11 +70,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   /** The pause menu's label for onExit. */
   exitLabel?: string;
   /**
-   * The guide's training: asks for these actions in order, showing the current one, with a tip
-   * after each turn. The fight starts in `sparring` (it can't end early); once the last step is
-   * done that lifts, and the fight is for real.
+   * The guide's scripted lesson (see lesson.ts): its words are written out in a box at the bottom, and only
+   * the keys it asks for work. Start the fight in `sparring`. When the last beat is read, the fight is won.
    */
-  coach?: { steps: CoachStep[]; tipAfter: (s: CombatState) => Tip | null };
+  lesson?: Beat[];
   /** The title when you win (fights off the map have their own). */
   wonText?: string;
   /** Called as a turn finishes playing, with the fight as it now stands. */
@@ -106,19 +106,20 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const [igniteState, setIgniteState] = useState<{ who: string; start: number; seed: number; at: number } | null>(null);
   const setIgnite = (v: { who: string; start: number; seed: number } | null) => setIgniteState(v && { ...v, at: 0 });
   const [pauseIndex, setPauseIndex] = useState(0);
-  // The training: how many of the coach's steps are done. Once the last turn has played out, the
-  // lesson is over: nothing holds the fight back any more.
-  const [coachStep, setCoachStep] = useState(0);
-  const [tip, setTip] = useState<Tip | null>(null);
   const busy = playback !== null;
-  const trained = !!coach && coachStep >= coach.steps.length;
-  useEffect(() => {
-    if (!trained || busy) return;
-    // The lesson is over: no more safety, and the enemy picks for itself instead of following its script.
-    setFight(f => (f.config.sparring ? { ...f, config: { ...f.config, sparring: false }, enemies: f.enemies.map(e => ({ ...e, script: [] })) } : f));
-  }, [trained, busy]);
   const forced = forcedAction(fight);
   const playing = fight.status === "playing";
+
+  /* ---------- the guide's lesson ----------
+   * `beat` is where the lesson stands; `written` how much of its words are on screen. */
+  const [beat, setBeat] = useState(0);
+  const [typed, setTyped] = useState({ beat: 0, n: 0 });
+  const written = typed.beat === beat ? typed.n : 0;
+  const setWritten = (n: number | ((w: number) => number)) => setTyped(t => ({ beat, n: typeof n === "number" ? n : n(t.beat === beat ? t.n : 0) }));
+  const current = lesson && playing ? lesson[beat] : undefined;
+  const typing = !!current && written < current.say.length;
+  /** The detour's words (see DETOUR), as far as they are written. */
+  const [detourN, setDetourN] = useState(0);
 
   // What's on screen: mid-turn during playback, otherwise the fight as it stands.
   // While an attacker is still closing in, the fight shows as it was before the blow.
@@ -168,14 +169,14 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     if (sel.kind === "player") {
       return {
         up: null,
-        left: opt("Fall back", { type: "maneuver", target: "self" }),
+        left: opt("Dodge", { type: "maneuver", target: "self" }),
         down: opt("Rest", { type: "rest" }),
         right: null,
       };
     }
     return {
       up: opt("Attack", { type: "attack", target: sel.id }),
-      left: opt("Maneuver", { type: "maneuver", target: sel.id }),
+      left: opt("Dodge", { type: "maneuver", target: sel.id }),
       down: null,
       right: opt("Block", { type: "block", target: sel.id }),
     };
@@ -183,6 +184,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const chosen = wheelOpen && highlight ? wheel[highlight] : null;
   // Hovering an Attack (before you commit to it): the Fatigue it would cost flickers on your bar.
   const previewCost = !busy && chosen?.action.type === "attack" ? attackCost(p, chosen.action.weight) : 0;
+  // Hovering a Rest: the Fatigue it would clear and the Health it would return flicker on your bar.
+  const previewRecover = !busy && chosen?.action.type === "rest" ? restRecovery(p) : undefined;
   const wheelCenter = sel.kind === "player" ? "You" : selectedEnemy?.name ?? "";
 
   const hudRef = useRef<HTMLDivElement>(null);
@@ -424,20 +427,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    * W/S move between depths. A/D walk the whole lineup as it appears on screen, left to right:
    * you, then the front line, then the back line. So pressing A at the left end of a line
    * steps to the line closer to you, and D at the right end steps to the line behind. */
-  const moveDepth = (dir: 1 | -1) => {
-    const r = rows.findIndex(row => row.some(s => sameSel(s, sel)));
-    for (let next = r + dir; next >= 0 && next < rows.length; next += dir) {
-      if (rows[next].length) {
-        // Land on the visually closest one: the left end of a line farther away, the right end of a closer one.
-        setSelection(dir > 0 ? rows[next][0] : rows[next][rows[next].length - 1]);
-        return;
-      }
-    }
-  };
-  const moveAcross = (dir: 1 | -1) => {
-    const lineup = rows.flat();
-    const i = lineup.findIndex(s => sameSel(s, sel));
-    setSelection(lineup[Math.max(0, Math.min(lineup.length - 1, i + dir))]);
+  const moveCursor = (dir: Dir) => {
+    const to = moveSelection(rows, sel, dir);
+    if (to) setSelection(to);
   };
 
   const openWheel = (s: Selection = sel) => {
@@ -454,7 +446,6 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   /** Resolve the turn, then play it back step by step. */
   const play = (action: PlayerAction) => {
     turnStart.current = performance.now();
-    if (coach && !forced && coach.steps[coachStep]?.matches(action)) setCoachStep(coachStep + 1);
     const next = resolveTurn(fight, action);
     const pose: PoseName = forced ? "kneel" : action.type; // staggered or reviving: down on one knee
     setFight(next);
@@ -466,7 +457,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     closeWheel();
   };
   const commit = (option: WheelOption | null) => {
-    if (option && playing && !busy) play(option.action);
+    if (!option || !playing || busy) return;
+    // (In the lesson, only the action it asks for, and not while it is still speaking.)
+    if (current && (typing || current.goal?.until !== "commit" || !current.goal.want || !isWanted(option.action, current.goal.want) || !lessonStand?.onTarget)) return;
+    if (current) nextBeat();
+    play(option.action);
   };
 
   // The model viewer's Play: a turn where you only Rest, so the enemy's action plays on its own.
@@ -562,7 +557,6 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         // Anyone who dodged is still walking to their new spot: they keep their pose until there.
         const walking = lastDodgers.current;
         if (Object.keys(walking).length) setWalkOff(walking);
-        if (coach) setTip(coach.tipAfter(fightRaw));
         onTurnPlayed?.(fightRaw); // same render as the playback ending, so nothing flickers
         setPlayback(null);
       },
@@ -593,6 +587,52 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   ];
   const finish = () => onDone?.(fight.status === "won", fight.player.charges);
 
+  /* ---------- the lesson's gate ---------- */
+  const goalTarget: Selection | undefined = current?.goal
+    ? current.goal.on === "player" ? { kind: "player" } : fight.enemies.find(e => e.alive) && { kind: "enemy", id: fight.enemies.find(e => e.alive)!.id }
+    : undefined;
+  const lessonStand = goalTarget && {
+    onTarget: sameSel(sel, goalTarget),
+    wheelOpen,
+    highlight,
+  };
+  /** The next beat; after the last one, the lesson is over and the fight won. */
+  const nextBeat = () => {
+    if (lesson && beat + 1 >= lesson.length) setFight(f => ({ ...f, status: "won" }));
+    setBeat(b => b + 1);
+  };
+  // Focused on the wrong one: the guide says so (and how to cancel), instead of the instruction.
+  const detour = !!current?.goal && wheelOpen && !!lessonStand && !lessonStand.onTarget;
+  useEffect(() => { setDetourN(0); }, [detour]);
+  useEffect(() => {
+    if (!detour || busy || paused || detourN >= DETOUR.say.length) return;
+    const t = window.setTimeout(() => setDetourN(n => n + 1), typeDelay(DETOUR.say, detourN));
+    return () => window.clearTimeout(t);
+  }, [detour, detourN, busy, paused]);
+  // Each beat's words are written out from the start, once the last turn has played out.
+  useEffect(() => {
+    if (!current || busy || paused || written >= current.say.length) return;
+    const t = window.setTimeout(() => setWritten(w => w + 1), typeDelay(current.say, written));
+    return () => window.clearTimeout(t);
+  }, [current, written, busy, paused]);
+  // Undo the step the previous beat asked for (move away, close the wheel, light another option): its instruction is back.
+  useEffect(() => {
+    if (!lesson || !current || busy || beat === 0) return;
+    const prev = lesson[beat - 1];
+    if (!prev.goal || prev.goal.until === "commit") return;
+    const target: Selection | undefined = prev.goal.on === "player" ? { kind: "player" } : fight.enemies.some(e => e.alive) ? { kind: "enemy", id: fight.enemies.find(e => e.alive)!.id } : undefined;
+    if (!target || lessonMet(prev.goal, { onTarget: sameSel(sel, target), wheelOpen, highlight })) return;
+    setTyped({ beat: beat - 1, n: prev.say.length });
+    setBeat(beat - 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beat, busy, selection, wheelOpen, highlight]);
+  // A beat that only asks you to get somewhere (select, focus, light an option) is done on arrival.
+  useEffect(() => {
+    if (!current?.goal || busy || typing || !lessonStand) return;
+    if (current.goal.until !== "commit" && lessonMet(current.goal, lessonStand)) nextBeat();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [beat, busy, typing, selection, wheelOpen, highlight]);
+
   useKeys(key => {
     // Escape pauses at any time; the pause menu takes all input until it closes.
     if (paused) {
@@ -615,12 +655,17 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     }
     if (forced) return; // the turn plays itself
     if (playSignal !== undefined) return; // the model viewer: its panel plays the turns
+    if (current) {
+      // The lesson: while its words are being written only E does anything (it finishes them);
+      // then only the key it asks for works (or E, to go on, when there is nothing to do).
+      if (detour && detourN < DETOUR.say.length) { if (key === "select") setDetourN(DETOUR.say.length); return; }
+      if (!detour && typing) { if (key === "select") setWritten(current.say.length); return; }
+      if (!current.goal) { if (key === "select") nextBeat(); return; }
+      if (!lessonStand || !lessonAllows(current.goal, key, lessonStand)) return;
+    }
     if (!wheelOpen) {
-      if (key === "up") moveDepth(1);
-      else if (key === "down") moveDepth(-1);
-      else if (key === "left") moveAcross(-1);
-      else if (key === "right") moveAcross(1);
-      else if (key === "select") openWheel(sel);
+      if (key === "select") openWheel(sel);
+      else if (key !== "back" && key !== "pause") moveCursor(key);
       return;
     }
     if (key === "back") closeWheel();
@@ -921,7 +966,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       if (!ev.ranged && kind !== "impact") continue;
       // A blast or a blow into the floor starts where its landing pose puts it: a fist, or the
       // head of a flail brought down on the floor.
-      const origin = kind === "blast" || kind === "impact" ? impactPoint(thrower?.intent.strikePose) : undefined;
+      // (The guide's halo grows from its orb as it is thrown out, in the figure's units.)
+      const origin = kind === "blast" || kind === "impact" ? impactPoint(thrower?.intent.strikePose) : kind === "halo" ? ([66, 86] as const) : undefined;
       // A flaming flail's slam burns.
       const fiery = kind === "impact" && !!thrower?.flags.flaming;
       if (kind) projectiles.push({ from: ev.attacker, to: ev.target, kind, origin, fiery, key: `${stepKey}-${ev.attacker}` });
@@ -1106,21 +1152,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       {/* Cutscene mode: black strips slide in while a turn plays out. When they leave, it's your move. */}
       <div className="letterbox letterbox-top" aria-hidden="true" />
       {panel && !busy && !paused && panel}
-      {coach && !busy && !paused && !wheelOpen && (
-        <div className="coach" role="status">
-          {trained ? (
-            <>
-              <div className="coach-title">Well done</div>
-              <p className="coach-text">That is everything. Now finish it.</p>
-            </>
-          ) : (
-            <>
-              <div className="coach-title">{coach.steps[coachStep].title} <span className="coach-count">{coachStep + 1} / {coach.steps.length}</span></div>
-              <p className="coach-text">{coach.steps[coachStep].text}</p>
-            </>
-          )}
-          {tip && <p className={`coach-tip ${tip.warn ? "is-warning" : ""}`}>{tip.text}</p>}
-        </div>
+      {current && !busy && !paused && (
+        <LessonBox speaker="The Guide" say={detour ? DETOUR.say : current.say} written={detour ? detourN : written} hint={detour ? DETOUR.hint : current.hint} ack={!detour && !current.goal} />
       )}
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
 
@@ -1130,7 +1163,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         {p.charges > 0 && (
           <span className="revive-count" aria-label={`${p.charges} revives left`}>{roman(p.charges)}</span>
         )}
-        <HealthBar fighter={p} preview={previewCost} />
+        <HealthBar fighter={p} preview={previewCost} recover={previewRecover} />
       </div>
 
       {/* While a turn plays, the target's bar sits bottom right, mirroring yours (in planning it hangs below the enemy). */}
@@ -1150,7 +1183,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           center={wheelCenter}
           anchor={anchor}
           aroundPlayer={sel.kind === "player"}
-          onHighlight={setHighlight}
+          onHighlight={d => { if (!lesson) setHighlight(d); }}
           onCommit={commit}
         />
       )}
@@ -1162,8 +1195,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           <div className="result-card">
             <h2>
               {fight.status !== "won" ? "You fade"
-                : onDone ? (fight.enemies.length > 1 ? "They lie still" : "It lies still")
-                : wonText ?? "The sleepwalkers are still"}
+                : wonText ?? (onDone ? (fight.enemies.length > 1 ? "They lie still" : "It lies still") : "The sleepwalkers are still")}
             </h2>
             {onDone ? (
               <div className="setup-buttons">

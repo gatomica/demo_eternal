@@ -15,6 +15,12 @@ import type { Fighter } from "../core/types";
  */
 const BAR_FULL_HP = 120;
 
+/** What a Rest would give back (see `restRecovery`), shown on the bar before you take it. */
+export interface Recovery {
+  fatigue: number;
+  heal: number;
+}
+
 export interface BarValues {
   hp: number;
   fatigue: number;
@@ -23,18 +29,23 @@ export interface BarValues {
 
 const barPct = (x: number, maxHP: number) => `${(Math.max(0, x) / maxHP) * 100}%`;
 
-function Segments({ v, maxHP, preview = 0 }: { v: BarValues; maxHP: number; preview?: number }) {
+function Segments({ v, maxHP, preview = 0, recover }: { v: BarValues; maxHP: number; preview?: number; recover?: Recovery }) {
   const hp = Math.max(0, v.hp);
   // Fatigue fills current health and can't spill past it, even for a moment mid-turn.
   const fatigue = Math.min(Math.max(0, v.fatigue), hp);
   // A cost about to be paid takes its share of the room that is left, flickering beside the Fatigue.
   const cost = Math.min(Math.max(0, preview), hp - fatigue);
+  // A Rest about to be taken: the Fatigue it clears and the Health it returns flicker where they are now.
+  const gone = Math.min(Math.max(0, recover?.fatigue ?? 0), fatigue);
+  const healed = Math.min(Math.max(0, recover?.heal ?? 0), Math.max(0, v.death));
   return (
     <>
       <i className="bar-room" style={{ width: barPct(hp - fatigue - cost, maxHP) }} />
       {cost > 0 && <i className="bar-preview" style={{ width: barPct(cost, maxHP) }} />}
-      <i className="bar-fatigue" style={{ width: barPct(fatigue, maxHP) }} />
-      <i className="bar-death" style={{ width: barPct(v.death, maxHP) }} />
+      {gone > 0 && <i className="bar-recover" style={{ width: barPct(gone, maxHP) }} />}
+      <i className="bar-fatigue" style={{ width: barPct(fatigue - gone, maxHP) }} />
+      {healed > 0 && <i className="bar-heal" style={{ width: barPct(healed, maxHP) }} />}
+      <i className="bar-death" style={{ width: barPct(v.death - healed, maxHP) }} />
     </>
   );
 }
@@ -48,11 +59,13 @@ function Segments({ v, maxHP, preview = 0 }: { v: BarValues; maxHP: number; prev
  * `mirrored` anchors the bar on the right and fills it right to left, for enemies.
  * A stagger bursts into shards.
  */
-export function HealthBar({ fighter, before, className, mirrored, preview }: {
+export function HealthBar({ fighter, before, className, mirrored, preview, recover }: {
   fighter: Fighter;
   before?: BarValues;
   /** Fatigue about to be paid (an action you are hovering): shown flickering on the bar, before it is committed. */
   preview?: number;
+  /** A Rest you are hovering: the Fatigue it would clear and the Health it would return, flickering on the bar. */
+  recover?: Recovery;
   className?: string;
   mirrored?: boolean;
 }) {
@@ -91,7 +104,7 @@ export function HealthBar({ fighter, before, className, mirrored, preview }: {
     >
       {/* The trail only shows health that was just lost, in a light red, sliding away. */}
       <span className="bar-layer bar-trail"><i className="bar-lost" style={{ width: barPct(trail.hp, maxHP) }} /></span>
-      <span className="bar-layer bar-now"><Segments v={now} maxHP={maxHP} preview={preview} /></span>
+      <span className="bar-layer bar-now"><Segments v={now} maxHP={maxHP} preview={preview} recover={recover} /></span>
       {flash > 0 && <span key={`flash-${flash}`} className="bar-flash" />}
       {shatter > 0 && <Shards key={`shatter-${shatter}`} count={8} small />}
     </div>

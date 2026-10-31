@@ -34,7 +34,7 @@ keep it up to date when a rule, enemy or map change is decided or built.
     game loads. `kinds/`: one file per enemy (`sleepwalker`, `waxed`, `warden`, `guide`). The Penitent
     Warden's flame, phases, Usurp Flame and opening scene live in `kinds/warden.ts`.
 - `combat/`: the combat screen. `CombatScreen.tsx` plays a turn back step by step (camera, poses,
-  dodges and knockbacks, the Usurp Flame scene, the phase-two scene); `playback.ts` (timings,
+  dodges and knockbacks, the Usurp Flame scene, the phase-two scene); `lesson.ts` + `LessonBox.tsx` (the scripted tutorial against the guide: beats, the key gate, the typed text box; `CombatScreen`'s `lesson` prop), `playback.ts` (timings,
   phases, `viewAt`, the per-turn step index), `selection.ts`, `ActionWheel.tsx`, `fight.ts`
   (`newFight`: your loadout, health and revives).
 - `screens/`: the main menu, Test combat, the Model viewer (`viewerModel.ts`: what it shows and
@@ -57,9 +57,9 @@ keep it up to date when a rule, enemy or map change is decided or built.
   figures, `MAP_FIGURES` by kind), `foes.ts` (`MAP_FOES`, chasing), `keepers.ts` (`KEEPERS`, rest
   points; the guide fades in at each), `tutorial.ts` (the guide's teaching: state, lines, the
   knot), `seals.ts` (the wax closing the start room), `gear.ts` (inventory, drops, losing it all on
-  a fall), `pickups.ts` (gear lying on the floor, e.g. the broken sword), gear lying where enemies fell (`Journey.ground`, `GroundItem` in `pickups.ts`), the beaten enemies' remains (`Journey.corpses`, drawn by `MAP_REMAINS` in `figures.ts`; the sleepwalkers get up when you rest, per `respawns`), `save.ts` (progress in localStorage), `Inventory.tsx`, `Dialogue.tsx`, `tuning.ts`, `Exploration.tsx`. The tutorial fight is
-  the `start-waxed` map enemy; its coach steps, tips and script are in `combat/training.ts`
-  (`CombatScreen`'s `coach` prop).
+  a fall), `pickups.ts` (gear lying on the floor), gear lying where enemies fell (`Journey.ground`, `GroundItem` in `pickups.ts`), the beaten enemies' remains (`Journey.corpses`, drawn by `MAP_REMAINS` in `figures.ts`; the sleepwalkers get up when you rest, per `respawns`), `save.ts` (progress in localStorage), `Inventory.tsx`, `Dialogue.tsx`, `tuning.ts`, `Exploration.tsx`. The tutorial fight starts when you
+  speak to the guide (`Exploration`'s `onLesson`, `Journeying`'s `lessonFight`): the guide against you, bare-handed,
+  under `combat/lesson.ts` (`CombatScreen`'s `lesson` prop).
 - `audio/sfx.ts`: the combat's sounds, synthesized with Tone.js (no files; loaded on the first sound); `sfxFor(event)` maps a
   combat event to a sound and `CombatScreen` plays it as the step's blow lands. Muted from the main menu.
 - `index.css`: all styles.

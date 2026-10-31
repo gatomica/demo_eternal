@@ -11,6 +11,8 @@ export interface Encounter {
   wonText?: string;
   /** Your revives in this fight, if not the usual. */
   charges?: number;
+  /** The guide's lesson (combat/lesson.ts): the fight follows its script, and can't end early. */
+  lesson?: boolean;
 }
 
 export const ENCOUNTERS: Encounter[] = [
@@ -22,8 +24,13 @@ export const ENCOUNTERS: Encounter[] = [
     enemies: [{ kind: "sleepwalker" }, { kind: "sleepwalker" }, { kind: "sleepwalker" }],
   },
   { id: "waxed", label: "One waxed", enemies: [{ kind: "waxed" }] },
-  // (Placeholder behavior: the guide is to become the tutorial's opponent.)
+  // (Placeholder behavior: the guide's own pattern is not designed yet.)
   { id: "guide", label: "The guide", enemies: [{ kind: "guide" }] },
+  // The tutorial: four scripted turns against the guide, on the back line (see combat/lesson.ts).
+  {
+    id: "tutorial", label: "Tutorial: the guide", lesson: true, wonText: "The lesson is over",
+    enemies: [{ kind: "guide", line: "back", script: ["Hum", "Hum", "Halo Blast", "Halo Blast"] }],
+  },
   { id: "waxed-pair", label: "Two waxed", enemies: [{ kind: "waxed" }, { kind: "waxed" }] },
   {
     id: "mixed",

@@ -5,7 +5,7 @@ import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState 
 import type { Variant } from "../core/bestiary";
 import type { ArmorTier, Side, WeaponTier } from "../core/types";
 import { type Cam, darkAt, ease, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, focusOf, NEAR, planningCamera, project, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec } from "./camera";
-import { ClangBurst, FlameHit, ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
+import { ClangBurst, FlameHit, HaloBurst, ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
 import type { Pt } from "./geom";
 import { Blood, Shards } from "./HealthBar";
 import { lookOf } from "./looks";
@@ -426,6 +426,13 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
               })()}
             </div>
           );
+        }
+        if (pr.kind === "halo") {
+          // The guide's halo: rings growing out of its orb, until they have swept through the target.
+          const o = pr.origin ?? [50, 80];
+          const ox = (isMirrored(thrower!.f) ? 100 - o[0] : o[0]) / 100;
+          const hx = a.x + a.w * ox, hy = a.y + (a.h * o[1]) / 120;
+          return <HaloBurst key={pr.key} cx={hx} cy={hy} diameter={Math.max(a.h * 0.9, Math.hypot(tx - hx, ty - hy) * 2.3)} />;
         }
         if (pr.kind === "blast") {
           // A giant fireball flashes in before him and fades fast; a shockwave of flame follows

@@ -33,7 +33,7 @@ export interface GuideSkeleton extends Skeleton {
 }
 
 export type GuidePoseName =
-  | "gd-idle" | "gd-drift" | "gd-orb-back" | "gd-swing" | "gd-tight" | "gd-hum" | "gd-shuffle"
+  | "gd-idle" | "gd-hover" | "gd-halo" | "gd-drift" | "gd-orb-back" | "gd-swing" | "gd-tight" | "gd-hum" | "gd-shuffle"
   | "gd-down" | "gd-flinch" | "gd-t" | "gd-t-b";
 
 const USUAL: GuideParams = { lean: 0, swing: 0, reach: 0, squash: 1, narrow: 1, tuck: 0, glow: 1, curl: 2, lift: 0 };
@@ -53,6 +53,10 @@ const pose = (g: Partial<GuideParams>): GuideSkeleton => ({
 export const GUIDE_POSES: Record<GuidePoseName, GuideSkeleton> = {
   // Standing quietly, the orb hanging still.
   "gd-idle": pose({}),
+  // Halo Blast, gathering: the orb floats up off its string, which goes slack, glowing brighter.
+  "gd-hover": pose({ lean: -2, tuck: 0.45, glow: 1.55, lift: 0.6 }),
+  // Halo Blast, as it is released: the cloak leans in, the orb thrown out on a taut string, flaring.
+  "gd-halo": pose({ lean: 7, swing: 40, reach: 9, glow: 2, curl: 1 }),
   // A slow drift, the cloak leaning into it and the orb trailing.
   "gd-drift": pose({ lean: 4, swing: 10, lift: 1 }),
   // Orb Back: leaning away, the orb drawn up and back on its string, the tip of the hat curled.
