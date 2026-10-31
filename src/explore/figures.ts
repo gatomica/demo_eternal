@@ -372,11 +372,24 @@ export function drawCloakRemains(g: CanvasRenderingContext2D, x: number, y: numb
   g.beginPath(); g.moveTo(X(0.02), Y(foot + 0.02)); g.lineTo(X(0), Y(foot - 0.3)); g.lineTo(X(0.36), Y(foot - 0.05)); g.closePath(); g.fill(); g.stroke();
 }
 
+/** The guide beaten: the navy cloak in a heap, the orb dim beside it. */
+export function drawGuideRemains(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
+  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
+  const foot = 0.36;
+  g.fillStyle = COLORS.shadow;
+  g.beginPath(); g.ellipse(X(0), Y(foot), 0.34 * T, 0.08 * T, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = GUIDE_NAVY;
+  g.beginPath(); g.moveTo(X(-0.3), Y(foot - 0.02)); g.quadraticCurveTo(X(-0.22), Y(foot - 0.26), X(0.02), Y(foot - 0.24)); g.quadraticCurveTo(X(0.26), Y(foot - 0.22), X(0.3), Y(foot - 0.02)); g.closePath(); g.fill();
+  g.fillStyle = "rgba(240,238,226,0.5)";
+  g.beginPath(); g.arc(X(0.38), Y(foot - 0.06), 0.06 * T, 0, Math.PI * 2); g.fill();
+}
+
 /** What lies where each kind of enemy fell. */
 export const MAP_REMAINS: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number) => void> = {
   sleepwalker: drawRemains,
   waxed: drawDeadWaxed,
   warden: drawCloakRemains,
+  guide: drawGuideRemains,
 };
 
 /**
@@ -455,9 +468,32 @@ export function drawPickup(g: CanvasRenderingContext2D, x: number, y: number, T:
   else drawArmorPiece(g, x, y, T, t);
 }
 
+const GUIDE_NAVY = "#1d2a4f";
+
+/**
+ * The guide on the map: a short pointed navy cloak, tall hat and all, a glowing orb hanging in
+ * front of it, a bare foot under the hem. (Not yet placed on the map.)
+ */
+function drawGuideMap(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
+  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
+  const foot = 0.36;
+  g.fillStyle = COLORS.shadow;
+  g.beginPath(); g.ellipse(X(0), Y(foot), 0.22 * T, 0.07 * T, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = GUIDE_NAVY;
+  g.beginPath(); g.moveTo(X(-0.2), Y(foot - 0.02)); g.quadraticCurveTo(X(-0.12), Y(foot - 0.3), X(-0.04), Y(-0.4)); g.quadraticCurveTo(X(0.08), Y(foot - 0.3), X(0.2), Y(foot - 0.02)); g.closePath(); g.fill();
+  const glow = g.createRadialGradient(X(0.02), Y(0.04), 0, X(0.02), Y(0.04), 0.3 * T);
+  glow.addColorStop(0, "rgb(255 255 245 / 0.55)");
+  glow.addColorStop(1, "rgb(255 255 245 / 0)");
+  g.fillStyle = glow;
+  g.beginPath(); g.arc(X(0.02), Y(0.04), 0.3 * T, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#f7f5ee";
+  g.beginPath(); g.arc(X(0.02), Y(0.04), 0.075 * T, 0, Math.PI * 2); g.fill();
+}
+
 /** How each kind of enemy is drawn on the map. */
 export const MAP_FIGURES: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame) => void> = {
   sleepwalker: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, SLEEPWALKER_LOOK),
   waxed: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, WAXED_LOOK),
   warden: (g, x, y, T, facing) => drawWardenMap(g, x, y, T, facing),
+  guide: (g, x, y, T) => drawGuideMap(g, x, y, T),
 };

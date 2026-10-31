@@ -5,7 +5,7 @@ import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, us
 import { play as playSfx, prepare as prepareSfx, sfxFor } from "../audio/sfx";
 import { ActionWheel, type Anchor } from "./ActionWheel";
 import type { CoachStep, Tip } from "./training";
-import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_SIDE, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, phaseAt, phaseFor, phaseTwoOf, type Playback, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt } from "./playback";
+import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_SIDE, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt } from "./playback";
 import { defaultSelection, rowsOf, sameSel, type Selection, type Wheel, type WheelOption } from "./selection";
 import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveTurn } from "../core/resolve";
@@ -286,9 +286,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     world.current.pos = pos;
     return { positions: pos, camera: { follow: "player", yaw: 0 }, ms: 0, version: 0 };
   });
-  const shoot = (positions: Record<string, Vec>, camera: ShotCamera, ms: number) => {
+  const shoot = (positions: Record<string, Vec>, camera: ShotCamera, ms: number, snap?: string[]) => {
     world.current.pos = positions;
-    setShot(s => ({ positions, camera, ms, version: s.version + 1 }));
+    setShot(s => ({ positions, camera, ms, snap, version: s.version + 1 }));
   };
 
   useLayoutEffect(() => {
@@ -300,7 +300,17 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       if (!at) return;
       const yaw = shotCamera(shot).yaw;
       const back = 9;
-      shoot(w.pos, { x: at.x - Math.sin(yaw) * back, z: at.z - Math.cos(yaw) * back, yaw }, IGNITE.draw);
+      const pulledBack = { x: at.x - Math.sin(yaw) * back, z: at.z - Math.cos(yaw) * back, yaw };
+      // Once it is dark, the waxed the shockwave will raise are moved to the back line, to be in frame when the light returns.
+      if (igniteState.at >= IGNITE.kindle && playback && step) {
+        const after = viewAt(playback.from, step.after);
+        const { front, back: backLine } = linesOf(after);
+        const slots = formation(w.anchor, w.yaw, front, backLine);
+        const moved = after.enemies.filter(e => e.alive && kindOf(e).flame && slots.has(e.id)).map(e => e.id);
+        shoot({ ...w.pos, ...Object.fromEntries(moved.map(id => [id, slots.get(id)!])) }, pulledBack, IGNITE.draw, moved);
+        return;
+      }
+      shoot(w.pos, pulledBack, IGNITE.draw);
       return;
     }
     if (!playback) {
@@ -320,6 +330,12 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         const at = closeIn(a, t, STRIKE_GAP);
         shoot({ ...w.pos, [usurp.who]: at }, between, USURP_STAGES.black - USURP_STAGES.dash);
       }
+      return;
+    }
+    // Staggered in phase two, the Warden sends a flame to a fallen waxed: the camera follows it there, to see it rise.
+    const raise = step?.events.find(ev => ev.kind === "raised" && ev.by);
+    if (raise && raise.kind === "raised" && raise.by && playback.phase !== "approach") {
+      shoot(w.pos, { between: [raise.by, raise.who], yaw: shotCamera(shot).yaw }, RAISE_CAMERA_MS);
       return;
     }
     const attack = step?.events.find(ev => ev.kind === "attack");
@@ -977,6 +993,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return fellBy("player");
   };
   const youDead = playerLooksDead();
+  // Once the Warden has fallen for good (as his fall plays, with no revive left, or after), every flame he lit dies out:
+  // the waxed's candles and the arena's.
+  const wardenHere = (playback ? playback.from : fight).enemies.find(e => kindOf(e).arena);
+  const wardenDown = !!wardenHere && (playback
+    ? !wardenHere.alive || (wardenHere.revives === 0 && reached(stepOf("fall", wardenHere.id)))
+    : !wardenHere.alive);
+  const candlesLit = arenaLit && !wardenDown;
   const playerSealed = (p.waxed || !!p.encased) && p.staggered;
   const figures: SceneFigure[] = [
     {
@@ -1038,8 +1061,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           ? [...(fx.get(e.id)?.classes ?? []).filter(c => c !== "fx-fall"), ...(justFell(e.id) ? ["fx-die"] : []), "is-remains"]
           : [...(fx.get(e.id)?.classes ?? []).filter(c => c !== "fx-fall"), ...(!e.alive && kindOf(e).remains ? ["is-remains"] : [])],
         dead: looksDead(e) ? kindOf(e).deathLook ?? "pieces" : undefined,
+        // His second form: the wax he leaves is burnt black.
+        charred: !!e.flags.phase2,
         // The fallen waxed burn as candles once the arena is lit (not the sealed ones); the lit ones, alive, carry theirs on their heads.
-        candle: !!kindOf(e).remains && arenaLit && (e.alive ? !looksDead(e) : e.fate !== "encased"),
+        candle: !!kindOf(e).remains && candlesLit && (e.alive ? !looksDead(e) : e.fate !== "encased"),
         // Its flame taken, or fallen (the waxed): sealed whole in wax.
         encased: (!e.alive && e.fate === "encased") || (looksDead(e) && kindOf(e).deathLook === "wax"),
         stepKey,
@@ -1070,7 +1095,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     <div className={`hud ${busy ? "is-cinematic" : ""}`} ref={hudRef}>
       <section className="stage" aria-label="Battlefield">
         <Scene
-          figures={figures} shot={shot} projectiles={projectiles} usurpTrails={usurpTrails} arenaLit={arenaLit}
+          figures={figures} shot={shot} projectiles={projectiles} usurpTrails={usurpTrails} arenaLit={candlesLit}
           arena={fight.enemies.some(e => kindOf(e).arena)}
           light={light}
           dark={ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark}

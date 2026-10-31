@@ -21,12 +21,11 @@
 import { useEffect, useRef, useState } from "react";
 import { dirOf, wrapIndex } from "../ui/input";
 import { Dialogue } from "./Dialogue";
-import { ENEMY_KINDS } from "../core/bestiary";
 import { drawPickup, drawKeeper, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
 import { choosePiece, equippedSide, equipSide, gearName, unequip, type GearSpec, type Inventory as Bag, loadoutOf, piecesFor, receive, SIDES, SLOTS } from "./gear";
 import { type ChoiceList, Inventory } from "./Inventory";
 import { type GroundItem, lookOfGear, PICKUP_REACH, PICKUPS } from "./pickups";
-import { CHASE_MEMORY, type Corpse, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, foeFloor, GRACE_MS, huddle, livingDef, MAP_FOES, type MapFoe, MAX_IN_FIGHT, memberKey, stepsFrom, TOUCH, waypoint } from "./foes";
+import { CHASE_MEMORY, type Corpse, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, foeFloor, GRACE_MS, huddle, livingDef, MAP_FOES, type MapFoe, MAX_IN_FIGHT, memberKey, stepsFrom, TOUCH, wakeEnemies, waypoint, withCorpses } from "./foes";
 import { FADE_FAR, FADE_NEAR, GUIDE, KEEPER_REACH, KEEPERS, REST_NOTE_MS } from "./keepers";
 import { cornerNudge, slide, surfaceNear, type Walker } from "./movement";
 import { CHUNK, CHUNK_PAD_BOTTOM, CHUNK_PAD_TOP, makeCanvas, paintChunk } from "./paint";
@@ -141,17 +140,8 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
   const takenRef = useRef<string[]>(journey.taken);
   // Who lies beaten, and where: the sleepwalkers get up again when you rest by a keeper (their remains go with them); the waxed and the Warden stay dead.
   const defeatedRef = useRef<string[]>(journey.defeated);
-  const corpsesRef = useRef<Record<string, Corpse>>((() => {
-    const out = { ...(journey.corpses ?? {}) };
-    // (A save from before the remains were kept: each beaten group lies where it started.)
-    for (const id of journey.defeated) {
-      const def = MAP_FOES.find(f => f.id === id);
-      if (!def) continue;
-      const spots = huddle(def.fight.length);
-      def.fight.forEach((m, i) => { out[memberKey(id, i)] ??= { kind: m.kind, x: def.home.x + spots[i][0], y: def.home.y + spots[i][1], alt: def.home.z }; });
-    }
-    return out;
-  })());
+  // (A save from before the remains were kept: each beaten group lies where it started.)
+  const corpsesRef = useRef<Record<string, Corpse>>(withCorpses(journey.corpses ?? {}, journey.defeated));
   /** Set up by the map's loop: the sleepwalkers get up again, back where they started. */
   const respawnRef = useRef<() => void>(() => {});
   const groundRef = useRef<GroundItem[]>(journey.ground ?? []);
@@ -393,14 +383,11 @@ export function Exploration({ journey, finale = false, onEncounter, onSave, onEx
     });
     const foes: Foe[] = spawn();
     respawnRef.current = () => {
-      // The sleepwalkers get up again, their remains gone; the waxed and the Warden stay dead.
-      corpsesRef.current = Object.fromEntries(Object.entries(corpsesRef.current).filter(([, c]) => !ENEMY_KINDS[c.kind].respawns));
-      // What they dropped goes with them (they will drop it again when they fall again).
-      groundRef.current = groundRef.current.filter(it => !it.from || corpsesRef.current[it.from]);
-      defeatedRef.current = defeatedRef.current.filter(id => {
-        const def = MAP_FOES.find(f => f.id === id);
-        return !def || !livingDef(def, corpsesRef.current);
-      });
+      // The sleepwalkers get up again, their remains and drops gone; the waxed and the Warden stay dead.
+      const woke = wakeEnemies({ corpses: corpsesRef.current, defeated: defeatedRef.current });
+      corpsesRef.current = woke.corpses;
+      groundRef.current = woke.ground;
+      defeatedRef.current = woke.defeated;
       // Everyone else goes back to where they started too, whatever they were doing.
       foes.splice(0, foes.length, ...spawn());
     };

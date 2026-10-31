@@ -9,6 +9,7 @@ import type { Turn } from "./turn";
 export function endTurn(t: Turn) {
   const { p, s, alive, fighters } = t;
   for (const e of alive) {
+    if (!e.alive) continue; // (gone with a boss that fell for good, say)
     if (t.fallen.has(e.id) && e.revives > 0) {
       // A boss with a revive left: its protected turn is next, then it rises at full health.
       e.revives -= 1;
@@ -23,6 +24,7 @@ export function endTurn(t: Turn) {
       e.fate = "fallen";
       e.hp = 0;
       e.fatigue = 0;
+      kindOf(e).onDeath?.({ self: e, state: s, event: t.emit });
     } else if (!e.staggered && e.fatigue >= e.hp) {
       e.staggered = true;
       t.emit({ kind: "stagger", who: e.id });

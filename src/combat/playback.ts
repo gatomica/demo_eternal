@@ -5,6 +5,9 @@ import type { CombatState, PlayerAction, Step } from "../core/types";
 import type { PoseName } from "../render/poses";
 import { IGNITE } from "../warden/scenes";
 
+/** How long the camera takes to find the flame the Warden sends to a fallen waxed and the waxed it raises, in ms. */
+export const RAISE_CAMERA_MS = 700;
+
 /** How long a lost turn (stagger or revive) waits before it plays out on its own. */
 export const FORCED_TURN_MS = 900;
 

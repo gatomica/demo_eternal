@@ -64,13 +64,13 @@ export function Remains({ weapon, armor }: { weapon: WeaponTier; armor: ArmorTie
 }
 
 /**
- * The Warden's remains: his cloak lying where he fell, a low pyramid of cloth over a thick pool of
+ * The Warden's remains (the wax burnt black, if he died in his second form): his cloak lying where he fell, a low pyramid of cloth over a thick pool of
  * wax (more of it dripping off the pool's edge), and his head laid still on its side at the center,
  * the hood's point trailing along the floor and the beak resting on the wax.
  */
-export function CloakRemains() {
+export function CloakRemains({ charred }: { charred?: boolean }) {
   return (
-    <svg viewBox="0 0 100 120" className="figure figure-front" aria-hidden="true">
+    <svg viewBox="0 0 100 120" className={`figure figure-front ${charred ? "is-charred" : ""}`} aria-hidden="true">
       {/* The pool: thick, with a dark underside and a glossy top. */}
       <ellipse cx={50} cy={112.5} rx={46} ry={7.5} className="fig-wax-edge" />
       <ellipse cx={50} cy={109} rx={46} ry={7.5} className="fig-wax-head" />
@@ -88,6 +88,22 @@ export function CloakRemains() {
         <ellipse cx={55} cy={105} rx={5.4} ry={3.6} className="fig-hood-dark" />
         <path d="M58 101.5 Q68 103 73 108 Q65 108.6 58 107.5 Z" className="fig-beak" />
       </g>
+    </svg>
+  );
+}
+
+/** The guide's remains: the navy cloak slumped in a heap, the orb dim beside it, a bare foot showing. */
+export function GuideRemains() {
+  return (
+    <svg viewBox="0 0 100 120" className="figure figure-front" aria-hidden="true">
+      <ellipse cx={50} cy={113} rx={30} ry={4.5} className="fig-shadow" />
+      <ellipse cx={45} cy={114} rx={3.4} ry={2} className="guide-foot" />
+      <path d="M22 112 Q26 96 40 94 Q47 88 56 93 Q70 94 76 112 Q50 118 22 112 Z" className="guide-cloak" />
+      <path d="M56 93 Q70 84 84 96 Q76 90 62 95 Z" className="guide-cloak" />
+      <path d="M36 110 Q42 100 47 96 M52 112 Q58 102 60 96" className="guide-fold" />
+      <circle cx={82} cy={108} r={7} className="guide-glow" style={{ opacity: 0.25 }} />
+      <circle cx={82} cy={108} r={5.5} className="guide-orb" style={{ opacity: 0.55 }} />
+      <path d="M72 100 Q77 104 82 108" className="guide-string" />
     </svg>
   );
 }

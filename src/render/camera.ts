@@ -247,6 +247,8 @@ export interface SceneShot {
   positions: Record<string, Vec>;
   camera: ShotCamera;
   ms: number;
+  /** Who jumps to its new spot at once instead of walking there (while the screen is dark, say). */
+  snap?: string[];
   /** Bumped on every new shot, so the scene knows to start moving. */
   version: number;
 }
@@ -260,4 +262,33 @@ export function shotCamera(shot: SceneShot): Cam {
 }
 
 /** The camera centered between two fighters wherever they stand (an attack's shot follows them as they move). */
-export const trackingCamera = (yaw: number, a: Vec, b: Vec): Cam => actionCamera({ x: 0, z: 0, yaw }, a, b);
+/**
+ * The camera centered between two fighters wherever they stand (an attack's shot follows them as they move).
+ * With `fit` (the screen's shape and how big each fighter is), it also backs off as far as it takes for both to
+ * be seen whole: head to feet within the part of the screen the black strips leave, and clear of the sides.
+ */
+export function trackingCamera(yaw: number, a: Vec, b: Vec, fit?: { aspect: number; scales: [number, number] }): Cam {
+  const base = actionCamera({ x: 0, z: 0, yaw }, a, b);
+  if (!fit) return base;
+  const mid = base.look!;
+  const fwd = forward(yaw), rgt = right(yaw);
+  // Each fighter's offset from the middle: ahead of it (+: nearer the far side of the shot) and to its right.
+  let back = Math.hypot(base.x - mid.x, base.z - mid.z);
+  [a, b].forEach((p, i) => {
+    const ahead = dot(sub(p, mid), fwd), across = dot(sub(p, mid), rgt), s = fit.scales[i];
+    // Its feet must land above the bottom strip, its head below the top strip (the strips cover about 11% each).
+    const feet = (FOCAL * EYE_HEIGHT) / (FIT_BOTTOM - HORIZON);
+    const head = (FOCAL * (FIGURE_HEIGHT * s - EYE_HEIGHT)) / (HORIZON - FIT_TOP);
+    // And its sides inside the screen's width, with the figure's own half width.
+    const sides = (FOCAL * (Math.abs(across) + 0.6 * s)) / (FIT_SIDE * fit.aspect);
+    back = Math.max(back, Math.max(feet, head, sides) - ahead);
+  });
+  back = Math.min(back, FIT_MAX_BACK);
+  const p = add(mid, fwd, -back);
+  return { x: p.x, z: p.z, yaw, look: mid };
+}
+
+/** The part of the screen a fight's figures are kept inside, as shares of its height (the black strips take the rest) and half its width. */
+const FIT_TOP = 0.13, FIT_BOTTOM = 0.87, FIT_SIDE = 0.42;
+/** The farthest the camera backs off to fit them. */
+const FIT_MAX_BACK = 14;

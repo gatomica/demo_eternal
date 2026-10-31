@@ -6,11 +6,12 @@
  * lurch after you, slowly, if you come close; sleepwalkers drift around and give chase, though
  * never as fast as you walk. Touching one starts its fight.
  */
-import type { KindId } from "../core/bestiary";
+import { ENEMY_KINDS, type KindId } from "../core/bestiary";
 import { ENCOUNTERS } from "../core/encounters";
 import { TRAINING_SCRIPT } from "../combat/training";
 import type { EnemySetup } from "../core/types";
 import type { Walker } from "./movement";
+import type { GroundItem } from "./pickups";
 import { openFloor } from "./seals";
 import { TUTORIAL_FOE } from "./tutorial";
 import { HALF_D, HALF_W } from "./tuning";
@@ -32,6 +33,38 @@ export interface MapFoe {
 
 /** Where a beaten enemy lies on the map. */
 export interface Corpse { kind: KindId; x: number; y: number; alt: number }
+
+/**
+ * Every beaten group lies somewhere: fills in the members of a group in `defeated` that have no
+ * recorded spot (a save from before the remains were kept), at the group's start.
+ */
+export function withCorpses(corpses: Record<string, Corpse>, defeated: string[]): Record<string, Corpse> {
+  const out = { ...corpses };
+  for (const id of defeated) {
+    const def = MAP_FOES.find(f => f.id === id);
+    if (!def) continue;
+    const spots = huddle(def.fight.length);
+    def.fight.forEach((m, i) => { out[memberKey(id, i)] ??= { kind: m.kind, x: def.home.x + spots[i][0], y: def.home.y + spots[i][1], alt: def.home.z }; });
+  }
+  return out;
+}
+
+/**
+ * What resting by a keeper does to the enemies (and coming back after a loss, which counts the
+ * same): the sleepwalkers get up again and their remains go; the waxed and the Warden stay dead.
+ * Everything lying on the ground (what enemies dropped, what you left there) goes too.
+ */
+export function wakeEnemies(j: { corpses: Record<string, Corpse>; defeated: string[] }) {
+  const corpses = Object.fromEntries(Object.entries(j.corpses).filter(([, c]) => !ENEMY_KINDS[c.kind].respawns));
+  return {
+    corpses,
+    ground: [] as GroundItem[],
+    defeated: j.defeated.filter(id => {
+      const def = MAP_FOES.find(f => f.id === id);
+      return !def || !livingDef(def, corpses);
+    }),
+  };
+}
 
 /** The key of member `i` of a map enemy's original group, for the corpses. */
 export const memberKey = (id: string, i: number) => `${id}#${i}`;
@@ -110,6 +143,8 @@ export const FOE_TUNING: Record<KindId, FoeTuning> = {
   sleepwalker: { notice: 4.5, chase: 2.0, walk: 0.8, wander: 1.8 },
   // He waits in the middle of his arena, and only comes for you once you're well inside it.
   warden: { notice: 3.5, chase: 1.1, walk: 0.7, wander: 0 },
+  // (Not yet on the map: the guide is to become the tutorial's opponent.)
+  guide: { notice: 3.5, chase: 1.2, walk: 0.7, wander: 0 },
 };
 
 /** How a member of a fight looks on the map, by its kind. */

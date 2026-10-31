@@ -4,6 +4,7 @@
  */
 import type { ReactNode } from "react";
 import type { Variant } from "../core/bestiary";
+import { GUIDE_LOOK } from "../guide/look";
 import { WARDEN_LOOK } from "../warden/look";
 import type { CandleArm, WardenPoseName } from "../warden/skeleton";
 import type { Pt } from "./geom";
@@ -39,6 +40,7 @@ export interface VariantLook {
 
 const LOOKS: Partial<Record<Variant, VariantLook>> = {
   warden: WARDEN_LOOK,
+  guide: GUIDE_LOOK,
 };
 
 export const lookOf = (variant?: Variant): VariantLook | undefined => (variant ? LOOKS[variant] : undefined);

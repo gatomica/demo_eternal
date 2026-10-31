@@ -14,6 +14,16 @@ export const WAXED: EnemyKind = {
   variant: "waxed",
   // Lit: its flame burns on its head (the Warden's phase two lights it, and raises it staggered if it has fallen).
   flags: { lit: false },
+  statuses: [{ key: "lit", off: "Unlit", on: "Lit" }],
+  // A lit waxed that bursts is spent: it dies as its blast finishes, sealed in wax (no candle left to burn).
+  afterTurn: r => {
+    if (r.action !== "Flame Immolation" || r.outcome !== "done") return;
+    r.self.alive = false;
+    r.self.fate = "encased";
+    r.self.hp = 0;
+    r.self.fatigue = 0;
+    r.event({ kind: "fall", who: r.self.id });
+  },
   pattern: parsePattern("Waxed", `
     actions:
       Scratch:      attack, baseline
@@ -22,12 +32,13 @@ export const WAXED: EnemyKind = {
       Drag Forward: maneuver, advance, *Far   // crawls in only when far away
       Slither Back: maneuver, retreat, *Close // backs off only when close
       Clutch Flame: rest
+      Flame Immolation: attack, heavy, ranged, *Lit, #fire, #shockwave   // a lit waxed bursts: it dies, and its fire hits everyone
     stances:
       All > Hands Raised      > Scratch
       All > Wax on Hand       > Hurl Wax
       All > Cowering Sideways > Brace
       All > Crawling          > Drag Forward, Slither Back
-      All > Cradle Flame      > Clutch Flame
+      All > Cradle Flame      > Flame Immolation, Clutch Flame
   `),
   modelPoses: { front: "w-t", back: "w-t-b" },
   stancePoses: {
@@ -47,6 +58,8 @@ export const WAXED: EnemyKind = {
     "Drag Forward": { act: "w-crawl" },
     "Slither Back": { act: "w-slither" },
     "Clutch Flame": { act: "w-clutch" },
+    // The cradled flame bursts: the same pose as clutching it, as the blast rolls out.
+    "Flame Immolation": { act: "w-clutch", strike: "w-clutch", projectile: "blast" },
   },
   // It still holds a flame of its own, cradled at its chest.
   flame: { stance: "Cradle Flame", action: "Clutch Flame" },

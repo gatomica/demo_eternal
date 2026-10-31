@@ -12,11 +12,12 @@ import { conditionOf } from "./conditions";
 import type { ActionDef, Pattern } from "./patterns";
 import { SLEEPWALKER } from "./kinds/sleepwalker";
 import { WARDEN } from "./kinds/warden";
+import { GUIDE_KIND } from "./kinds/guide";
 import { WAXED } from "./kinds/waxed";
 import type { ArmorTier, CombatEvent, CombatState, Enemy, EnemySetup, Fighter, Intent, Line, Rng, Side, TurnReport, WeaponTier } from "./types";
 
 /** Special looks a kind can be drawn with: "waxed" (kneeling, sealed in wax), "warden" (his own figure). */
-export type Variant = "waxed" | "warden";
+export type Variant = "waxed" | "warden" | "guide";
 
 /** A direct hit (not blocked or dodged) from an enemy of this kind, for its `onDirectHit`. */
 export interface DirectHit {
@@ -99,7 +100,7 @@ export interface EnemyKind {
    * What lies where it fell: "pieces" (default); "wax": sealed whole in wax (in `deathPose`), as if the Warden had
    * taken its flame; or "cloak": a cloak draped over a thick pool of wax.
    */
-  deathLook?: "pieces" | "wax" | "cloak";
+  deathLook?: "pieces" | "wax" | "cloak" | "guide";
   /** The pose it lies in when its `deathLook` is "wax". */
   deathPose?: string;
   /** Its fight takes place in its arena (see warden/arena.tsx). */
@@ -111,6 +112,8 @@ export interface EnemyKind {
   flame?: { stance: string; action: string };
   /** Conditions named in the pattern (`*Name`, written in lowercase here), checked when picking. */
   conditions?: Record<string, (self: Enemy, state: CombatState) => boolean>;
+  /** It has fallen for good (no revive left): what that does to the rest of the fight (the Warden's death snuffs the waxed). */
+  onDeath?: (d: { self: Enemy; state: CombatState; event: (ev: CombatEvent) => void }) => void;
   /** It picks after everyone else each turn, to react to what they chose (the Warden: which waxed is about to Clutch Flame). */
   decidesLast?: boolean;
   /**
@@ -151,6 +154,7 @@ export const ENEMY_KINDS = {
   sleepwalker: SLEEPWALKER,
   waxed: WAXED,
   warden: WARDEN,
+  guide: GUIDE_KIND,
 } satisfies Record<string, EnemyKind>;
 
 export type KindId = keyof typeof ENEMY_KINDS;

@@ -5,6 +5,7 @@
 import { ENEMY_KINDS } from "../core/bestiary";
 import type { Enemy, Side } from "../core/types";
 import type { Pt } from "./geom";
+import { GUIDE_POSES, type GuidePoseName } from "../guide/poses";
 import { flailOf, WARDEN_POSES, type WardenPoseName } from "../warden/skeleton";
 import { checkAdjust, type BoneAdjust } from "./rig";
 
@@ -89,7 +90,8 @@ export type PoseName =
   | "sw-overhead" | "sw-chop" | "sw-parry" | "sw-charge" | "sw-backstep" | "sw-despair"
   | "w-idle" | "w-hands" | "w-scratch" | "w-wax-hand" | "w-hurl"
   | "w-dead" | "w-cower" | "w-crawl" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
-  | WardenPoseName;
+  | WardenPoseName
+  | GuidePoseName;
 
 /**
  * The waxed kneel, shins bound together and laid behind them. Seen at a 3/4 angle, "behind"
@@ -107,7 +109,7 @@ const bare = (hand: Pt) => ({ at: hand, angle: 0 });
  * Drawn facing right in a 100 × 120 box, feet on y = 114. The figures are 2D drawings of a 3/4 view:
  * to the front means toward the camera (lower on screen), to the back away from it (higher).
  */
-const POSES: Record<Exclude<PoseName, WardenPoseName>, Skeleton> = {
+const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton> = {
   idle: {
     head: [50, 22], neck: [50, 33], hip: [50, 66],
     weaponArm: { elbow: [58, 47], hand: [64, 58] },
@@ -557,7 +559,7 @@ const POSES: Record<Exclude<PoseName, WardenPoseName>, Skeleton> = {
 checkAdjust(POSES);
 
 /** Every pose, the Warden's included. */
-export const ALL_POSES: Record<PoseName, Skeleton> = { ...POSES, ...WARDEN_POSES };
+export const ALL_POSES: Record<PoseName, Skeleton> = { ...POSES, ...WARDEN_POSES, ...GUIDE_POSES };
 
 /** A pose name from game data, if it's one we can draw. */
 export const asPose = (name: string | undefined, fallback: PoseName): PoseName =>

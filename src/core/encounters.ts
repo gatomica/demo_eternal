@@ -22,6 +22,8 @@ export const ENCOUNTERS: Encounter[] = [
     enemies: [{ kind: "sleepwalker" }, { kind: "sleepwalker" }, { kind: "sleepwalker" }],
   },
   { id: "waxed", label: "One waxed", enemies: [{ kind: "waxed" }] },
+  // (Placeholder behavior: the guide is to become the tutorial's opponent.)
+  { id: "guide", label: "The guide", enemies: [{ kind: "guide" }] },
   { id: "waxed-pair", label: "Two waxed", enemies: [{ kind: "waxed" }, { kind: "waxed" }] },
   {
     id: "mixed",

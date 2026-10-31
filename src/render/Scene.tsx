@@ -10,7 +10,7 @@ import type { Pt } from "./geom";
 import { Blood, Shards } from "./HealthBar";
 import { lookOf } from "./looks";
 import { flameOf, type PoseName } from "./poses";
-import { CloakRemains, Remains } from "./Remains";
+import { CloakRemains, GuideRemains, Remains } from "./Remains";
 import { StickFigure } from "./StickFigure";
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "../warden/arena";
 import { IGNITE } from "../warden/scenes";
@@ -44,7 +44,9 @@ export interface SceneFigure {
   /** Sealed whole in wax (its flame taken by Usurp Flame). */
   encased?: boolean;
   /** It has fallen: its body in "pieces" on the floor (drawn instead of the figure), or sealed in "wax". */
-  dead?: "pieces" | "wax" | "cloak";
+  dead?: "pieces" | "wax" | "cloak" | "guide";
+  /** The Warden's remains in his second form: the wax is burnt black. */
+  charred?: boolean;
   /** The Warden: phase two's look (black wax, burning inside) whatever his arm. */
   phase2Look?: boolean;
   /** The Warden: his flail is on fire. */
@@ -138,7 +140,9 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
       // Centered between the two wherever they are right now: pushed, knocked back or dodging.
       const a = posNow(to.between[0], k), b = posNow(to.between[1], k);
       if (!a || !b) return from;
-      const centered = trackingCamera(to.yaw, a, b);
+      // (Backing off as far as it takes to show the two whole.)
+      const scale = (id: string) => figures.find(f => f.id === id)?.scale ?? 1;
+      const centered = trackingCamera(to.yaw, a, b, size.h ? { aspect: size.w / size.h, scales: [scale(to.between[0]), scale(to.between[1])] } : undefined);
       return tracking ? centered : lerpCam(from, centered, k);
     }
     if (!("follow" in to)) return lerpCam(from, to, k);
@@ -160,7 +164,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     const tracking = "between" in prev && "between" in shot.camera && prev.between[0] === shot.camera.between[0] && prev.between[1] === shot.camera.between[1];
     for (const [id, to] of Object.entries(shot.positions)) {
       const t = pos.current.get(id);
-      pos.current.set(id, { from: t ? lerpVec(t.from, t.to, k) : to, to });
+      pos.current.set(id, { from: t && !shot.snap?.includes(id) ? lerpVec(t.from, t.to, k) : to, to });
     }
     cam.current = { from: nowCam, to: shot.camera, fromYaw, tracking };
     timing.current = { start: performance.now(), ms: shot.ms };
@@ -278,7 +282,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
           }}
         >
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} /> : f.dead === "cloak" ? <CloakRemains /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} encased={f.encased} />}
+            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} encased={f.encased} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}
           </div>

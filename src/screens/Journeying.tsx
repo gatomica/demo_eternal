@@ -10,7 +10,7 @@ import { newFight } from "../combat/fight";
 import { TRAINING_STEPS, tipAfter } from "../combat/training";
 import type { CombatState, Opening } from "../core/types";
 import { Exploration, type Journey } from "../explore/Exploration";
-import type { MapFoe } from "../explore/foes";
+import { type MapFoe, wakeEnemies, withCorpses } from "../explore/foes";
 import { dropsOf, EMPTY_INVENTORY, gotNote, loadoutOf, lose, receive } from "../explore/gear";
 import { type GroundItem, PICKUPS } from "../explore/pickups";
 import { clearSave, loadJourney, saveJourney } from "../explore/save";
@@ -93,16 +93,16 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
             });
             setFinale(lesson);
           } else {
-            // Wake by the keeper you last rested by (or at the start). Your progress stays, but
-            // the gear you carried is gone.
+            // Wake by the keeper you last rested by (or at the start). Your progress stays, but the
+            // gear you carried is gone. Coming back counts as a rest: the sleepwalkers get up again
+            //, and the knot is wound again.
+            const woke = wakeEnemies({ corpses: withCorpses(backTo.corpses ?? {}, backTo.defeated), defeated: backTo.defeated });
             setJourney({
-              defeated: backTo.defeated,
-              corpses: backTo.corpses,
-              ground: backTo.ground,
+              ...woke,
               taken: backTo.taken,
               rested: backTo.rested,
               tutorial: lesson ? { ...backTo.tutorial, attempts: backTo.tutorial.attempts + 1 } : backTo.tutorial,
-              knot,
+              knot: backTo.knot && "wound",
               inventory: lose(backTo.inventory),
             });
           }

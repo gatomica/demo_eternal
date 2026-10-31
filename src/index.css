@@ -663,3 +663,23 @@ kbd {
 .gear-sprite.is-armor > svg { position: absolute; left: -2%; top: 10%; width: 100%; height: auto; transform: scale(2); transform-origin: 52% 33%; }
 .inv-slot .gear-sprite.is-armor { width: 100%; height: 100%; }
 .inv-list-name { flex: 1; }
+
+/* The Warden's remains in his second form: the wax burnt pitch black. */
+.is-charred .fig-wax-head { fill: #1b1915; stroke: #0b0a08; }
+.is-charred .fig-wax-edge { fill: #090806; }
+.is-charred .fig-wax-drip { stroke: #1b1915; }
+.is-charred .fig-head-shine { opacity: 0.2; }
+.is-charred .fig-cloak-wax { stroke: #1b1915; }
+
+/* The guide: a navy cloak that doubles as a hat, a glowing yarn orb on a black string, bare feet. */
+.guide-cloak { fill: #1d2a4f; stroke: #111a33; stroke-width: 1; stroke-linejoin: round; }
+.guide-fold { fill: none; stroke: #131d3a; stroke-width: 1.1; stroke-linecap: round; opacity: 0.85; }
+.guide-foot { fill: #e5cdb8; stroke: rgb(0 0 0 / 0.25); stroke-width: 0.5; }
+.guide-opening { fill: #03050c; stroke: #0d1530; stroke-width: 1; }
+.guide-string { fill: none; stroke: #07070b; stroke-width: 1; stroke-linecap: round; }
+.guide-orb { fill: #f7f5ee; }
+.guide-yarn { fill: none; stroke: #cfc9b4; stroke-width: 0.8; stroke-linecap: round; }
+.guide-glow { fill: rgb(255 255 245 / 0.42); filter: blur(2.5px); animation: guide-pulse 2.6s ease-in-out infinite alternate; }
+.guide-glow-wide { fill: rgb(255 255 245 / 0.14); filter: blur(5px); }
+@keyframes guide-pulse { from { transform: scale(0.94); } to { transform: scale(1.06); } }
+@media (prefers-reduced-motion: reduce) { .guide-glow { animation: none; } }

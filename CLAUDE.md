@@ -31,7 +31,7 @@ keep it up to date when a rule, enemy or map change is decided or built.
     as the design doc (`Comes from > Stance > Leads to`, action lines with `*Condition` and `#tag`).
   - `bestiary.ts`: `EnemyKind` (stats, pattern, poses, flags, hooks: `forced`, `afterTurn`,
     `onDirectHit`, `opening`, viewer statuses...) and the `ENEMY_KINDS` registry, checked when the
-    game loads. `kinds/`: one file per enemy (`sleepwalker`, `waxed`, `warden`). The Penitent
+    game loads. `kinds/`: one file per enemy (`sleepwalker`, `waxed`, `warden`, `guide`). The Penitent
     Warden's flame, phases, Usurp Flame and opening scene live in `kinds/warden.ts`.
 - `combat/`: the combat screen. `CombatScreen.tsx` plays a turn back step by step (camera, poses,
   dodges and knockbacks, the Usurp Flame scene, the phase-two scene); `playback.ts` (timings,
@@ -50,6 +50,7 @@ keep it up to date when a rule, enemy or map change is decided or built.
   flags, `flailOf`), `parts.tsx` (cloak, hood, beard, flame, flail, candle arm), `trails.tsx`,
   `WardenFigure.tsx` (the layering), `look.ts`, `arena.tsx` (sealed sleepwalkers, lit in phase
   two), `scenes.ts` (`IGNITE` timings).
+- `guide/`: the guide's figure (`GuideFigure.tsx`: cloak, orb, string, bare feet), its poses (`poses.ts`: a few numbers each) and its `look.ts`. The kind is `core/kinds/guide.ts`.
 - `explore/`: the exploration map. `plans.ts` (`LEVEL_PLANS`, one ASCII plan per level on a
   shared grid, levels 0-1 below ground, 2 the ground floor, 3-6 above), `world.ts` (tiles,
   ramps), `movement.ts`, `sight.ts`, `paint.ts` (chunked level painting), `figures.ts` (map

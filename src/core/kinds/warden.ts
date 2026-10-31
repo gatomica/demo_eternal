@@ -56,7 +56,11 @@ function enterPhaseTwo(r: TurnReport) {
   r.event({ kind: "phase", who: self.id, phase: 2 });
   // Once he's back on his feet, he always takes up Idle (the only "Second Phase >" stance).
   self.nextFrom = "Second Phase";
-  for (const ally of alliesOf(r)) light(r, ally);
+  // They come back on the back line, in frame behind him.
+  for (const ally of alliesOf(r)) {
+    light(r, ally);
+    ally.line = "back";
+  }
 }
 
 function setFlaming(r: TurnReport, on: boolean) {
@@ -96,7 +100,7 @@ export const WARDEN: EnemyKind = {
       Usurp Flame / Recover / Second Phase > Idle                    > Usurp Flame, Stride, Wind Up Flail
       Chain Guard / Clutch Arm         > Wax Shoulder In         > Usurp Flame, Fan Flames, Wax Guard, Wind Up Flail
       Fan Flames / Wax Guard           > Wax Arm Back            > Usurp Flame, Stride, Wax Punch, Flame Blast
-      Flame Blast / Recover            > Arm Over Chest          > Usurp Flame, Fan Flames, Wax Guard, Clutch Arm
+      Flame Blast / Recover            > Arm Over Chest          > Usurp Flame, Fan Flames, Wax Guard, Clutch Arm, Stride
       Stride                           > Flail Clutched          > Usurp Flame, Flail Swing, Chain Guard
       Flail Swing / Wind Up Flail      > Flail Spinning Behind   > Usurp Flame, Rising Flail, Wax Guard, Stride, Fan Flames
       Rising Flail                     > Flail Spinning Overhead > Usurp Flame, Flail Slam
@@ -139,6 +143,18 @@ export const WARDEN: EnemyKind = {
     "Usurp Flame": { act: "wd-usurp" },
     "Wind Up Flail": { act: "wd-spin-behind", rest: "wd-wound-up", windup: "wd-winding-up" },
     "Clutch Arm": { act: "wd-clutch-arm", rest: "wd-clutch-arm", windup: "wd-clutch-ready" },
+  },
+  // When he falls for good, every flame he lit goes out: the waxed die with him, sealed in wax, their candles snuffed.
+  onDeath: ({ self, state, event }) => {
+    for (const ally of state.enemies) {
+      if (ally === self || !ally.alive || !kindOf(ally).flame) continue;
+      ally.alive = false;
+      ally.fate = "encased";
+      ally.hp = 0;
+      ally.fatigue = 0;
+      ally.staggered = false;
+      event({ kind: "fall", who: ally.id });
+    }
   },
   // His flaming slam and his flame blast send a shockwave through the whole fight: his waxed are hit too.
   shockwave: self => self.intent.action !== "Flail Slam" || !!self.flags.flaming,
