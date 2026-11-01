@@ -16,7 +16,7 @@ export function describeAction(kindName: KindId, line: Line, stance: string | un
     type: a.type, dir, forced: false, stance, action: a.name,
     pose: stance ? kind.stancePoses[stance] ?? poses?.act : poses?.act,
     actPose: poses?.act, strikePose: poses?.strike, projectile: poses?.projectile, restPose: poses?.rest, windupPose: poses?.windup, guardPose: poses?.guard,
-    weight: a.weight, ranged: a.ranged || undefined, tags: a.tags.length ? a.tags : undefined,
+    weight: a.weight, damage: a.damage, cost: a.cost, ranged: a.ranged || undefined, tags: a.tags.length ? a.tags : undefined,
   };
 }
 

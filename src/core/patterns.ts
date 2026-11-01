@@ -21,7 +21,7 @@
  *     Flail Swing / Wind Up Flail > Flail Spinning Behind > Stride, Wax Guard, Rising Flail
  *
  * - An action line is `Name: kind, modifiers…`. Kinds: attack, block, maneuver, rest.
- *   Modifiers: a weight (baseline, light, normal, heavy), `ranged`, a Maneuver direction
+ *   Modifiers: a weight (baseline, light, normal, heavy), `damage N` and `cost N` (its own, in sixteenths, in place of its weight's), `ranged`, a Maneuver direction
  *   (`advance` closes in on you, `retreat` backs off, `by-line` does whichever its line calls
  *   for), `*Condition` (only available while that condition holds; `*!Condition` while it
  *   doesn't; several must all hold; `*A or *B` holds while either does), and `#tag` (a rule it triggers, e.g. `#waxing`: a direct
@@ -57,6 +57,9 @@ export interface ActionDef {
   /** Its own weight, for an Attack or Block. Otherwise the fighter's weapon. */
   weight?: WeaponTier;
   ranged: boolean;
+  /** Its own damage and Fatigue cost, in sixteenths of the fighter's max health, instead of its weight's (`damage 2`, `cost 2`). */
+  damage?: number;
+  cost?: number;
   /** For a Maneuver: closes in on you, backs off, or whichever its current line calls for. */
   dir?: "advance" | "retreat" | "by-line";
   /**
@@ -113,6 +116,8 @@ export function parsePattern(label: string, src: string, { events = [] }: { even
       for (const w of words) {
         if ((WEIGHTS as string[]).includes(w)) def.weight = w as WeaponTier;
         else if (w === "ranged") def.ranged = true;
+        else if (/^damage\s+\d+$/.test(w)) def.damage = Number(w.split(/\s+/)[1]);
+        else if (/^cost\s+\d+$/.test(w)) def.cost = Number(w.split(/\s+/)[1]);
         else if (w === "advance" || w === "retreat" || w === "by-line") def.dir = w;
         else if (w.startsWith("*")) def.needs.push(w.split(/\s+or\s+/).map(alt => alt.replace(/^\*\s*/, "").replace(/^!\s*/, "!")).join("|"));
         else if (w.startsWith("#")) def.tags.push(w.slice(1));

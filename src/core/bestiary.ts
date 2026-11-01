@@ -14,6 +14,7 @@ import { SLEEPWALKER } from "./kinds/sleepwalker";
 import { WARDEN } from "./kinds/warden";
 import { GUIDE_KIND } from "./kinds/guide";
 import { WAXED } from "./kinds/waxed";
+import { BLOB_BODY, BLOB_LEFT, BLOB_MID, BLOB_RIGHT } from "./kinds/blob";
 import type { ArmorTier, CombatEvent, CombatState, Enemy, EnemySetup, Fighter, Intent, Line, Rng, Side, TurnReport, WeaponTier } from "./types";
 
 /** Special looks a kind can be drawn with: "waxed" (kneeling, sealed in wax), "warden" (his own figure). */
@@ -153,11 +154,34 @@ export interface EnemyKind {
 export const ENEMY_KINDS = {
   sleepwalker: SLEEPWALKER,
   waxed: WAXED,
+  blobLeft: BLOB_LEFT,
+  blobMid: BLOB_MID,
+  blobRight: BLOB_RIGHT,
   warden: WARDEN,
   guide: GUIDE_KIND,
 } satisfies Record<string, EnemyKind>;
 
 export type KindId = keyof typeof ENEMY_KINDS;
+
+/**
+ * An enemy with several targetable parts: each part is an enemy kind of its own (its own stance and action each turn),
+ * but the parts share one body (Health, Fatigue and a place). Only the whole body is picked in the Model viewer.
+ */
+export interface BodyDef {
+  name: string;
+  /** Its parts, left to right as the player sees them. */
+  parts: { kind: KindId; part: "left" | "mid" | "right"; label: string }[];
+}
+
+/** Every multi-target enemy. */
+export const BODIES = { waxBlob: BLOB_BODY } satisfies Record<string, BodyDef>;
+
+export type BodyId = keyof typeof BODIES;
+
+/** The setups for a fight against this body (`id` tells it apart from other bodies in the fight). */
+export function bodySetups(body: BodyId, id: string = body, extra: Partial<EnemySetup> = {}): EnemySetup[] {
+  return BODIES[body].parts.map(p => ({ kind: p.kind, name: p.label, body: id, part: p.part, ...extra }));
+}
 
 /** The kind of enemy it is. */
 export const kindOf = (e: { kind: KindId }): EnemyKind => ENEMY_KINDS[e.kind];

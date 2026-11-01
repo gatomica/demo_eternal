@@ -21,19 +21,18 @@
 import { useEffect, useRef, useState } from "react";
 import { dirOf, wrapIndex } from "../ui/input";
 import { Dialogue } from "./Dialogue";
-import { drawPickup, drawKeeper, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
+import { drawBlobTop, drawPickup, drawKeeper, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
 import { choosePiece, equippedSide, equipSide, gearName, unequip, type GearSpec, type Inventory as Bag, loadoutOf, piecesFor, receive, SIDES, SLOTS } from "./gear";
 import { type ChoiceList, Inventory } from "./Inventory";
 import { type GroundItem, lookOfGear, PICKUP_REACH, PICKUPS } from "./pickups";
-import { CHASE_MEMORY, type Corpse, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, foeFloor, GRACE_MS, huddle, livingDef, MAP_FOES, type MapFoe, MAX_IN_FIGHT, memberKey, stepsFrom, TOUCH, wakeEnemies, waypoint, withCorpses } from "./foes";
-import { FADE_FAR, FADE_NEAR, GUIDE, KEEPER_REACH, KEEPERS, REST_NOTE_MS } from "./keepers";
+import { CHASE_MEMORY, type Corpse, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, foeFloor, GRACE_MS, huddle, inFightArea, livingDef, MAP_FOES, type MapFoe, MAX_IN_FIGHT, memberKey, stepsFrom, TOUCH, wakeEnemies, waypoint, withCorpses } from "./foes";
+import { FADE_FAR, FADE_NEAR, KEEPER_REACH, KEEPERS, REST_NOTE_MS } from "./keepers";
 import { cornerNudge, slide, surfaceNear, type Walker } from "./movement";
-import { CHUNK, CHUNK_PAD_BOTTOM, CHUNK_PAD_TOP, makeCanvas, paintChunk } from "./paint";
-import { drawSeal, MELT_MS, SEALS, sealsUp, setSeals } from "./seals";
-import { seeThrough, sight } from "./sight";
-import { type After, DROP_DELAY_MS, DROP_MS, GIFT, GUIDE_WALK, guideTalk, type Knot, LANDING, PERCH, RELIEF, type Talk, type TutorialState } from "./tutorial";
-import { ACCEL, BODY_ABOVE_FEET, CAMERA_FOLLOW, COLORS, DEPTH_DIM, GHOST_ALPHA, GRAVITY, LADDER_SPEED, RISE, SIGHT_EASE, SPEED, STEP_TOLERANCE, STRIDE, TILES_TALL, VISION_FULL, VISION_RADIUS } from "./tuning";
-import { type Dir, FLOOR, groundBelow, isAir, isRamp, LADDER, LEVELS, tileAt, WORLD } from "./world";
+import { createMapRenderer } from "./render";
+import { sight } from "./sight";
+import { type After, FIRST_FLOOR_KEEPER, GIFT, type Knot, type Talk, type TutorialState } from "./tutorial";
+import { ACCEL, BODY_ABOVE_FEET, CAMERA_FOLLOW, GRAVITY, HALF_W, LADDER_SPEED, RISE, SPEED, STAIRS_SPEED, STEP_TOLERANCE, STRIDE, VISION_RADIUS } from "./tuning";
+import { type Dir, LADDER, ladderSpan, STAIRS, WORLD } from "./world";
 
 /** Resting is a sleep: how long the screen is dark in all, and when, in the dark, it happens. */
 const SLEEP_MS = 2400;
@@ -53,7 +52,7 @@ export interface Journey {
   fallen?: Record<string, Corpse>;
   /** The keeper you last rested by (a keeper's id). */
   rested?: string;
-  /** The guide's teaching: while it isn't done, the start room's exits are sealed in wax. */
+  /** The guide's teaching: the lesson passed, and the knot given at the first floor's safe spot. */
   tutorial: TutorialState;
   /** The guide's gift, once given: your revive for the demo (see tutorial.ts). */
   knot?: Knot;
@@ -65,17 +64,13 @@ export interface Journey {
   found?: string;
 }
 
-export function Exploration({ journey, finale = false, onEncounter, onLesson, onSave, onExit }: {
+export function Exploration({ journey, onEncounter, onSave, onExit }: {
   journey: Journey;
-  /** Just back from passing the guide's lesson: the guide speaks its relief and asks you to rest with it. */
-  finale?: boolean;
   /**
    * A fight starts: the enemy that reached you, then any others chasing you that join in, and
    * where you were, to come back to afterwards.
    */
   onEncounter: (foes: MapFoe[], journey: Journey) => void;
-  /** The guide has spoken its last words before the lesson: the fight against it begins (`journey` is where to come back to). */
-  onLesson: (journey: Journey) => void;
   /** Your progress is worth keeping now (you rested, the guide gave you something). */
   onSave: (journey: Journey) => void;
   /** Back to the main menu, with where you stand. */
@@ -85,8 +80,8 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
   // The screen goes dark as a fight begins; input stops.
   const [entering, setEntering] = useState(false);
   const leaving = useRef(false);
-  const latest = useRef({ journey, onEncounter, onLesson, onSave });
-  latest.current = { journey, onEncounter, onLesson, onSave };
+  const latest = useRef({ journey, onEncounter, onSave });
+  latest.current = { journey, onEncounter, onSave };
   // Escape opens the inventory screen, which also holds the way back to the main menu.
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
@@ -222,7 +217,7 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
   const rest = () => {
     const id = nearRef.current;
     if (!id) return;
-    const gift = id === GUIDE && tutorialRef.current.beaten && !tutorialRef.current.done;
+    const gift = id === FIRST_FLOOR_KEEPER && !tutorialRef.current.done;
     held.current = [];
     leaving.current = true;
     setSleeping(true);
@@ -247,35 +242,17 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
   };
 
   // The guide speaking: its lines, which one you're at, and what follows the last. The map
-  // stands still meanwhile. After the lesson it opens on its own with the relief.
-  const [talk, setTalk] = useState<(Talk & { at: number }) | null>(() => (finale ? { ...RELIEF, at: 0 } : null));
+  // stands still meanwhile.
+  const [talk, setTalk] = useState<(Talk & { at: number }) | null>(null);
   const talkRef = useRef(false);
   talkRef.current = talk !== null;
-  // Set when the guide lets the wax go; the map's loop starts the melt.
-  const melting = useRef(false);
   // Where you stand now, as a Journey (set by the map's loop).
   const snapshot = useRef<() => Journey>(() => latest.current.journey);
-  const speak = () => {
-    held.current = [];
-    setTalk({ ...guideTalk(tutorialRef.current), at: 0 });
-    tutorialRef.current = { ...tutorialRef.current, greeted: true };
-  };
+  /** What follows the guide's last words: the knot, once, at the first floor's safe spot. */
   const then = (after: After) => {
-    if (after === "fight") {
-      // The lesson: the screen fades out as for any fight.
-      leaving.current = true;
-      held.current = [];
-      setEntering(true);
-      const backTo = snapshot.current();
-      latest.current.onSave(backTo);
-      window.setTimeout(() => latest.current.onLesson(backTo), ENCOUNTER_FADE_MS);
-      return;
-    }
-    if (after !== "melt") return;
-    // The gift: the knot, and the wax goes.
+    if (after !== "knot") return;
     tutorialRef.current = { ...tutorialRef.current, done: true };
     setKnot("wound");
-    melting.current = true;
     setNote({ text: "The guide presses a tangled knot into your hands.", id: Date.now() });
     latest.current.onSave(snapshot.current());
   };
@@ -337,7 +314,6 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
     if ((key === "e" || key === "enter") && !e.repeat && (nearRef.current || nearPickupRef.current)) {
       e.preventDefault();
       if (nearPickupRef.current) pickUp();
-      else if (nearRef.current === GUIDE && !tutorialRef.current.beaten) speak();
       else rest();
     }
   };
@@ -358,13 +334,8 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
 
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const g = canvas.getContext("2d")!;
     const { start } = WORLD;
     const { journey: begin } = latest.current;
-    // The start room's exits stay sealed until the guide has given you the knot.
-    setSeals(!begin.tutorial.done);
-    // How far the wax has melted (0 whole, 1 gone), once the guide lets it go.
-    let meltStart: number | null = null;
     // Coming back from a fight: where you were. Otherwise you wake by the keeper you last
     // rested by, or, the very first time, at the start.
     const keeper = KEEPERS.find(k => k.id === begin.rested);
@@ -377,8 +348,8 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
     };
     // Everyone not yet beaten (or, of a group, whoever is not dead for good), back where they started.
     const makeFoe = (def: MapFoe): Foe => ({
-      def, x: def.home.x, y: def.home.y, alt: def.home.z, vx: 0, vy: 0, facing: "down", walked: 0,
-      climbing: false, fall: 0, ground: def.home.z, target: null, wait: Math.random() * 2, chasing: false, lostFor: 0, lastSeen: null, seenAt: null,
+      def, half: def.girth, x: def.home.x, y: def.home.y, alt: def.home.z, vx: 0, vy: 0, facing: "down", walked: 0,
+      climbing: false, fall: 0, ground: def.home.z, target: null, wait: Math.random() * 2, chasing: false, lostFor: 0, lastSeen: null, seenAt: null, aimX: 0, aimY: 1, reach: 0,
       homeSteps: stepsFrom(def.home.z, Math.floor(def.home.x), Math.floor(def.home.y)),
     });
     /** Everyone who is up: each group not beaten, whoever in it is not dead for good, at its start. */
@@ -422,102 +393,21 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
       inventory: invRef.current,
       taken: takenRef.current,
     });
-    const meltProgress = () => (meltStart === null ? 0 : Math.min(1, (performance.now() - meltStart) / MELT_MS));
-    // The guide: when you first wake it sits on the raised platform east of the room, then drops in,
-    // walks to its place and begins the lesson. Every other time it is already there.
-    const home = KEEPERS.find(k => k.id === GUIDE)!.at;
-    const firstWake = !begin.at && !begin.rested && !begin.tutorial.beaten;
-    const guide = {
-      x: firstWake ? PERCH.x : home.x, y: firstWake ? PERCH.y : home.y, alt: firstWake ? PERCH.z : home.z,
-      phase: (firstWake ? "perch" : "home") as "perch" | "drop" | "walk" | "home", t: 0,
-    };
-    const updateGuide = (dtMs: number) => {
-      if (guide.phase === "perch") {
-        guide.t += dtMs;
-        if (guide.t >= DROP_DELAY_MS) { guide.phase = "drop"; guide.t = 0; }
-      } else if (guide.phase === "drop") {
-        guide.t += dtMs;
-        const u = Math.min(1, guide.t / DROP_MS);
-        guide.x = PERCH.x + (LANDING.x - PERCH.x) * u;
-        guide.y = PERCH.y + (LANDING.y - PERCH.y) * u;
-        // Falls with a little hop off the edge.
-        guide.alt = PERCH.z + (LANDING.z - PERCH.z) * u * u + Math.sin(Math.PI * u) * 0.3;
-        if (u >= 1) { guide.phase = "walk"; guide.alt = LANDING.z; }
-      } else if (guide.phase === "walk") {
-        const dx = home.x - guide.x, dy = home.y - guide.y, d = Math.hypot(dx, dy), step = GUIDE_WALK * dtMs / 1000;
-        if (d > step) { guide.x += (dx / d) * step; guide.y += (dy / d) * step; return; }
-        guide.x = home.x; guide.y = home.y; guide.phase = "home";
-      }
-    };
-    // The guide is fully there while it arrives or speaks; otherwise it is one presence that
-    // fades in as you come near a place you can rest, and out again as you leave.
-    const fade: Record<string, number> = Object.fromEntries(KEEPERS.map(k => [k.id, k.id === GUIDE && guide.phase !== "home" ? 1 : 0]));
+    // The guide is one presence: it fades in beside whichever keeper you come near, and out again as
+    // you leave (and stays while it speaks).
+    const fade: Record<string, number> = Object.fromEntries(KEEPERS.map(k => [k.id, 0]));
     const fadeKeepers = (dtMs: number) => {
       const ease = 1 - Math.exp(-3 * dtMs / 1000);
       for (const k of KEEPERS) {
         const d = Math.hypot(k.at.x - me.x, k.at.y - me.y) + Math.abs(k.at.z - me.alt) * 6;
-        const present = k.id === GUIDE && (guide.phase !== "home" || talkRef.current);
+        const present = talkRef.current && k.id === restedAt.current;
         const want = present ? 1 : Math.min(1, Math.max(0, (FADE_FAR - d) / (FADE_FAR - FADE_NEAR)));
         fade[k.id] += (want - fade[k.id]) * ease;
       }
     };
     // The camera follows where you appear on screen: your height lifts you up the screen.
     const cam = { x: me.x, y: me.y - me.alt * RISE };
-    let T = 0;
-    // Painted chunks of each level, as they've come into view (dropped once long out of view).
-    type Chunk = { surface: HTMLCanvasElement; faces: HTMLCanvasElement; used: number } | null;
-    const chunks = new Map<string, Chunk>();
-    let frameNo = 0;
-    const chunkAt = (z: number, cx: number, cy: number): Chunk => {
-      const key = `${z},${cx},${cy}`;
-      let c = chunks.get(key);
-      if (c === undefined) {
-        const p = paintChunk(z, T, cx, cy);
-        c = p && { ...p, used: frameNo };
-        chunks.set(key, c);
-      }
-      if (c) c.used = frameNo;
-      return c;
-    };
-    /** Keeps the cache small: chunks not drawn for a while go (they're repainted if needed). */
-    const evictChunks = () => {
-      if (chunks.size < 240) return;
-      for (const [k, c] of chunks) if (!c || frameNo - c.used > 120) chunks.delete(k);
-    };
-    // The world is composed here, level by level, before going on screen.
-    const scene = makeCanvas(1, 1);
-    const sg = scene.getContext("2d")!;
-    // What you can see of each level this frame: white where visible, shaded by distance.
-    const lights = WORLD.levels.map(() => makeCanvas(1, 1));
-    // How brightly you currently see each tile of each level (eased toward what you see now).
-    const glow = WORLD.levels.map(() => new Float32Array(WORLD.w * WORLD.h));
-    const glowAbove = WORLD.levels.map(() => new Float32Array(WORLD.w * WORLD.h));
-    // Brightness of sight, one pixel per tile, stretched (and smoothly blended) over the map.
-    const softCanvas = makeCanvas(WORLD.w, WORLD.h);
-    const sfg = softCanvas.getContext("2d")!;
-    const soft = sfg.createImageData(WORLD.w, WORLD.h);
-    // Scratch layer where one view of a level is worked out before joining that level's sight.
-    const maskCanvas = makeCanvas(1, 1);
-    const mg = maskCanvas.getContext("2d")!;
-    // Scratch layer where each slice of a level is cut down to what you can see of it.
-    const layer = makeCanvas(1, 1);
-    const yg = layer.getContext("2d")!;
-
-    const fit = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const width = Math.round(canvas.clientWidth * dpr), height = Math.round(canvas.clientHeight * dpr);
-      if (width === canvas.width && height === canvas.height && T) return;
-      canvas.width = width;
-      canvas.height = height;
-      for (const c of [scene, layer, maskCanvas, ...lights]) { c.width = canvas.width; c.height = canvas.height; }
-      const next = Math.max(8, Math.round(Math.min(canvas.height / TILES_TALL, canvas.width / 13)));
-      if (next !== T) {
-        T = next;
-        chunks.clear();
-      }
-    };
-    fit();
-    window.addEventListener("resize", fit);
+    const renderer = createMapRenderer(canvas);
 
     /** Which way the held keys point, as -1/0/1 on each axis (opposite keys cancel out). */
     const input = () => {
@@ -544,9 +434,28 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
       }
       if (me.climbing) me.facing = "up";
 
+      // Ladders are climbed in place: up and down change your height while you hold still against
+      // the wall. At the bottom or the top, pressing out (down or up) or sideways walks you off.
+      const startX = me.x, startY = me.y, startAlt = me.alt;
+      const tx0 = Math.floor(me.x), ty0 = Math.floor(me.y);
+      const span = surfaceNear(tx0, ty0, me.x, me.y, me.alt)?.t === LADDER ? ladderSpan(tx0, ty0, me.alt) : null;
+      const atBottom = !span || me.alt <= span.bottom + 1e-3, atTop = !span || me.alt >= span.top - 1e-3;
+      const pinned = !!span && ((iy < 0 && !atTop) || (iy > 0 && !atBottom) || (!atBottom && !atTop));
+      me.climbing = pinned;
+      if (pinned) {
+        me.facing = "up";
+        me.vx = me.vy = 0;
+        me.fall = 0;
+        const pull = Math.min(1, 12 * dt);
+        me.x += (tx0 + 0.5 - me.x) * pull;
+        me.y += (ty0 + 0.45 - me.y) * pull;
+        me.alt = Math.min(span!.top, Math.max(span!.bottom, me.alt - iy * SPEED * LADDER_SPEED * dt));
+        me.ground = me.alt;
+      } else {
       // Ease toward the target velocity (diagonals are as fast as straight lines, not faster).
       const len = Math.hypot(ix, iy) || 1;
-      const top = SPEED * (me.climbing ? LADDER_SPEED : 1);
+      const onStairs = surfaceNear(Math.floor(me.x), Math.floor(me.y), me.x, me.y, me.alt)?.t === STAIRS;
+      const top = SPEED * (onStairs ? STAIRS_SPEED : 1);
       const k = 1 - Math.exp(-ACCEL * dt);
       me.vx += ((ix / len) * top - me.vx) * k;
       me.vy += ((iy / len) * top - me.vy) * k;
@@ -554,7 +463,6 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
       if (!iy && Math.abs(me.vy) < 0.01) me.vy = 0;
 
       // Move one axis at a time, so you slide along walls instead of sticking to them.
-      const startX = me.x, startY = me.y;
       const wantX = me.vx * dt, wantY = me.vy * dt;
       me.x = slide(me, "x", wantX);
       if (Math.abs(me.x - startX) < Math.abs(wantX) * 0.5) {
@@ -579,11 +487,11 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
           if (me.alt <= under.h) { me.alt = under.h; me.fall = 0; }
         }
         me.ground = under.h;
-        me.climbing = me.fall === 0 && under.t === LADDER;
+      }
       }
 
       // The walk cycle follows the distance actually covered.
-      const moved = Math.hypot(me.x - startX, me.y - startY);
+      const moved = Math.hypot(me.x - startX, me.y - startY) + (pinned ? Math.abs(me.alt - startAlt) : 0);
       if (moved < 1e-3) me.walked = 0;
       else me.walked += moved;
 
@@ -595,9 +503,8 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
       grace = Math.max(0, grace - dtMs);
       for (const f of foes) updateFoe(f, dt);
 
-      updateGuide(dtMs);
-      // Standing by a keeper, on its level: you can rest there (the guide, once it has arrived).
-      const by = KEEPERS.find(k => (k.id !== GUIDE || guide.phase === "home") && Math.abs(k.at.z - me.alt) < 0.2 && Math.hypot(k.at.x - me.x, k.at.y - me.y) < KEEPER_REACH)?.id ?? null;
+      // Standing by a keeper, on its level: you can rest there.
+      const by = KEEPERS.find(k => Math.abs(k.at.z - me.alt) < 0.2 && Math.hypot(k.at.x - me.x, k.at.y - me.y) < KEEPER_REACH)?.id ?? null;
       if (by !== nearRef.current) { nearRef.current = by; setNear(by); }
       // Gear on the floor within reach.
       const onFloor = floorItems().find(p => Math.abs(p.at.z - me.alt) < 0.2 && Math.hypot(p.at.x - me.x, p.at.y - me.y) < PICKUP_REACH)?.id ?? null;
@@ -651,6 +558,15 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
         if (f.target) { goal = f.target; speed = tune.walk; }
       }
 
+      // Its arms (a big body's) reach toward what it is after, even when a wall stops it getting there.
+      const arm = 1 - Math.exp(-6 * dt);
+      const want = f.chasing ? goal : null;
+      if (want) {
+        const wx = want.x - f.x, wy = want.y - f.y, wl = Math.hypot(wx, wy);
+        if (wl > 0.05) { f.aimX += (wx / wl - f.aimX) * arm; f.aimY += (wy / wl - f.aimY) * arm; }
+      }
+      f.reach += ((want ? 1 : 0.15) - f.reach) * arm;
+
       let ix = 0, iy = 0;
       if (goal) {
         const gx = goal.x - f.x, gy = goal.y - f.y, len = Math.hypot(gx, gy);
@@ -662,7 +578,7 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
           // counts round corners. Ambling about nearby: straight there.
           const steps = f.chasing ? (f.lastSeen ? f.lastSeen.steps : stepsToYou())
             : goal === f.target && f.target.x === home.x && f.target.y === home.y ? f.homeSteps : null;
-          const via = waypoint(level, f.x, f.y, goal, steps);
+          const via = waypoint(level, f.x, f.y, goal, steps, f.half);
           const vx = via.x - f.x, vy = via.y - f.y, vl = Math.hypot(vx, vy) || 1;
           ix = vx / vl; iy = vy / vl;
         }
@@ -675,7 +591,8 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
       f.y = slide(f, "y", f.vy * dt);
       // Enemies keep to their level: no walking off ledges.
       const under = surfaceNear(Math.floor(f.x), Math.floor(f.y), f.x, f.y, f.alt);
-      if (!under || under.h < f.alt - STEP_TOLERANCE) { f.x = sx; f.y = sy; f.vx = f.vy = 0; f.target = null; f.wait = 0.5; }
+      // (Nor do they climb ladders.)
+      if (!under || under.t === LADDER || under.h < f.alt - STEP_TOLERANCE) { f.x = sx; f.y = sy; f.vx = f.vy = 0; f.target = null; f.wait = 0.5; }
       else f.alt = under.h;
       const moved = Math.hypot(f.x - sx, f.y - sy);
       if (goal && !f.chasing && moved < 1e-4 && Math.hypot(f.vx, f.vy) > 0.2) { f.target = null; f.wait = 1; } // stuck on a wall
@@ -685,7 +602,7 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
       }
 
       // Close enough: the fight begins, and everyone else chasing you piles in.
-      if (grace <= 0 && sameLevel && dist < TOUCH && !leaving.current) {
+      if (grace <= 0 && sameLevel && dist < TOUCH + (f.half ? f.half - HALF_W : 0) && inFightArea(f, me) && !leaving.current) {
         leaving.current = true;
         held.current = [];
         setEntering(true);
@@ -710,7 +627,8 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
       let count = first.def.fight.length;
       const out: Foe[] = [];
       const chasing = foes
-        .filter(f => f !== first && f.chasing)
+        // (One that only fights you in its own room, the blob, never joins a fight outside it.)
+        .filter(f => f !== first && f.chasing && inFightArea(f, me))
         .sort((a, b) => Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y));
       for (const f of chasing) {
         if (count + f.def.fight.length > MAX_IN_FIGHT) continue;
@@ -724,7 +642,7 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
      * Draws the enemies and keepers on level z whose feet are on a row that passes `test`, as
      * seen from the camera at (ox, oy), back ones first.
      */
-    const drawFoes = (ctx: CanvasRenderingContext2D, z: number, ox: number, oy: number, test: (y: number) => boolean) => {
+    const drawFoes = (ctx: CanvasRenderingContext2D, z: number, ox: number, oy: number, T: number, test: (y: number) => boolean) => {
       const list: { y: number; draw: () => void }[] = [];
       for (const f of foes) {
         if (Math.round(f.alt) !== z || !test(f.y)) continue;
@@ -732,11 +650,22 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
           const phase = Math.floor(f.walked / STRIDE) % 4;
           const frame: Frame = f.walked <= 0 ? "stand" : phase === 0 ? "stepR" : phase === 2 ? "stepL" : "stand";
           // Each member of the group drawn as what it is, back ones first.
+          // (A multi-target enemy is one heap: its middle part draws the whole of it, in the middle.)
           const spots = huddle(f.def.fight.length);
-          const members = f.def.fight.map((m, i) => ({ kind: m.kind, at: spots[i] })).sort((a, b) => a.at[1] - b.at[1]);
+          const members = f.def.fight.map((m, i) => ({ kind: m.kind, at: (m.body ? [0, 0] : spots[i]) as [number, number] })).sort((a, b) => a.at[1] - b.at[1]);
           for (const { kind, at: [dx, dy] } of members) {
             const px = ox + (f.x + dx) * T, py = oy + (f.y + dy - f.alt * RISE - BODY_ABOVE_FEET) * T;
+            // A multi-target body is a heap seen from above, reaching with its arms toward what it is after.
+            if (f.def.fight.some(m => m.body)) { if (kind === "blobMid") drawBlobTop(ctx, px, py, T, f.aimX, f.aimY, f.reach, performance.now()); continue; }
+            if (!f.def.girth) { MAP_FIGURES[kind](ctx, px, py, T, f.facing, frame); continue; }
+            // A big one is drawn bigger, standing on the same spot.
+            const feet = py + BODY_ABOVE_FEET * T, s = Math.max(1, f.def.girth * 1.9);
+            ctx.save();
+            ctx.translate(px, feet);
+            ctx.scale(s, s);
+            ctx.translate(-px, -feet);
             MAP_FIGURES[kind](ctx, px, py, T, f.facing, frame);
+            ctx.restore();
           }
         } });
       }
@@ -750,8 +679,7 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
         list.push({ y: c.y, draw: () => MAP_REMAINS[c.kind](ctx, ox + c.x * T, oy + (c.y - c.alt * RISE - BODY_ABOVE_FEET) * T, T) });
       }
       for (const k of KEEPERS) {
-        // The guide may be dropping in or walking over; the others stand where they are.
-        const at = k.id === GUIDE ? { x: guide.x, y: guide.y, z: guide.alt } : k.at;
+        const at = k.at;
         if (Math.round(at.z) !== z || !test(at.y) || fade[k.id] < 0.02) continue;
         list.push({ y: at.y, draw: () => {
           const px = ox + at.x * T, py = oy + (at.y - at.z * RISE - BODY_ABOVE_FEET) * T;
@@ -760,209 +688,28 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
           ctx.globalAlpha = 1;
         } });
       }
-      // Wax standing in the start room's exits.
-      if (sealsUp()) {
-        const melt = meltProgress();
-        for (const s of SEALS) {
-          if (s.z !== z || !test(s.y)) continue;
-          list.push({ y: s.y + 0.5, draw: () => drawSeal(ctx, ox + s.x * T, oy + (s.y - s.z * RISE) * T, T, melt) });
-        }
-      }
       list.sort((a, b) => a.y - b.y).forEach(d => d.draw());
     };
 
     const draw = (dtMs: number) => {
-      const W = canvas.width, H = canvas.height;
-      // Snap to whole pixels so the tiles don't shimmer while scrolling.
-      const ox = Math.round(W / 2 - cam.x * T);
-      const oy = Math.round(H / 2 - (cam.y - BODY_ABOVE_FEET) * T);
-      const levelY = (z: number) => oy - Math.round(z * RISE * T);
       fadeKeepers(dtMs);
-      const fx = ox + me.x * T, fy = oy + (me.y - me.alt * RISE) * T;
-
-      // Sight, one mask per level.
-      // - Levels at or below you: pinned to that level's own height, so they never slide as you
-      //   climb, and seen across that level's own grid (from a bridge you look out over the hall
-      //   below). If that level is solid rock where you stand, your own level's sight is used.
-      // - Levels above you: seen only through your own level's sight, held at your own eye
-      //   height. From below you only glimpse their near edge, and more of them comes into view
-      //   as you climb toward them.
+      // Sight only changes when you move: worked out again then, into the same arrays.
       const from = `${me.x},${me.y},${me.alt}`;
       if (from !== seenFrom) {
         sight(me.x, me.y, me.alt, seen);
         seenFrom = from;
       }
-      const seenAll = seen;
-      seenLast = seenAll;
-      const ownLevel = Math.max(0, Math.min(LEVELS - 1, Math.round(me.alt)));
-      const strip = Math.ceil(T / 12) + 1, rise = RISE * T, fadeOver = VISION_RADIUS * (1 - VISION_FULL);
-      const { w: MW, h: MH } = WORLD;
-      const ease = 1 - Math.exp(-SIGHT_EASE * dtMs / 1000);
-      /**
-       * Paints into `lights[z]` what you see of a level, judged by sight `left` on level gz's
-       * tiles, placed with its top row at `top`. `shown` holds the eased brightness per tile.
-       */
-      const paintSight = (z: number, gz: number, left: Float32Array, top: number, shown: Float32Array): boolean => {
-        let any = false;
-        // Ease each tile's brightness toward what you see now, so sight fades in and out.
-        for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
-          const i = y * MW + x;
-          const target = seeThrough(gz, x, y) && left[i] >= 0 ? Math.min(1, left[i] / fadeOver) : 0;
-          shown[i] += (target - shown[i]) * ease;
-          if (shown[i] < 0.002) shown[i] = 0;
-          else any = true;
-        }
-        // Nothing of this level in sight: nothing to paint.
-        if (!any) return false;
-        const lit = (x: number, y: number) =>
-          x >= 0 && y >= 0 && x < MW && y < MH && seeThrough(gz, x, y) ? shown[y * MW + x] : 0;
-        // Tiles with light, or right next to some: the soft brightness below fades out across
-        // these, so nothing switches on abruptly at the edge of your sight.
-        const near = (x: number, y: number) => {
-          if (!seeThrough(gz, x, y)) return false;
-          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (lit(x + dx, y + dy) > 0) return true;
-          return false;
-        };
-
-        // The shape of what you see, crisp at the walls: every tile near light, plus the
-        // near edges of the walls around them (their rim, and their face if it's toward you).
-        mg.globalCompositeOperation = "source-over";
-        mg.clearRect(0, 0, W, H);
-        mg.fillStyle = "#fff";
-        for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
-          const px = ox + x * T, py = top + y * T;
-          if (near(x, y)) {
-            const t = tileAt(gz, x, y);
-            // Stairs rise over the tile behind them; ledges hang a face over the tile in front.
-            const up = isRamp(t) ? rise : 0;
-            const down = t === FLOOR && isAir(gz, x, y + 1) ? (gz - groundBelow(gz, x, y + 1)) * rise : 0;
-            mg.fillRect(px, py - up, T, T + up + down);
-          } else if (!seeThrough(gz, x, y)) {
-            if (lit(x, y - 1) > 0) mg.fillRect(px, py, T, strip);
-            if (lit(x, y + 1) > 0) mg.fillRect(px, py + T - rise - strip, T, rise + strip);
-            if (lit(x - 1, y) > 0) mg.fillRect(px, py, strip, T);
-            if (lit(x + 1, y) > 0) mg.fillRect(px + T - strip, py, strip, T);
-          }
-        }
-
-        // How brightly: one value per tile, blended smoothly between tiles. Walls take the
-        // brightness of the floor beside them.
-        const pix = soft.data;
-        for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
-          let a = lit(x, y);
-          if (!seeThrough(gz, x, y)) a = Math.max(lit(x, y - 1), lit(x, y + 1), lit(x - 1, y), lit(x + 1, y));
-          const k = (y * MW + x) * 4;
-          pix[k] = pix[k + 1] = pix[k + 2] = 255;
-          pix[k + 3] = Math.round(a * 255);
-        }
-        sfg.putImageData(soft, 0, 0);
-        mg.globalCompositeOperation = "destination-in";
-        mg.imageSmoothingEnabled = true;
-        mg.drawImage(softCanvas, ox, top, MW * T, MH * T);
-        const lg = lights[z].getContext("2d")!;
-        lg.drawImage(maskCanvas, 0, 0);
-        return true;
-      };
-
-      // Levels with nothing in sight are skipped altogether below.
-      const inSight: boolean[] = [];
-      frameNo++;
-      for (let z = 0; z < LEVELS; z++) {
-        lights[z].getContext("2d")!.clearRect(0, 0, W, H);
-        // What sight reaches of this level, pinned to the level's own height.
-        inSight[z] = paintSight(z, z, seenAll[z], levelY(z), glow[z]);
-        // Levels above you are also glimpsed through your own level's sight, held at your eye
-        // height: from below you catch their near edge, and more as you climb toward them.
-        if (z > me.alt + 1e-3 && paintSight(z, ownLevel, seenAll[ownLevel], oy - me.alt * RISE * T, glowAbove[z])) inSight[z] = true;
-      }
-
-      /**
-       * Draws rows r0..r1 of level z, with the enemies standing in them that pass `test`,
-       * cut down to what you can see of that level.
-       */
-      const rows = (z: number, r0: number, r1: number, test: (y: number) => boolean = () => true) => {
-        if (r1 <= r0) return;
-        yg.globalCompositeOperation = "source-over";
-        yg.clearRect(0, 0, W, H);
-        // Only the chunks on screen, and only the slice of rows asked for.
-        const top = levelY(z);
-        const vr0 = Math.max(r0, Math.floor(-top / T) - 1), vr1 = Math.min(r1, Math.ceil((H - top) / T) + 1);
-        const cx0 = Math.max(0, Math.floor(-ox / T / CHUNK)), cx1 = Math.min(Math.ceil(WORLD.w / CHUNK) - 1, Math.floor((W - ox) / T / CHUNK));
-        const cyMax = Math.ceil(WORLD.h / CHUNK) - 1;
-        const piece = (img: HTMLCanvasElement, cx: number, from: number, a: number, b: number, shift: number) => {
-          // Rows a..b of a chunk layer whose first row is `from`.
-          if (b <= a) return;
-          const sx = 0, sy = (a - from) * T, sw = CHUNK * T, sh = (b - a) * T;
-          yg.drawImage(img, sx, sy, sw, sh, ox + cx * CHUNK * T, top + a * T + shift, sw, sh);
-        };
-        if (vr1 > vr0) {
-          // Surfaces, north to south (each chunk's top pad holds stairs rising into the row above).
-          for (let cy = Math.max(0, Math.floor(vr0 / CHUNK)); cy <= Math.min(cyMax, Math.floor(vr1 / CHUNK) + 1); cy++) {
-            for (let cx = cx0; cx <= cx1; cx++) {
-              const c = chunkAt(z, cx, cy);
-              if (!c) continue;
-              const from = cy * CHUNK - CHUNK_PAD_TOP;
-              piece(c.surface, cx, from, Math.max(vr0, from), Math.min(vr1, cy * CHUNK + CHUNK), 0);
-            }
-          }
-          // Then the cliff faces (each hangs one row below the tile it belongs to, and may run on).
-          for (let cy = Math.max(0, Math.floor((vr0 - CHUNK_PAD_BOTTOM) / CHUNK)); cy <= Math.min(cyMax, Math.floor(vr1 / CHUNK)); cy++) {
-            for (let cx = cx0; cx <= cx1; cx++) {
-              const c = chunkAt(z, cx, cy);
-              if (!c) continue;
-              const from = cy * CHUNK;
-              piece(c.faces, cx, from, Math.max(vr0, from), Math.min(vr1, from + CHUNK + CHUNK_PAD_BOTTOM), T);
-            }
-          }
-        }
-        drawFoes(yg, z, ox, oy, y => y >= r0 && y < r1 && test(y));
-        yg.globalCompositeOperation = "destination-in";
-        yg.drawImage(lights[z], 0, 0);
-        sg.drawImage(layer, 0, 0);
-      };
-      /** Enemies alone on level z, cut down to what you can see of it (those in front of you). */
-      const foesOnly = (z: number, test: (y: number) => boolean) => {
-        yg.globalCompositeOperation = "source-over";
-        yg.clearRect(0, 0, W, H);
-        drawFoes(yg, z, ox, oy, test);
-        yg.globalCompositeOperation = "destination-in";
-        yg.drawImage(lights[z], 0, 0);
-        sg.drawImage(layer, 0, 0);
-      };
-
+      seenLast = seen;
       // Each stretch of STRIDE lifts a foot, then lands it: right, stand, left, stand.
       const phase = Math.floor(me.walked / STRIDE) % 4;
       const frame: Frame = me.walked <= 0 ? "stand" : phase === 0 ? "stepR" : phase === 2 ? "stepL" : "stand";
-
-      // Levels at or below you go down whole. Levels above are split at your row: the part
-      // behind you first, then you, then the part in front of or over you.
-      sg.clearRect(0, 0, W, H);
-      const base = Math.floor(me.alt + 1e-3);
-      const split = Math.max(0, Math.min(WORLD.h, Math.floor(me.y)));
-      // On your own level, enemies further down the screen than you go in front of you.
-      for (let z = 0; z < LEVELS; z++) {
-        if (inSight[z]) rows(z, 0, z <= base ? WORLD.h : split, y => z !== base || y <= me.y);
-        // Whatever lies below you is dimmed, more so the further down: it reads as depth.
-        const below = Math.min(1, Math.max(0, me.alt - z));
-        if (below > 0 && z < LEVELS - 1) {
-          sg.fillStyle = `rgb(0 0 0 / ${DEPTH_DIM * below})`;
-          sg.fillRect(0, 0, W, H);
-        }
-      }
       // You wear what you have equipped.
       const look = playerLook(loadoutOf(invRef.current));
-      drawWalker(sg, fx, fy - BODY_ABOVE_FEET * T, T, me.facing, frame, true, (me.alt - me.ground) * RISE, look);
-      if (base < LEVELS && inSight[base]) foesOnly(base, y => y > me.y);
-      for (let z = base + 1; z < LEVELS; z++) if (inSight[z]) rows(z, split, WORLD.h);
-      evictChunks();
-
-      g.fillStyle = COLORS.void;
-      g.fillRect(0, 0, W, H);
-      g.drawImage(scene, 0, 0);
-      // Your outline shows faintly through anything covering you (it vanishes into you otherwise).
-      g.globalAlpha = GHOST_ALPHA;
-      drawWalker(g, fx, fy - BODY_ABOVE_FEET * T, T, me.facing, frame, false, 0, look);
-      g.globalAlpha = 1;
+      renderer.draw({
+        camX: cam.x, camY: cam.y, x: me.x, y: me.y, alt: me.alt, seen,
+        actors: drawFoes,
+        player: { draw: (ctx, px, py, T, solid) => drawWalker(ctx, px, py, T, me.facing, frame, solid, solid ? (me.alt - me.ground) * RISE : 0, look) },
+      }, dtMs);
     };
 
     let raf = 0;
@@ -970,15 +717,12 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
     const tick = (now: number) => {
       const dt = Math.min(now - last, 100);
       last = now;
-      // The guide's relief is over: the wax runs, and goes for good once it has.
-      if (melting.current && meltStart === null) meltStart = now;
-      if (meltStart !== null && meltProgress() >= 1 && sealsUp()) { setSeals(false); setNote({ text: "The wax runs away. The way is open.", id: Date.now() }); }
       if (!pausedRef.current && !talkRef.current && !leaving.current) update(dt);
       draw(dt);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
-    return () => { cancelAnimationFrame(raf); window.clearTimeout(fadeTimer); window.removeEventListener("resize", fit); };
+    return () => { cancelAnimationFrame(raf); window.clearTimeout(fadeTimer); renderer.dispose(); };
   }, []);
 
   return (
@@ -988,7 +732,7 @@ export function Exploration({ journey, finale = false, onEncounter, onLesson, on
         <div className="explore-prompt"><kbd>E</kbd> Pick Up</div>
       )}
       {near && !nearPickup && !paused && !entering && !talk && (
-        <div className="explore-prompt"><kbd>E</kbd> {near === GUIDE ? (tutorialRef.current.beaten ? "Rest with the guide" : "Speak with the guide") : "Rest"}</div>
+        <div className="explore-prompt"><kbd>E</kbd> Rest</div>
       )}
       {sleeping && <div className="explore-sleep" />}
       {talk && <Dialogue speaker="The guide" text={talk.lines[talk.at]} last={talk.at + 1 >= talk.lines.length} />}

@@ -8,6 +8,7 @@
  * on its target only if the target didn't Maneuver. A Maneuver costs nothing in itself: only the
  * attacks it dodged tired you.
  */
+import { bodyOf, leaderOf } from "../body";
 import type { Enemy, Line } from "../types";
 import type { Turn } from "./turn";
 
@@ -35,12 +36,17 @@ export function resolveMovement(t: Turn) {
   }
   for (const e of alive) {
     if (t.fallen.has(e.id)) continue;
-    const yours: Line | null = youMove ? (act!.target === e.id ? "front" : "back") : null;
-    const its: Line | null = e.intent.type === "maneuver" && !t.out.has(e.id) && !t.cancelled.has(e.id) ? (e.intent.dir === "advance" ? "front" : "back") : null;
+    // The parts of a multi-target enemy move as one: your Maneuver or melee hit on any part moves them all, and
+    // only its leader (the middle one) moves the body with its own Maneuver.
+    const mates = bodyOf(alive, e);
+    const lead = leaderOf(mates.filter(m => !t.fallen.has(m.id)));
+    const yours: Line | null = youMove ? (mates.some(m => m.id === act!.target) ? "front" : "back") : null;
+    const its: Line | null = lead.intent.type === "maneuver" && !t.out.has(lead.id) && !t.cancelled.has(lead.id) ? (lead.intent.dir === "advance" ? "front" : "back") : null;
+    const pulled = mates.find(m => t.pulls.has(m.id));
     if (yours && its) { if (yours === its) place(e, yours, p.id); }
     else if (yours) place(e, yours, p.id);
-    else if (its) place(e, its, e.id);
-    else if (t.pulls.has(e.id)) place(e, "front", t.pulls.get(e.id)!);
+    else if (its) place(e, its, lead.id);
+    else if (pulled) place(e, "front", t.pulls.get(pulled.id)!);
   }
   for (const e of alive) {
     const from = before.get(e.id)!;

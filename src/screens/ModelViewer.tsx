@@ -6,20 +6,20 @@
  */
 import { useCallback, useMemo, useState } from "react";
 import { CombatScreen } from "../combat/CombatScreen";
-import { ENEMY_KINDS, type KindId, type StatusToggle } from "../core/bestiary";
+import { ENEMY_KINDS, type StatusToggle } from "../core/bestiary";
 import { needText } from "../core/conditions";
 import { nextStances } from "../core/patterns";
 import type { CombatState } from "../core/types";
 import { ARMOR, WEAPONS } from "../core/rules";
 import type { ArmorTier, WeaponTier } from "../core/types";
 import type { PoseName } from "../render/poses";
-import { applyPlayerShow, applyShow, DEAD, figureAngleOf, LINE_TOGGLE, MODEL, MODEL_ANGLES, type ModelAngle, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, VIEWER_KINDS, viewerActions, viewerFight, type ViewerShow } from "./viewerModel";
+import { applyPlayerShow, applyShow, DEAD, type EnemySubject, figureAngleOf, LINE_TOGGLE, MODEL, MODEL_ANGLES, type ModelAngle, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow } from "./viewerModel";
 import { cycle, useKeys } from "../ui/input";
 import { Picker } from "../ui/Picker";
 
-/** What the viewer looks at: an enemy, or you. */
-type Subject = KindId | "player";
-const SUBJECTS: Subject[] = [...VIEWER_KINDS, "player"];
+/** What the viewer looks at: an enemy (a multi-target one as a whole, all its parts at once), or you. */
+type Subject = EnemySubject | "player";
+const SUBJECTS: Subject[] = [...VIEWER_SUBJECTS, "player"];
 
 /** Pick which enemy (or you) to look at. A/D change, E opens it, Q goes back to the menu. */
 function ViewerSetup({ kind, onChange, onStart, onExit }: {
@@ -41,7 +41,7 @@ function ViewerSetup({ kind, onChange, onStart, onExit }: {
         focused
         value={kind}
         options={SUBJECTS}
-        labels={{ ...Object.fromEntries(VIEWER_KINDS.map(k => [k, ENEMY_KINDS[k].name])), player: "You (player)" }}
+        labels={{ ...Object.fromEntries(VIEWER_SUBJECTS.map(k => [k, subjectName(k)])), player: "You (player)" }}
         onChange={onChange}
       />
       <p className="hint">
@@ -56,59 +56,151 @@ function ViewerSetup({ kind, onChange, onStart, onExit }: {
 }
 
 export function ModelViewer({ onExit }: { onExit: () => void }) {
-  const [kind, setKind] = useState<Subject>(VIEWER_KINDS[0]);
+  const [kind, setKind] = useState<Subject>(VIEWER_SUBJECTS[0]);
   const [viewing, setViewing] = useState(false);
   const [run, setRun] = useState(0);
   if (!viewing) return <ViewerSetup kind={kind} onChange={setKind} onStart={() => { setRun(r => r + 1); setViewing(true); }} onExit={onExit} />;
   if (kind === "player") return <PlayerViewerFight key={`player-${run}`} onBack={() => setViewing(false)} onRetry={() => setRun(r => r + 1)} onExit={onExit} />;
-  return <ViewerFight key={`${kind}-${run}`} kind={kind} onBack={() => setViewing(false)} onRetry={() => setRun(r => r + 1)} onExit={onExit} />;
+  return <ViewerFight key={`${kind}-${run}`} subject={kind} onBack={() => setViewing(false)} onRetry={() => setRun(r => r + 1)} onExit={onExit} />;
 }
 
-function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
-  kind: KindId;
+function ViewerFight({ subject, onBack, onRetry, onExit }: {
+  subject: EnemySubject;
   onBack: () => void;
   onRetry: () => void;
   onExit: () => void;
 }) {
-  const kind = ENEMY_KINDS[kindName];
-  const [show, setShow] = useState<ViewerShow>(() => ({ stance: kind.pattern.stances[0].name, on: {}, turn: 1 }));
+  const partKinds = partsOf(subject);
+  const kinds = partKinds.map(k => ENEMY_KINDS[k]);
+  const multi = kinds.length > 1;
+  const [show, setShow] = useState<ViewerShow>(() => ({ parts: kinds.map(k => ({ stance: k.pattern.stances[0].name })), on: {}, turn: 1 }));
   const [playSignal, setPlaySignal] = useState(0);
   const [lit, setLit] = useState(true);
-  const initial = useMemo(() => viewerFight(kindName), [kindName]);
+  const initial = useMemo(() => viewerFight(subject), [subject]);
   const override = useCallback((s: CombatState) => applyShow(s, show), [show]);
   const shown = useMemo(() => applyShow(initial, show), [initial, show]);
-  const toggles = [LINE_TOGGLE, ...(kind.statuses ?? [])];
+  // The statuses of all the parts (by key), after the line they share.
+  const statuses = [...new Map(kinds.flatMap(k => k.statuses ?? []).map(t => [t.key, t])).values()];
+  const toggles = [LINE_TOGGLE, ...statuses];
   const flip = (toggle: StatusToggle) =>
     setShow(prev => {
       const on = { ...prev.on, [toggle.key]: !prev.on[toggle.key] };
-      // Switched on, some statuses send it to the stance that follows them (phase two: Idle).
-      const enters = toggle.enters && on[toggle.key] ? nextStances(kind.pattern, { action: toggle.enters, outcome: "done" })[0]?.name : undefined;
-      return { ...prev, action: undefined, next: undefined, interrupt: undefined, on, stance: enters ?? prev.stance };
+      return {
+        ...prev, interrupt: undefined, acting: undefined, on,
+        // Switched on, some statuses send the part that has them to the stance that follows them (phase two: Idle).
+        parts: prev.parts.map((p, i) => {
+          const enters = toggle.enters && on[toggle.key] && kinds[i].statuses?.some(t => t.key === toggle.key)
+            ? nextStances(kinds[i].pattern, { action: toggle.enters, outcome: "done" })[0]?.name : undefined;
+          return { ...p, action: undefined, next: undefined, stance: enters ?? p.stance };
+        }),
+      };
     });
+  const setStance = (i: number, name: string) =>
+    setShow(prev => ({ ...prev, acting: undefined, parts: prev.parts.map((p, j) => (j === i ? { stance: name } : p)) }));
+  /** The same stance for every part (the whole body staggered, fallen or in its T-pose). */
+  const setAllStances = (name: string) =>
+    setShow(prev => ({ ...prev, acting: undefined, parts: prev.parts.map(() => ({ stance: name })) }));
   // Playing an action also picks, at random, which of the stances it leads to it moves on to,
   // as in a fight; it settles into that stance as the action ends.
-  const play = (action: string, interrupt = false) => {
+  const nextOf = (i: number, action: string, interrupt: boolean) => {
     // A broken Rest counts as undone: it picks up again from the Recover stances.
-    const options = nextStances(kind.pattern, { action, outcome: interrupt ? "undone" : "done", avoid: interrupt ? show.stance : undefined });
-    const next = options[Math.floor(Math.random() * options.length)].name;
-    setShow(prev => ({ ...prev, action, next, interrupt }));
+    const options = nextStances(kinds[i].pattern, { action, outcome: interrupt ? "undone" : "done", avoid: interrupt ? show.parts[i].stance : undefined });
+    return options[Math.floor(Math.random() * options.length)].name;
+  };
+  /** One part does an action; the others of its body hold their stance. */
+  const play = (i: number, action: string, interrupt = false) => {
+    const next = nextOf(i, action, interrupt);
+    setShow(prev => ({ ...prev, interrupt, acting: multi ? i : undefined, parts: prev.parts.map((p, j) => (j === i ? { ...p, action, next, chosen: action } : { stance: p.stance, chosen: p.chosen })) }));
+    setPlaySignal(n => n + 1);
+  };
+  /** Every part does the action it has picked (the first its stance allows, otherwise), all in the same turn. */
+  const playAll = () => {
+    setShow(prev => ({
+      ...prev, interrupt: false, acting: "all",
+      parts: prev.parts.map((p, i) => {
+        const stance = kinds[i].pattern.stances.find(x => x.name === p.stance);
+        const action = p.chosen ?? stance?.actions[0].name;
+        return action ? { ...p, action, next: nextOf(i, action, false) } : { stance: p.stance };
+      }),
+    }));
     setPlaySignal(n => n + 1);
   };
   // Once it's over, that stance is the one shown, and its statuses follow what the action did
   // (Flame Blast seals him, say).
   const afterTurn = (s: CombatState) => {
-    const e = s.enemies[0];
     setShow(prev => {
-      const on: Record<string, boolean> = { ...prev.on, back: e.line === "back" };
-      for (const t of kind.statuses ?? []) on[t.key] = !!e.flags[t.key];
-      return { stance: prev.next ?? prev.stance, on, turn: s.turn };
+      const on: Record<string, boolean> = { ...prev.on, back: s.enemies[0].line === "back" };
+      for (const t of statuses) on[t.key] = s.enemies.some(e => !!e.flags[t.key]);
+      return { parts: prev.parts.map(p => ({ stance: p.next ?? p.stance, chosen: p.chosen })), on, turn: s.turn, angle: prev.angle };
     });
+  };
+  // The part the player's blow is aimed at, when a Block or Maneuver is played (or a Rest broken).
+  const playTarget = (() => {
+    if (!multi) return undefined;
+    if (typeof show.acting === "number") return `e${show.acting}`;
+    const i = show.parts.findIndex((p, j) => {
+      const type = p.action && kinds[j].pattern.actions.get(p.action.toLowerCase())?.type;
+      return type === "block" || type === "maneuver";
+    });
+    return `e${Math.max(0, i)}`;
+  })();
+  const anyModel = show.parts.some(p => p.stance === MODEL);
+
+  /** The stance and action chips of one part. */
+  const partControls = (i: number) => {
+    const kind = kinds[i], part = show.parts[i];
+    return (
+      <>
+        <div className="viewer-section">
+          <span className="picker-label">Stance</span>
+          <div className="picker-options">
+            {[...kind.pattern.stances.map(st => st.name), STAGGERED, DEAD, MODEL].map(name => (
+              <button key={name} className="chip" aria-pressed={name === part.stance} onClick={() => setStance(i, name)}>
+                {name}
+              </button>
+            ))}
+          </div>
+        </div>
+        {part.stance === DEAD ? (
+          <p className="hint">Its remains lie where it fell. (Put it on the back line to see them further off.)</p>
+        ) : part.stance === MODEL ? null : (
+          <div className="viewer-section">
+            <span className="picker-label">Actions from this stance</span>
+            <div className="picker-options">
+              {viewerActions(partKinds[i], shown, part.stance, i).flatMap(({ action: a, available, fixed }) => [
+                <button
+                  key={a.name}
+                  className={`chip viewer-action${available ? "" : " viewer-unmet"}${multi && part.chosen === a.name ? " is-chosen" : ""}`}
+                  title={available ? `Play ${a.name}` : `Play ${a.name} anyway (in a fight it needs ${a.needs.map(needText).join(", ")})`}
+                  onClick={e => { e.currentTarget.blur(); play(i, a.name); }}
+                >
+                  ▶ {a.name} <span className="viewer-kind">{fixed ? "fixed rule" : a.type}</span>
+                </button>,
+                // A Rest can also be broken by a blow, to see the flinch.
+                ...(a.type === "rest" && !fixed && part.stance !== STAGGERED
+                  ? [
+                      <button
+                        key={`${a.name}-flinch`}
+                        className={`chip viewer-action${available ? "" : " viewer-unmet"}`}
+                        title={`Play ${a.name}, broken by a blow`}
+                        onClick={e => { e.currentTarget.blur(); play(i, a.name, true); }}
+                      >
+                        ↯ Flinch <span className="viewer-kind">{a.name} interrupted</span>
+                      </button>,
+                    ]
+                  : []),
+              ])}
+            </div>
+          </div>
+        )}
+      </>
+    );
   };
 
   const panel = (
     <aside className="viewer-panel" aria-label="Model viewer">
       <div className="viewer-head">
-        <h2 className="viewer-title">{kind.name}</h2>
+        <h2 className="viewer-title">{subjectName(subject)}</h2>
         <button className="hud-button viewer-change" onClick={onBack}>Change enemy</button>
       </div>
       <LightToggle lit={lit} onChange={setLit} />
@@ -126,17 +218,24 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
           })}
         </div>
       </div>
-      <div className="viewer-section">
-        <span className="picker-label">Stance</span>
-        <div className="picker-options">
-          {[...kind.pattern.stances.map(st => st.name), STAGGERED, DEAD, MODEL].map(name => (
-            <button key={name} className="chip" aria-pressed={name === show.stance} onClick={() => setShow(prev => ({ ...prev, stance: name, action: undefined, next: undefined }))}>
-              {name}
+      {multi && (
+        <div className="viewer-section">
+          <span className="picker-label">Whole body</span>
+          <div className="picker-options">
+            {[STAGGERED, DEAD, MODEL].map(name => (
+              <button key={name} className="chip" aria-pressed={show.parts.every(p => p.stance === name)} onClick={() => setAllStances(name)}>{name}</button>
+            ))}
+            <button
+              className="chip viewer-action"
+              title="Every part does the action it last played (or the first of its stance), all in the same turn"
+              onClick={e => { e.currentTarget.blur(); playAll(); }}
+            >
+              ▶ Play all parts <span className="viewer-kind">together</span>
             </button>
-          ))}
+          </div>
         </div>
-      </div>
-      {show.stance === MODEL ? (
+      )}
+      {anyModel && (
         <div className="viewer-section">
           <span className="picker-label">Angle</span>
           <div className="picker-options">
@@ -147,38 +246,13 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
             ))}
           </div>
         </div>
-      ) : show.stance === DEAD ? (
-        <p className="hint">Its remains lie where it fell. (Put it on the back line to see them further off.)</p>
-      ) : (
-      <div className="viewer-section">
-        <span className="picker-label">Actions from this stance</span>
-        <div className="picker-options">
-          {viewerActions(kindName, shown, show.stance).flatMap(({ action: a, available, fixed }) => [
-            <button
-              key={a.name}
-              className={`chip viewer-action${available ? "" : " viewer-unmet"}`}
-              title={available ? `Play ${a.name}` : `Play ${a.name} anyway (in a fight it needs ${a.needs.map(needText).join(", ")})`}
-              onClick={e => { e.currentTarget.blur(); play(a.name); }}
-            >
-              ▶ {a.name} <span className="viewer-kind">{fixed ? "fixed rule" : a.type}</span>
-            </button>,
-            // A Rest can also be broken by a blow, to see the flinch.
-            ...(a.type === "rest" && !fixed && show.stance !== STAGGERED
-              ? [
-                  <button
-                    key={`${a.name}-flinch`}
-                    className={`chip viewer-action${available ? "" : " viewer-unmet"}`}
-                    title={`Play ${a.name}, broken by a blow`}
-                    onClick={e => { e.currentTarget.blur(); play(a.name, true); }}
-                  >
-                    ↯ Flinch <span className="viewer-kind">{a.name} interrupted</span>
-                  </button>,
-                ]
-              : []),
-          ])}
-        </div>
-      </div>
       )}
+      {kinds.map((_, i) => (
+        <div key={i} className={multi ? "viewer-part" : undefined}>
+          {multi && <h3 className="viewer-part-title">{partLabel(subject, i)}</h3>}
+          {partControls(i)}
+        </div>
+      ))}
     </aside>
   );
 
@@ -189,8 +263,9 @@ function ViewerFight({ kind: kindName, onBack, onRetry, onExit }: {
       panel={panel}
       light={lit}
       playSignal={playSignal}
+      playTarget={playTarget}
       attackOnPlay={!!show.interrupt}
-      figureAngle={show.stance === MODEL ? figureAngleOf(show.angle ?? "front34") : undefined}
+      figureAngle={anyModel ? figureAngleOf(show.angle ?? "front34") : undefined}
       onTurnPlayed={afterTurn}
       onRetry={onRetry}
       onChangeLoadout={onBack}

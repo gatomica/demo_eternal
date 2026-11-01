@@ -10,18 +10,12 @@ interface Keeper {
 }
 
 export const KEEPERS: Keeper[] = [
-  // Beside where you first wake.
-  { id: "start", at: { x: 7.5, y: 2.6, z: 2 } },
-  // Down in the cellar's cold room.
-  { id: "cellar", at: { x: 5.5, y: 23.6, z: 1 } },
-  // At the top of the stairs into the gallery, halfway up.
-  { id: "gallery", at: { x: 37.5, y: 6.6, z: 4 } },
-  // In the antechamber, right before the Warden.
-  { id: "sanctum", at: { x: 69.5, y: 13.6, z: 6 } },
+  // The start room's safe spot, by its north wall.
+  { id: "start", at: { x: 16.5, y: 11.6, z: 0 } },
+  // The Nave's safe spot, a few tiles from the top of the ladder: the guide gives you the knot here.
+  { id: "floor1", at: { x: 30.5, y: 15.6, z: 7 } },
 ];
 
-/** The keeper who speaks to you (see tutorial.ts): the one beside where you first wake. They are all the one guide. */
-export const GUIDE = "start";
 
 /**
  * The guide isn't always there: it fades in as you come near a place you can rest, fully visible

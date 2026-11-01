@@ -1,161 +1,115 @@
 /**
- * MapViewer.tsx — the exploration map as a labelled grid, to read it and to ask for changes. One
- * level at a time, with the walls, floors and stairs of its plan, and everything placed on it:
- * keepers, gear lying about, enemies, the wax seals. Click a tile to see what is there and copy
- * its address ("level 2, x 7, y 3") to paste into a change request.
+ * MapViewer.tsx — the exploration map as the game draws it, with a free camera and no light
+ * radius. It draws through the same renderer as the exploration screen (`explore/render.ts`),
+ * so what you see is what you'd see standing there: floors above cover the ones below, ledges
+ * drop away, stairs climb.
  *
- * Coordinates are the ones the code uses: the world grid, which is the plan's column/row + 1 (the
- * map has a one-tile margin). A tile's address is its whole numbers; a spot inside it ("7.5, 2.6")
- * is where something's feet are.
+ * WASD (or the arrows) move the camera over the grid. Q goes one level down, E one level up: the
+ * camera is then "standing" at that height: the levels above it are not drawn (as in the game,
+ * a floor overhead never covers your view; go up to look at it), and the levels below are dimmed.
+ *
+ * The address shown ("level 1, x 15, y 14") is the tile under the camera, in the coordinates the
+ * code uses: the world grid, which is the plan's column/row + 1 (the map has a one-tile margin).
  */
-import { useMemo, useState } from "react";
-import { gearName } from "../explore/gear";
-import { MAP_FOES } from "../explore/foes";
-import { KEEPERS } from "../explore/keepers";
-import { LEVEL_PLANS } from "../explore/plans";
-import { PICKUPS } from "../explore/pickups";
-import { SEALS } from "../explore/seals";
-import { useKeys } from "../ui/input";
+import { useEffect, useRef, useState } from "react";
+import { createMapRenderer, seeAll } from "../explore/render";
+import { CAMERA_FOLLOW, RISE } from "../explore/tuning";
+import { LEVELS, WORLD } from "../explore/world";
 
-/** Pixels per tile, and the space left for the rulers. */
-const C = 16, GUTTER = 30;
+const LEVEL_NOTES = ["the labyrinth and the shaft room", "the shaft", "the shaft", "the shaft", "the shaft", "the shaft", "the shaft", "Floor A: the Nave and the wheel round it", "stairs up to Floor B", "stairs up to Floor B", "Floor B: the Gallery", "stairs up to Floor C", "stairs up to Floor C", "Floor C: the Sanctum"];
 
-type MarkKind = "keeper" | "pickup" | "foe" | "seal";
+/** How fast the camera pans, in tiles per second. */
+const PAN = 9;
 
-/** Something placed on the map: where its feet are (world grid tiles, fractions included). */
-interface Mark { kind: MarkKind; id: string; glyph: string; detail: string; x: number; y: number; z: number }
-
-const MARKS: Mark[] = [
-  ...KEEPERS.map((k): Mark => ({ kind: "keeper", id: k.id, glyph: "K", detail: `Keeper "${k.id}" (a place to rest)`, ...k.at })),
-  ...PICKUPS.map((p): Mark => ({ kind: "pickup", id: p.id, glyph: "G", detail: `Pickup "${p.id}": ${gearName(p.gear)}${p.gear.eternal ? " (eternal)" : ""}`, ...p.at })),
-  ...MAP_FOES.map((f): Mark => ({
-    kind: "foe", id: f.id, glyph: f.kind === "warden" ? "W" : f.kind === "waxed" ? "x" : "S",
-    detail: `Enemy "${f.id}" (${f.kind}${f.still ? ", still" : ""}): fight of ${f.fight.map(e => e.kind + (e.line ? ` (${e.line})` : "")).join(", ")}`,
-    ...f.home,
-  })),
-  ...SEALS.map((s, i): Mark => ({ kind: "seal", id: `seal-${i + 1}`, glyph: "~", detail: `Wax seal ${i + 1} (closes the corridor until the tutorial is done)`, x: s.x + 0.5, y: s.y + 0.5, z: s.z })),
-];
-
-const GLYPHS: Record<string, string> = { "^": "▲", v: "▼", "<": "◀", ">": "▶", H: "H", "@": "★" };
-
-const LEVEL_NOTES = ["below ground", "below ground", "ground floor", "above", "above", "above", "above"];
-
-/** What the plan says about a tile, in words. */
-function describeTile(c: string): string {
-  if (c === ".") return "floor";
-  if (c === "@") return "floor: where you start";
-  if (c === "#") return "wall or pillar";
-  if (c === "H") return "ladder (climbs north)";
-  if (c in GLYPHS) return `stairs (uphill ${({ "^": "north", v: "south", "<": "west", ">": "east" } as Record<string, string>)[c]})`;
-  return "nothing";
-}
+const KEYS: Record<string, string> = {
+  KeyW: "up", ArrowUp: "up", KeyS: "down", ArrowDown: "down", KeyA: "left", ArrowLeft: "left", KeyD: "right", ArrowRight: "right",
+};
 
 export function MapViewer({ onExit }: { onExit: () => void }) {
-  const [z, setZ] = useState(2);
-  const [below, setBelow] = useState(false);
-  const [picked, setPicked] = useState<{ col: number; row: number } | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [alt, setAlt] = useState(0);
+  const [at, setAt] = useState({ x: WORLD.start.x, y: WORLD.start.y });
   const [copied, setCopied] = useState(false);
-  useKeys(key => {
-    if (key === "back" || key === "pause") onExit();
-    else if (key === "up") setZ(v => Math.min(LEVEL_PLANS.length - 1, v + 1));
-    else if (key === "down") setZ(v => Math.max(0, v - 1));
-  });
+  const altRef = useRef(alt);
+  altRef.current = alt;
+  const exit = useRef(onExit);
+  exit.current = onExit;
 
-  const cols = useMemo(() => Math.max(...LEVEL_PLANS.flat().map(r => r.length)), []);
-  const rows = Math.max(...LEVEL_PLANS.map(p => p.length));
-  const at = (lv: number, col: number, row: number) => LEVEL_PLANS[lv]?.[row]?.[col] ?? " ";
-  const marks = MARKS.filter(m => m.z === z);
-
-  const pick = (e: React.MouseEvent<SVGSVGElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    const col = Math.floor((e.clientX - r.left - GUTTER) / C), row = Math.floor((e.clientY - r.top - GUTTER) / C);
-    if (col < 0 || row < 0 || col >= cols || row >= rows) return;
-    setPicked({ col, row });
-    setCopied(false);
-  };
-
-  // Everything standing on the picked tile, and the address to copy.
-  const here = picked ? marks.filter(m => Math.floor(m.x) === picked.col + 1 && Math.floor(m.y) === picked.row + 1) : [];
-  const address = picked ? `level ${z}, x ${picked.col + 1}, y ${picked.row + 1}` : "";
-  const summary = picked
-    ? `${address}: ${describeTile(at(z, picked.col, picked.row))}${here.map(m => `; ${m.detail} at ${m.x}, ${m.y}`).join("")}`
-    : "";
+  const address = `level ${alt}, x ${Math.floor(at.x)}, y ${Math.floor(at.y)}`;
   const copy = () => {
     try {
-      void navigator.clipboard.writeText(summary).then(() => setCopied(true), () => {});
+      void navigator.clipboard.writeText(address).then(() => setCopied(true), () => {});
     } catch {
-      // No clipboard here: the line above is there to copy by hand.
+      // No clipboard here: the address above is there to copy by hand.
     }
   };
+
+  useEffect(() => {
+    const canvas = canvasRef.current!;
+    const renderer = createMapRenderer(canvas);
+    const held = new Set<string>();
+    const eye = { x: WORLD.start.x + 0.5, y: WORLD.start.y + 0.5 };
+    // The camera as the game keeps it: where the eye appears on screen (its height lifts it up the screen).
+    const cam = { x: eye.x, y: eye.y - altRef.current * RISE };
+    const seen = seeAll(altRef.current);
+    let shown = "";
+
+    const onDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.code === "Escape") { exit.current(); return; }
+      const dir = KEYS[e.code];
+      if (dir) { held.add(dir); e.preventDefault(); return; }
+      if (e.repeat) return;
+      if (e.code === "KeyQ") { setAlt(a => Math.max(0, a - 1)); setCopied(false); }
+      else if (e.code === "KeyE") { setAlt(a => Math.min(LEVELS - 1, a + 1)); setCopied(false); }
+    };
+    const onUp = (e: KeyboardEvent) => { const dir = KEYS[e.code]; if (dir) held.delete(dir); };
+    const onBlur = () => held.clear();
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    window.addEventListener("blur", onBlur);
+
+    let raf = 0, last = performance.now();
+    const tick = (now: number) => {
+      const dtMs = Math.min(now - last, 100);
+      last = now;
+      const dt = dtMs / 1000;
+      const ix = (held.has("right") ? 1 : 0) - (held.has("left") ? 1 : 0);
+      const iy = (held.has("down") ? 1 : 0) - (held.has("up") ? 1 : 0);
+      const len = Math.hypot(ix, iy) || 1;
+      eye.x = Math.min(WORLD.w - 0.5, Math.max(0.5, eye.x + (ix / len) * PAN * dt));
+      eye.y = Math.min(WORLD.h - 0.5, Math.max(0.5, eye.y + (iy / len) * PAN * dt));
+      const a = altRef.current;
+      const c = 1 - Math.exp(-CAMERA_FOLLOW * dt);
+      cam.x += (eye.x - cam.x) * c;
+      cam.y += (eye.y - a * RISE - cam.y) * c;
+      seeAll(a, seen);
+      renderer.draw({ camX: cam.x, camY: cam.y, x: eye.x, y: eye.y, alt: a, seen }, dtMs);
+      const here = `${Math.floor(eye.x)},${Math.floor(eye.y)}`;
+      if (here !== shown) { shown = here; setAt({ x: eye.x, y: eye.y }); setCopied(false); }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      renderer.dispose();
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
 
   return (
     <main className="mapviewer">
       <header className="mapviewer-head">
         <h2 className="viewer-title">Map viewer</h2>
-        <div className="picker-options">
-          {LEVEL_PLANS.map((_, i) => (
-            <button key={i} className="chip" aria-pressed={i === z} onClick={() => { setZ(i); setPicked(null); }}>
-              {i}
-            </button>
-          ))}
-        </div>
-        <span className="hint">Level {z}, {LEVEL_NOTES[z] ?? ""}</span>
-        <label className="hint"><input type="checkbox" checked={below} onChange={e => setBelow(e.target.checked)} /> show level below</label>
+        <span className="hint">Level {alt}, {LEVEL_NOTES[alt] ?? ""}</span>
+        <span className="hint">{address}</span>
+        <button className="hud-button" onClick={copy}>{copied ? "Copied" : "Copy address"}</button>
+        <span className="hint">WASD move · Q down a level · E up a level · Esc back</span>
         <button className="hud-button" onClick={onExit}>Menu</button>
       </header>
-
-      <p className="mapviewer-info" aria-live="polite">
-        {picked ? (
-          <>
-            {summary}{" "}
-            <button className="hud-button" onClick={copy}>{copied ? "Copied" : "Copy"}</button>
-          </>
-        ) : (
-          "Click a tile to see what is there. W/S change level, Q goes back."
-        )}
-      </p>
-
-      <div className="mapviewer-scroll">
-        <svg width={GUTTER + cols * C + 8} height={GUTTER + rows * C + 8} onClick={pick} role="img" aria-label={`Map, level ${z}`}>
-          {/* Rulers, in world coordinates (plan column/row + 1), every 5. */}
-          {Array.from({ length: Math.ceil(cols / 5) }, (_, i) => i * 5).map(col => (
-            <text key={`x${col}`} x={GUTTER + col * C + C / 2} y={GUTTER - 8} className="mapviewer-ruler" textAnchor="middle">{col + 1}</text>
-          ))}
-          {Array.from({ length: Math.ceil(rows / 5) }, (_, i) => i * 5).map(row => (
-            <text key={`y${row}`} x={GUTTER - 6} y={GUTTER + row * C + C / 2 + 3} className="mapviewer-ruler" textAnchor="end">{row + 1}</text>
-          ))}
-
-          {Array.from({ length: rows }, (_, row) => Array.from({ length: cols }, (_, col) => {
-            const c = at(z, col, row);
-            const x = GUTTER + col * C, y = GUTTER + row * C;
-            if (c === " ") {
-              // Empty here: show what lies below it, if asked.
-              const lower = below && z > 0 && at(z - 1, col, row) !== " " && at(z - 1, col, row) !== "#";
-              return lower ? <rect key={`${col},${row}`} x={x} y={y} width={C} height={C} className="mapviewer-below" /> : null;
-            }
-            const kind = c === "#" ? "wall" : c === "." || c === "@" ? "floor" : "ramp";
-            return (
-              <g key={`${col},${row}`}>
-                <rect x={x} y={y} width={C} height={C} className={`mapviewer-${kind}`} />
-                {GLYPHS[c] && <text x={x + C / 2} y={y + C / 2 + 4} textAnchor="middle" className="mapviewer-glyph">{GLYPHS[c]}</text>}
-              </g>
-            );
-          }))}
-
-          {marks.map(m => (
-            <g key={`${m.kind}-${m.id}`} className={`mapviewer-mark is-${m.kind}`}>
-              <circle cx={GUTTER + (m.x - 1) * C} cy={GUTTER + (m.y - 1) * C} r={C * 0.42} />
-              <text x={GUTTER + (m.x - 1) * C} y={GUTTER + (m.y - 1) * C + 4} textAnchor="middle">{m.glyph}</text>
-            </g>
-          ))}
-
-          {picked && <rect x={GUTTER + picked.col * C} y={GUTTER + picked.row * C} width={C} height={C} className="mapviewer-picked" />}
-        </svg>
-      </div>
-
-      <p className="hint mapviewer-legend">
-        ★ start · ▲▼◀▶ stairs (uphill) · H ladder · K keeper · G gear · S sleepwalker · x waxed · W warden · ~ wax seal
-      </p>
+      <canvas ref={canvasRef} className="mapviewer-canvas" />
     </main>
   );
 }

@@ -6,6 +6,8 @@
 export interface MenuOption {
   label: string;
   run: () => void;
+  /** A small, dim button for the developer's shortcuts (it is there, but not asking to be pressed). */
+  quiet?: boolean;
 }
 
 export function MenuButtons({ options, focus, onFocus }: { options: MenuOption[]; focus: number; onFocus: (i: number) => void }) {
@@ -14,7 +16,7 @@ export function MenuButtons({ options, focus, onFocus }: { options: MenuOption[]
       {options.map((o, i) => (
         <button
           key={o.label}
-          className={`menu-button ${i === focus ? "is-focused" : ""}`}
+          className={`menu-button ${i === focus ? "is-focused" : ""} ${o.quiet ? "is-quiet" : ""}`}
           onMouseEnter={() => onFocus(i)}
           onClick={o.run}
         >

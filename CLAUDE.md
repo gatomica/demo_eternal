@@ -3,9 +3,9 @@
 A Vite + React 19 + TypeScript browser game, hosted on Netlify (`npm run build`, publishes `dist/`).
 Screens from the main menu: **Test combat** (pick a loadout and an encounter), **Exploration**
 (walk a multi-floor map; touching an enemy starts its fight), the **Model viewer** (one enemy, its
-stances and actions, played against a dummy that never gets hurt; or "You": the player with any weapon
+stances and actions, played against a dummy that never gets hurt; an enemy with several targetable parts, like the Wax Blob, is shown as one body with all its parts at once, each with its own stance and actions; or "You": the player with any weapon
 and armor, any pose held, and your actions played against a dummy Sleepwalker) and the **Map viewer**
-(each level's plan as a grid, with keepers, gear, enemies and seals marked; click a tile to copy its address).
+(the map drawn exactly as the game draws it, with a free camera and no light radius: WASD pans, Q and E go down and up a level).
 
 The design doc is `docs/enemies.md`. Read it before changing rules or enemies, and
 keep it up to date when a rule, enemy or map change is decided or built.
@@ -32,20 +32,20 @@ What is planned but not built is in `docs/todo.md`: read it when starting a task
     as the design doc (`Comes from > Stance > Leads to`, action lines with `*Condition` and `#tag`).
   - `bestiary.ts`: `EnemyKind` (stats, pattern, poses, flags, hooks: `forced`, `afterTurn`,
     `onDirectHit`, `opening`, viewer statuses...) and the `ENEMY_KINDS` registry, checked when the
-    game loads. `kinds/`: one file per enemy (`sleepwalker`, `waxed`, `warden`, `guide`). The Penitent
+    game loads. `kinds/`: one file per enemy (`sleepwalker`, `waxed`, `warden`, `guide`; `blob`: the Wax Blob's three parts, one multi-target enemy whose parts share Health and a line, see `body.ts` and `Enemy.body`). The Penitent
     Warden's flame, phases, Usurp Flame and opening scene live in `kinds/warden.ts`.
 - `combat/`: the combat screen. `CombatScreen.tsx` plays a turn back step by step (camera, poses,
   dodges and knockbacks, the Usurp Flame scene, the phase-two scene); `lesson.ts` + `LessonBox.tsx` (the scripted tutorial against the guide: beats, the key gate, the typed text box; `CombatScreen`'s `lesson` prop), `playback.ts` (timings,
   phases, `viewAt`, the per-turn step index), `selection.ts`, `ActionWheel.tsx`, `fight.ts`
   (`newFight`: your loadout, health and revives).
 - `screens/`: the main menu, Test combat, the Model viewer (`viewerModel.ts`: what it shows and
-  plays, for an enemy and for the player), the Map viewer (`MapViewer.tsx`, reads `explore/` data) and
+  plays, for an enemy, a multi-target body (`BODIES` in `core/bestiary.ts`) and for the player), the Map viewer (`MapViewer.tsx`, draws through `explore/render.ts`) and
   `Journeying` (exploration plus its fights). `ui/`: keys (`input.ts`), menus,
   pickers, the setup screen.
 - `render/`: drawing. `camera.ts` (floor plan, camera, formations, shots), `poses.ts` (`POSES`,
   which pose a fighter shows; checks every kind's poses exist), `StickFigure.tsx` (stick figures,
   wax looks), `looks.ts` (what a `variant` draws differently: its own figure, candle arm, scenes),
-  `rig.ts` (the true bone lengths, `RIG`, and `fitTorso`/`fitLimbs`, which re-solve a pose to them when a figure is drawn), `Scene.tsx` (the field, figures, darkness, flames, and the fight's light: `LightFall`, tuned by `LIGHT` in `camera.ts`), `effects.tsx` (projectiles, shockwaves),
+  `rig.ts` (the true bone lengths, `RIG`, and `fitTorso`/`fitLimbs`, which re-solve a pose to them when a figure is drawn), `Scene.tsx` (the field, figures, darkness, flames, and the fight's light: `LightFall`, tuned by `LIGHT` in `camera.ts`), `effects.tsx` (projectiles, shockwaves), `WaxBlob.tsx` (the heap round the Wax Blob's three parts),
   `HealthBar.tsx`, `geom.ts`.
 - `warden/`: the Warden's figure. `skeleton.ts` (`WARDEN_POSES`, built with `pose(...)` and its
   flags, `flailOf`), `parts.tsx` (cloak, hood, beard, flame, flail, candle arm), `trails.tsx`,
@@ -53,13 +53,13 @@ What is planned but not built is in `docs/todo.md`: read it when starting a task
   two), `scenes.ts` (`IGNITE` timings).
 - `guide/`: the guide's figure (`GuideFigure.tsx`: cloak, orb, string, bare feet), its poses (`poses.ts`: a few numbers each) and its `look.ts`. The kind is `core/kinds/guide.ts`.
 - `explore/`: the exploration map. `plans.ts` (`LEVEL_PLANS`, one ASCII plan per level on a
-  shared grid, levels 0-1 below ground, 2 the ground floor, 3-6 above), `world.ts` (tiles,
-  ramps), `movement.ts`, `sight.ts`, `paint.ts` (chunked level painting), `figures.ts` (map
+  shared, stacked grid: the tutorial segment: level 0 the waxed ring labyrinth with the shaft room at its centre, 0-6 the shaft's ladder; then the dungeon: Floor A on level 7 (the Nave), B on 10 and C on 13, each 3 levels above the last), `world.ts` (tiles,
+  ramps), `movement.ts`, `sight.ts`, `paint.ts` (chunked level painting), `render.ts` (draws the whole stack cut down to what is in sight; used by `Exploration` and the Map viewer), `figures.ts` (map
   figures, `MAP_FIGURES` by kind), `foes.ts` (`MAP_FOES`, chasing), `keepers.ts` (`KEEPERS`, rest
-  points; the guide fades in at each), `tutorial.ts` (the guide's teaching: state, lines, the
-  knot), `seals.ts` (the wax closing the start room), `gear.ts` (inventory, drops, losing it all on
-  a fall), `pickups.ts` (gear lying on the floor), gear lying where enemies fell (`Journey.ground`, `GroundItem` in `pickups.ts`), the beaten enemies' remains (`Journey.corpses`, drawn by `MAP_REMAINS` in `figures.ts`; the sleepwalkers get up when you rest, per `respawns`), `save.ts` (progress in localStorage), `Inventory.tsx`, `Dialogue.tsx`, `tuning.ts`, `Exploration.tsx`. The tutorial fight starts when you
-  speak to the guide (`Exploration`'s `onLesson`, `Journeying`'s `lessonFight`): the guide against you, bare-handed,
+  points; the guide fades in at each), `tutorial.ts` (the guide's teaching: state, the gift, the
+  knot), `sealed.ts` (the sleepers sealed in the labyrinth's wax, painted into the chunks), `gear.ts` (inventory, drops, losing it all on
+  a fall), `pickups.ts` (gear lying on the floor), gear lying where enemies fell (`Journey.ground`, `GroundItem` in `pickups.ts`), the beaten enemies' remains (`Journey.corpses`, drawn by `MAP_REMAINS` in `figures.ts`; the sleepwalkers get up when you rest, per `respawns`), `save.ts` (progress in localStorage), `Inventory.tsx`, `Dialogue.tsx`, `tuning.ts`, `Exploration.tsx`. The tutorial fight:
+  a new game opens in the lesson (`Journeying`'s `lessonFight`, `CombatScreen`'s `wakeUp`: you wake in the dark, the guide's light approaching): the guide against you, bare-handed,
   under `combat/lesson.ts` (`CombatScreen`'s `lesson` prop).
 - `audio/sfx.ts`: the combat's sounds, synthesized with Tone.js (no files; loaded on the first sound); `sfxFor(event)` maps a
   combat event to a sound and `CombatScreen` plays it as the step's blow lands. Muted from the main menu.
@@ -97,6 +97,6 @@ What is planned but not built is in `docs/todo.md`: read it when starting a task
   Model stance: a T-pose seen 3/4 front, straight front, 3/4 back and straight back, to check proportions) and
   in a real Test combat fight. Mid-turn timing bugs (a pose flashing for a frame, a status shown too
   early) usually come from `viewAt` / step snapshots vs. the final `fight` state in `combat/CombatScreen.tsx`.
-- Map plans: no floor should hang over another (except the original bridge over the hall); stairs
-  sit on the lower level and point uphill, with floor past their top end on the level above.
+- Map plans: a diagonal tile (◤ ◥ ◣ ◢: the character shows its floor half; the other half is wall) cuts corners for non-square rooms. Ladders (`H`, an `H` on consecutive levels at one tile is one tall ladder) are climbed in place. Floors are stacked on one shared footprint (a higher floor may sit right over a lower one; one level is `RISE` = one tile of height on screen). Stairs
+  are one tile at 45 degrees (it climbs a whole level), sit on the lower level and point uphill, with floor past their top end on the level above and a hole in that floor above the stairs themselves. While you are on the stairs the level above is not drawn (not even the hole); it appears when you reach the top (`levelOf` in `world.ts`, drawn by `render.ts`).
 - Don't change gameplay numbers or enemy patterns unless asked; propose them first.

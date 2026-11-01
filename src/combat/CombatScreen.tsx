@@ -4,7 +4,7 @@
 import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { play as playSfx, prepare as prepareSfx, sfxFor } from "../audio/sfx";
 import { ActionWheel, type Anchor } from "./ActionWheel";
-import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_SIDE, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt } from "./playback";
+import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_SIDE, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
 import { LessonBox } from "./LessonBox";
 import { DETOUR, isWanted, type Beat, lessonAllows, lessonMet, typeDelay } from "./lesson";
 import { defaultSelection, moveSelection, rowsOf, sameSel, type Selection, type Wheel, type WheelOption } from "./selection";
@@ -12,7 +12,7 @@ import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveTurn } from "../core/resolve";
 import { attackCost, restRecovery } from "../core/rules";
 import type { CombatState, Enemy, Opening, PlayerAction } from "../core/types";
-import { behind, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
+import { behind, bodiesOfEnemies, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
 import type { Projectile } from "../render/effects";
 import { type BarValues, HealthBar } from "../render/HealthBar";
 import { lookOf } from "../render/looks";
@@ -41,7 +41,7 @@ const barValues =(f: { hp: number; fatigue: number; death: number }): BarValues 
 /** How an enemy's look draws it differently (its kind's variant). */
 const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 
-export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, playerAction, playerHold, playerAngle, playerDead, light = true, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, figureAngle }: {
+export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, playerAction, playerHold, playerAngle, playerDead, light = true, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, figureAngle, playTarget }: {
   initial: CombatState;
   /** A scene to play before the first turn (it leaves the fight as `initial`). */
   opening?: Opening;
@@ -51,6 +51,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   panel?: ReactNode;
   /** Each change plays a turn in which you just Rest (the model viewer's actions). You can't act yourself. */
   playSignal?: number;
+  /** The model viewer, an enemy with several parts: the id of the part your blow is aimed at when it needs something to block or dodge. */
+  playTarget?: string;
   /** The model viewer: you attack it this turn (to break its Rest). */
   attackOnPlay?: boolean;
   /** The model viewer's Model stance: how the enemy is seen (3/4 or straight on, from the front or behind). */
@@ -74,6 +76,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    * the keys it asks for work. Start the fight in `sparring`. When the last beat is read, the fight is won.
    */
   lesson?: Beat[];
+  /** The lesson opens with you waking in the dark, the guide's light approaching (a new game's start): nothing can be done until it has arrived. */
+  wakeUp?: boolean;
   /** The title when you win (fights off the map have their own). */
   wonText?: string;
   /** Called as a turn finishes playing, with the fight as it now stands. */
@@ -116,7 +120,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const [typed, setTyped] = useState({ beat: 0, n: 0 });
   const written = typed.beat === beat ? typed.n : 0;
   const setWritten = (n: number | ((w: number) => number)) => setTyped(t => ({ beat, n: typeof n === "number" ? n : n(t.beat === beat ? t.n : 0) }));
-  const current = lesson && playing ? lesson[beat] : undefined;
+  /** Waking in the dark, before the lesson: the guide walks in out of the black (see `WAKE`). */
+  const [waking, setWaking] = useState(!!(wakeUp && lesson));
+  const [wakeDark, setWakeDark] = useState<{ level: number; ms: number; glow: string } | undefined>(undefined);
+  const current = lesson && playing && !waking ? lesson[beat] : undefined;
   const typing = !!current && written < current.say.length;
   /** The detour's words (see DETOUR), as far as they are written. */
   const [detourN, setDetourN] = useState(0);
@@ -162,6 +169,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const shownId = (busy && involvedEnemy(step)) || selectedEnemy?.id;
   const shownEnemy = view.enemies.find(e => e.id === shownId);
   const shownBefore = prevView?.enemies.find(e => e.id === shownId);
+  /** Who the bar hangs below: the shown enemy, or the middle part of the body it is a part of. */
+  const barHolder = shownEnemy?.body ? (view.enemies.find(e => e.body === shownEnemy.body && e.part === "mid" && e.alive) ?? shownEnemy).id : shownId;
 
   /* ---------- the wheel for the current selection ---------- */
   const wheel: Wheel = (() => {
@@ -211,6 +220,20 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    * and the enemies walk from wherever they are to their lines. If you Maneuvered, you walk to
    * where you were going and the camera follows you there. */
   const world = useRef({ anchor: { x: 0, z: 0 } as Vec, yaw: 0, pos: {} as Record<string, Vec> });
+
+  /** The parts of multi-target enemies (the Wax Blob): they share a slot in the formation. */
+  const bodies = useMemo(() => bodiesOfEnemies(initial.enemies), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * Moves `id` to `to`; the rest of its body (the Wax Blob) goes along a share of the way, so the heap travels with the part that
+   * lunges, dodges or is knocked back, and stretches toward it.
+   */
+  const dragBody = (pos: Record<string, Vec>, id: string, to: Vec, follow = 0.55): Record<string, Vec> => {
+    const from = pos[id], out = { ...pos, [id]: to };
+    const body = bodies[id]?.body;
+    if (body && from) for (const [mate, b] of Object.entries(bodies)) if (mate !== id && b.body === body && pos[mate]) out[mate] = { x: pos[mate].x + (to.x - from.x) * follow, z: pos[mate].z + (to.z - from.z) * follow };
+    return out;
+  };
 
   const linesOf = (st: CombatState) => ({
     front: st.enemies.filter(e => e.alive && e.line === "front").map(e => e.id),
@@ -277,7 +300,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // Turn so the enemies, from wherever they are now, end up roughly ahead in their lines.
     const enemiesNow = [...front, ...back].map(id => w.pos[id]).filter(Boolean);
     const yaw = facingToward(anchor, enemiesNow, front.length, back.length, w.yaw);
-    const pos = { ...w.pos, ...Object.fromEntries(formation(anchor, yaw, front, back)), player: anchor };
+    const pos = { ...w.pos, ...Object.fromEntries(formation(anchor, yaw, front, back, bodies)), player: anchor };
     world.current = { anchor, yaw, pos };
     return { pos, camera: planningShot(anchor, yaw, pos, st) };
   };
@@ -285,7 +308,14 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const [shot, setShot] = useState<SceneShot>(() => {
     // Laid out as the fight stands when the screen opens (before its opening scene, if any).
     const { front, back } = linesOf(opening?.from ?? initial);
-    const pos = { ...Object.fromEntries(formation({ x: 0, z: 0 }, 0, front, back)), player: { x: 0, z: 0 } };
+    const pos: Record<string, Vec> = { ...Object.fromEntries(formation({ x: 0, z: 0 }, 0, front, back, bodies)), player: { x: 0, z: 0 } };
+    // Waking up: the enemies (the guide) start far off in the dark, in the direction of their lines.
+    if (wakeUp && lesson) {
+      for (const id of [...front, ...back]) {
+        const p = pos[id], d = Math.hypot(p.x, p.z) || 1;
+        pos[id] = { x: p.x + (p.x / d) * WAKE.distance, z: p.z + (p.z / d) * WAKE.distance };
+      }
+    }
     world.current.pos = pos;
     return { positions: pos, camera: { follow: "player", yaw: 0 }, ms: 0, version: 0 };
   });
@@ -308,7 +338,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       if (igniteState.at >= IGNITE.kindle && playback && step) {
         const after = viewAt(playback.from, step.after);
         const { front, back: backLine } = linesOf(after);
-        const slots = formation(w.anchor, w.yaw, front, backLine);
+        const slots = formation(w.anchor, w.yaw, front, backLine, bodies);
         const moved = after.enemies.filter(e => e.alive && kindOf(e).flame && slots.has(e.id)).map(e => e.id);
         shoot({ ...w.pos, ...Object.fromEntries(moved.map(id => [id, slots.get(id)!])) }, pulledBack, IGNITE.draw, moved);
         return;
@@ -317,6 +347,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       return;
     }
     if (!playback) {
+      if (waking) return; // (the wake-up scene moves everyone itself)
       // Planning: you stand where you are; the camera eases toward your selection.
       const { pos, camera } = settle(fight, w.pos.player ?? w.anchor);
       shoot(pos, camera, NUDGE_MS);
@@ -386,30 +417,47 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       const at = attack.ranged ? a : closeIn(a, t, STRIKE_GAP);
       // (It stays centered between the two as they move: closing in, knocked back, dodging.)
       const camera: ShotCamera = { between: [attack.attacker, attack.target], yaw: shotCamera(shot).yaw };
-      shoot({ ...w.pos, [attack.attacker]: at }, camera, APPROACH_MS);
+      shoot(dragBody(w.pos, attack.attacker, at), camera, APPROACH_MS);
       if (attack.result === "dodged") {
         // A target that dodges gets clear late in the approach, timed to be gone just as the blow arrives (the
         // blow lands where it was), and only then takes its dodge pose.
         const to = dodgeTo();
         const timer = window.setTimeout(() => {
-          shoot({ ...world.current.pos, [attack.target]: to }, camera, APPROACH_MS - DODGE_DELAY_MS);
+          shoot(dragBody(world.current.pos, attack.target, to), camera, APPROACH_MS - DODGE_DELAY_MS);
           setDodgeStarted(stepKey);
         }, DODGE_DELAY_MS);
         cleanup = () => window.clearTimeout(timer);
       }
     } else if (attack.result === "hit") {
       // A clean hit knocks the target back, and it stays there.
-      shoot({ ...w.pos, [attack.target]: pushedAway(a, t, KNOCKBACK) }, shot.camera, KNOCK_MS);
+      shoot(dragBody(w.pos, attack.target, pushedAway(a, t, KNOCKBACK)), shot.camera, KNOCK_MS);
     } else if (attack.result === "blocked") {
       // A block jolts them both apart a little, and they stay there (like a knockback).
-      const knocked = { ...w.pos, [attack.target]: pushedAway(a, t, BLOCK_PUSH) };
-      if (!attack.ranged) knocked[attack.attacker] = pushedAway(t, a, BLOCK_PUSH);
+      let knocked = dragBody(w.pos, attack.target, pushedAway(a, t, BLOCK_PUSH));
+      if (!attack.ranged) knocked = dragBody(knocked, attack.attacker, pushedAway(t, a, BLOCK_PUSH));
       shoot(knocked, shot.camera, KNOCK_MS);
     }
     // (A dodge already got out of the way during the approach, so there's nothing more to move at the impact.)
     return cleanup;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playback?.index, playback?.phase, !!playback, selId, fight, usurpStage, igniteState]);
+  }, [playback?.index, playback?.phase, !!playback, selId, fight, usurpStage, igniteState, waking]);
+
+  // Waking up: black but for the guide's light, which comes closer; then the dark lifts and the lesson begins.
+  useEffect(() => {
+    if (!waking) return;
+    const guide = fight.enemies[0]?.id;
+    if (!guide) { setWaking(false); return; }
+    setWakeDark({ level: 1, ms: 0, glow: guide });
+    const { front, back } = linesOf(initial);
+    const slots = formation({ x: 0, z: 0 }, 0, front, back, bodies);
+    const timers = [
+      window.setTimeout(() => shoot({ ...world.current.pos, ...Object.fromEntries(slots), player: { x: 0, z: 0 } }, { follow: "player", yaw: 0 }, WAKE.walkMs), WAKE.startMs),
+      window.setTimeout(() => setWakeDark({ level: 0, ms: WAKE.liftMs, glow: guide }), WAKE.liftAt),
+      window.setTimeout(() => { setWaking(false); setWakeDark(undefined); }, WAKE.liftAt + WAKE.liftMs),
+    ];
+    return () => timers.forEach(window.clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** Where the selected figure will be on screen once the camera settles, for the ring (the mark over it, and the wheel). */
   const [anchor, setAnchor] = useState<Anchor | null>(null);
@@ -471,7 +519,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       if (playing && !busy) play(playerAction);
       return;
     }
-    const foe = fight.enemies.find(e => e.alive);
+    const foe = (playTarget ? fight.enemies.find(e => e.id === playTarget) : undefined) ?? fight.enemies.find(e => e.alive);
     // (Not against a fixed rule like Usurp Flame: that plays on its own.)
     const fixedRule = !!foe && !!kindOf(foe).fixedActions?.includes(foe.intent.action ?? "");
     if (playing && !busy) play(!fixedRule && (attackOnPlay || foe?.intent.type === "block" || foe?.intent.type === "maneuver") ? { type: "attack", target: foe!.id } : { type: "rest" });
@@ -579,11 +627,18 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return () => window.clearTimeout(timer);
   }, [playing, forced, busy, paused]);
 
+  const skipBattle = () => {
+    setPaused(false);
+    setPlayback(null);
+    setFight(f => ({ ...f, status: "won", enemies: f.enemies.map(e => ({ ...e, hp: 0, alive: false, fate: "fallen" as const })) }));
+  };
   const pauseOptions: MenuOption[] = [
     { label: "Resume", run: () => setPaused(false) },
     { label: "Restart fight", run: onRetry },
     ...(onChangeLoadout ? [{ label: changeLabel ?? "Change loadout", run: onChangeLoadout }] : []),
     { label: exitLabel ?? "Main menu", run: onExit },
+    // A shortcut for testing: win the fight on the spot (every enemy lies down).
+    ...(playing && playSignal === undefined ? [{ label: "Skip battle", quiet: true, run: skipBattle }] : []),
   ];
   const finish = () => onDone?.(fight.status === "won", fight.player.charges);
 
@@ -646,7 +701,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       setPauseIndex(0);
       return;
     }
-    if (busy) return; // input waits for the turn to finish playing
+    if (busy || waking) return; // input waits for the turn to finish playing (or for the guide to arrive)
     if (!playing) {
       if (onDone) { if (key === "select" || key === "back" || key === "pause") finish(); }
       else if (key === "select") onRetry();
@@ -1092,7 +1147,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         weapon: e.weapon,
         armor: e.armor,
         variant: kindOf(e).variant,
-        scale: kindOf(e).scale,
+        // The outer parts of a Wax Blob stand a little smaller than the middle one.
+        scale: (kindOf(e).scale ?? 1) * (e.part === "left" || e.part === "right" ? 0.85 : 1),
+        body: e.body,
+        part: e.part,
         flame: !!kindOf(e).flame,
         arm: lookOfFoe(e)?.candleArm ? (arms[e.id] = candleArmOf(e)) : undefined,
         // Phase two's look (black wax, burning inside) from the moment all is dark.
@@ -1112,15 +1170,17 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         // The fallen waxed burn as candles once the arena is lit (not the sealed ones); the lit ones, alive, carry theirs on their heads.
         candle: !!kindOf(e).remains && candlesLit && (e.alive ? !looksDead(e) : e.fate !== "encased"),
         // Its flame taken, or fallen (the waxed): sealed whole in wax.
-        encased: (!e.alive && e.fate === "encased") || (looksDead(e) && kindOf(e).deathLook === "wax"),
+        // (The parts of a Wax Blob are sealed whole in wax, always.)
+        encased: (!e.alive && e.fate === "encased") || (looksDead(e) && kindOf(e).deathLook === "wax") || !!e.body,
         stepKey,
         selected: !busy && sel.kind === "enemy" && sel.id === e.id && e.alive && !looksDead(e),
         disabled: busy || !playing || forced !== null || !e.alive || looksDead(e),
         label: `Select ${e.name}`,
         onPick: () => { if (playSignal === undefined) openWheel({ kind: "enemy", id: e.id }); },
         // While you plan, the bar of whoever you're targeting, right below it (mid-turn it sits on the black strip instead).
-        bar: playing && !busy && e.id === shownId && e.alive
-          ? <HealthBar fighter={e} before={shownBefore && barValues(shownBefore)} mirrored />
+        // (A part of a body, the Wax Blob: the bar always hangs below its middle part, whichever part is the target.)
+        bar: playing && !busy && e.id === barHolder && e.alive
+          ? <HealthBar fighter={shownEnemy ?? e} before={shownBefore && barValues(shownBefore)} mirrored />
           : undefined,
       })),
   ];
@@ -1144,7 +1204,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           figures={figures} shot={shot} projectiles={projectiles} usurpTrails={usurpTrails} arenaLit={candlesLit}
           arena={fight.enemies.some(e => kindOf(e).arena)}
           light={light}
-          dark={ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark}
+          dark={wakeDark ?? (ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark)}
           ignite={ignite ? { who: ignite.who, start: ignite.start, seed: ignite.seed } : undefined}
         />
       </section>
@@ -1176,7 +1236,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       )}
 
       {/* The ring over whoever you have selected: a small mark while you plan, grown into the wheel when you focus. */}
-      {playing && !forced && !busy && (
+      {playing && !forced && !busy && !waking && (
         <ActionWheel
           wheel={wheel}
           open={wheelOpen}

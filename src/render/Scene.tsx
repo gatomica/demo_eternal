@@ -12,6 +12,7 @@ import { lookOf } from "./looks";
 import { flameOf, type PoseName } from "./poses";
 import { CloakRemains, GuideRemains, Remains } from "./Remains";
 import { StickFigure } from "./StickFigure";
+import { BlobBack, BlobFront, type BlobBox } from "./WaxBlob";
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "../warden/arena";
 import { IGNITE } from "../warden/scenes";
 import type { CandleArm, WardenPoseName } from "../warden/skeleton";
@@ -53,6 +54,9 @@ export interface SceneFigure {
   flailFire?: boolean;
   /** Size relative to a normal figure. */
   scale?: number;
+  /** A part of a multi-target enemy (the Wax Blob): its body, and which part it is. The parts stand in one heap. */
+  body?: string;
+  part?: "left" | "mid" | "right";
   /** Playback animations (fx-hit, fx-step...). */
   classes: string[];
   /** Changes on every playback beat, so animations replay. */
@@ -84,8 +88,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   figures: SceneFigure[];
   shot: SceneShot;
   projectiles?: Projectile[];
-  /** The light dying (0 to 1, over `ms`), all but one figure's flame, which keeps burning. */
-  dark?: { level: number; ms: number; flame?: string };
+  /** The light dying (0 to 1, over `ms`), all but one figure's flame, which keeps burning (or the glow of one figure's own light, the guide's orb). */
+  dark?: { level: number; ms: number; flame?: string; glow?: string };
   /** Flames streaming from figures, each arching over another, into its candle hand. */
   usurpTrails?: { from: string; to: string; key: string }[];
   /** The Warden's arena: sleepwalkers sealed into its floor and walls. */
@@ -250,6 +254,14 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   }
 
   /** Whether this piece of the arena stands between the camera and a fighter it overlaps (it goes see-through, so nobody is hidden). */
+  // The heaps of multi-target enemies: where each body's parts stand on screen.
+  const blobs = [...new Set(placed.map(({ f }) => f.body).filter((b): b is string => !!b))].flatMap(body => {
+    const parts = placed.filter(({ f }) => f.body === body);
+    const mid = parts.find(({ f }) => f.part === "mid") ?? parts[0];
+    const box: BlobBox = { parts: parts.map(({ box: b }) => ({ x: b.x, y: b.y, w: b.w, h: b.h })), slumped: parts.every(({ f }) => !!f.dead) };
+    const zs = parts.map(({ box: b }) => 1000 - Math.round(b.depth * 10));
+    return [{ body, box, lo: Math.min(...zs) - 1, hi: Math.max(...zs) + 1, filter: `brightness(${Math.max(0.68, Math.min(1, 1.12 - mid.box.depth * 0.06)) * lightAt(mid.at)})` }];
+  });
   const coversFigure = (box: ReturnType<typeof figureBox>) => placed.some(({ box: b }) =>
     b.depth > box.depth && b.x < box.x + box.w && b.x + b.w > box.x && b.y < box.y + box.h && b.y + b.h > box.y);
 
@@ -261,6 +273,12 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         <div key={pr.id} className={`arena-slot ${coversFigure(box) ? "is-see-through" : ""}`} style={{ left: box.x, top: box.y, width: box.w, height: box.h, zIndex: 1000 - Math.round(box.depth * 10), filter: `brightness(${Math.max(0.55, Math.min(1, 1.05 - box.depth * 0.04)) * lightAt(pr.pos)})` }}>
           <SealedSleeper kind={pr.kind} flip={pr.flip} lit={propLit} />
         </div>
+      ))}
+      {blobs.map(b => (
+        <Fragment key={`blob-${b.body}`}>
+          <div className="blob-slot" style={{ zIndex: b.lo, filter: b.filter }}><BlobBack box={b.box} /></div>
+          <div className="blob-slot" style={{ zIndex: b.hi, filter: b.filter }}><BlobFront box={b.box} /></div>
+        </Fragment>
       ))}
       {placed.map(({ f, box, at }) => (
         <Fragment key={f.id}>
@@ -277,8 +295,11 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
             width: box.w,
             height: box.h,
             zIndex: 1000 - Math.round(box.depth * 10),
-            // Distance haze: the further away, the dimmer.
-            filter: `brightness(${Math.max(0.68, Math.min(1, 1.12 - box.depth * 0.06)) * lightAt(at)})`,
+            // The outer parts of a heap lean out of it.
+            transform: f.part === "left" ? "rotate(-7deg)" : f.part === "right" ? "rotate(7deg)" : undefined,
+            transformOrigin: "50% 90%",
+            // Distance haze: the further away, the dimmer. (The parts of one body, the Wax Blob, share the heap's: they are one lump of wax.)
+            filter: (f.body && blobs.find(b => b.body === f.body)?.filter) || `brightness(${Math.max(0.68, Math.min(1, 1.12 - box.depth * 0.06)) * lightAt(at)})`,
           }}
         >
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
@@ -314,6 +335,13 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         return (
           <LoneFlame className="scene-lone-flame" at={[fx, fy]} sz={sz} />
         );
+      })()}
+      {dark?.glow && (() => {
+        const t = placed.find(x => x.f.id === dark.glow);
+        if (!t) return null;
+        // The guide's orb, hanging in front of its chest: a soft white glow over the dark.
+        const size = Math.max(t.box.h * 1.1, 90);
+        return <div className="scene-orb-glow" style={{ left: t.box.x + t.box.w / 2 - size / 2, top: t.box.y + t.box.h * 0.62 - size / 2, width: size, height: size }} />;
       })()}
       {usurpTrails.map(usurpTrail => {
         const a = placed.find(x => x.f.id === usurpTrail.from), b = placed.find(x => x.f.id === usurpTrail.to);

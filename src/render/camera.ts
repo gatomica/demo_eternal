@@ -137,11 +137,21 @@ export function planningCamera(anchor: Vec, yaw: number): Cam {
 }
 
 /** Slots in the formation for the enemies on each line, in order, relative to the player. */
-export function formation(anchor: Vec, yaw: number, front: string[], back: string[]): Map<string, Vec> {
+export function formation(anchor: Vec, yaw: number, front: string[], back: string[], bodies: Record<string, BodyPart> = {}): Map<string, Vec> {
   const spots = new Map<string, Vec>();
+  // The parts of one body (the Wax Blob) share one slot: only its first part is placed on the arc.
+  const firstOf = new Map<string, string>();
+  const slotted = (ids: string[]) => ids.filter(id => {
+    const b = bodies[id]?.body;
+    if (!b) return true;
+    if (firstOf.has(b)) return false;
+    firstOf.set(b, id);
+    return true;
+  });
+  const slots = { front: slotted(front), back: slotted(back) };
   // Each line stands on an arc around the player, all the same distance from them: its middle
   // where the line's slot is, the rest spread along the arc (`spacing` apart, along the arc).
-  for (const [line, ids] of [["front", front], ["back", back]] as const) {
+  for (const [line, ids] of [["front", slots.front], ["back", slots.back]] as const) {
     const { side, ahead, spacing } = LINES[line];
     const r = Math.hypot(side, ahead), mid = Math.atan2(side, ahead);
     ids.forEach((id, i) => {
@@ -149,7 +159,28 @@ export function formation(anchor: Vec, yaw: number, front: string[], back: strin
       spots.set(id, fromPlayer(anchor, yaw, r * Math.sin(a), r * Math.cos(a)));
     });
   }
+  // Then its parts spread across the slot: left, middle and right, close together.
+  for (const [body, first] of firstOf) {
+    const centre = spots.get(first)!;
+    const parts = [...front, ...back].filter(id => bodies[id]?.body === body);
+    parts.forEach((id, i) => {
+      const part = bodies[id].part;
+      const across = part === "left" ? -1 : part === "right" ? 1 : part === "mid" ? 0 : i - (parts.length - 1) / 2;
+      spots.set(id, add(centre, right(yaw), across * BODY_SPREAD));
+    });
+  }
   return spots;
+}
+
+/** What a body's part is, for placing it: which body, and which part. */
+export interface BodyPart { body: string; part?: "left" | "mid" | "right" }
+
+/** How far apart the left, middle and right parts of one body stand, in meters. */
+export const BODY_SPREAD = 0.85;
+
+/** The bodies in a fight: each part's body and place in it, by enemy id. */
+export function bodiesOfEnemies(enemies: { id: string; body?: string; part?: "left" | "mid" | "right" }[]): Record<string, BodyPart> {
+  return Object.fromEntries(enemies.filter(e => e.body).map(e => [e.id, { body: e.body!, part: e.part }]));
 }
 
 /**

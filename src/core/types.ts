@@ -58,6 +58,9 @@ export interface Intent {
   guardPose?: string;
   /** The weight of this Attack or Block, when the action has its own. Otherwise the fighter's weapon. */
   weight?: WeaponTier;
+  /** Its own damage and Fatigue cost in sixteenths of its max health, when the action sets them (otherwise its weight's). */
+  damage?: number;
+  cost?: number;
   /** A ranged attack: the attacker stays put, a Block sends nothing back, and it can always be dodged. */
   ranged?: boolean;
   /** For a Maneuver aimed at an ally (Usurp Flame): that ally's id. It pushes you away like backing off. */
@@ -129,6 +132,13 @@ export interface Enemy extends Fighter {
   reviving: boolean;
   /** How it left the fight, once it has. */
   fate?: "fallen" | "encased";
+  /**
+   * A part of a multi-target enemy (the Wax Blob): the id of its body, shared by all its parts. The parts of a body
+   * share one pool of health and one place (line), each acting on its own.
+   */
+  body?: string;
+  /** Which part of its body it is, as seen from the player's side. */
+  part?: "left" | "mid" | "right";
 }
 
 export interface CombatConfig {
@@ -276,6 +286,9 @@ export interface EnemySetup {
    * begins (the Warden's Usurp Flame). It starts the fight already encased. See `openingOf`.
    */
   offering?: boolean;
+  /** A part of a multi-target enemy: its body's id, shared by the parts, and which part it is. */
+  body?: string;
+  part?: "left" | "mid" | "right";
 }
 
 /** A scene played before the first turn: the fight as it stood before it, and its steps. */

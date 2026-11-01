@@ -9,10 +9,10 @@
  * step through.
  */
 import { GAP_PEEK, VISION_RADIUS } from "./tuning";
-import { inside, isAir, isRamp, LEVELS, tileAt, VOID, walkable, WORLD } from "./world";
+import { inside, isAir, isRamp, isShaft, LEVELS, tileAt, VOID, walkable, WORLD } from "./world";
 
 /** Tiles sight travels over on level z: walkable ones, plus the space above stairs from below. */
-const seesThrough = (z: number, x: number, y: number) => walkable(tileAt(z, x, y)) || isRamp(tileAt(z - 1, x, y));
+const seesThrough = (z: number, x: number, y: number) => walkable(tileAt(z, x, y)) || isRamp(tileAt(z - 1, x, y)) || isShaft(z, x, y);
 
 /** The same, worked out once per tile when the map loads (sight asks it many times a frame). */
 const SEE = WORLD.levels.map((_, z) => {
@@ -79,6 +79,8 @@ export function sight(px: number, py: number, alt: number, left = WORLD.levels.m
     // other, glimpsing only a little way onto the far floor (like past a doorway).
     if (isRamp(tileAt(z, x, y)) && z + 1 < LEVELS) relax(z + 1, i, Math.min(here, GAP_PEEK));
     if (z > 0 && isRamp(tileAt(z - 1, x, y))) relax(z - 1, i, Math.min(here, GAP_PEEK));
+    // Inside a shaft the light runs straight down (and up) its length, as far as it is open.
+    if (isShaft(z, x, y) && z > 0 && seeThrough(z - 1, x, y)) relax(z - 1, i, here);
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dy) continue;
       const nx = x + dx, ny = y + dy, ni = ny * w + nx;
@@ -92,7 +94,7 @@ export function sight(px: number, py: number, alt: number, left = WORLD.levels.m
       } else if (!dx !== !dy && isAir(z, nx, ny)) {
         // Over a ledge: down to the first thing below. If that's floor, you glimpse it.
         for (let k = z - 1; k >= 0; k--) {
-          if (tileAt(k, nx, ny) === VOID) continue;
+          if (tileAt(k, nx, ny) === VOID && !isShaft(k, nx, ny)) continue;
           if (seeThrough(k, nx, ny)) relax(k, ni, Math.min(here - 1, GAP_PEEK));
           break;
         }

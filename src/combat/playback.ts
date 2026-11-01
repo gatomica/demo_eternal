@@ -109,6 +109,9 @@ export const phaseFor = (st: Step | undefined): Playback["phase"] => (phaseTwoOf
 /** How long the arena shows before a fight's opening scene starts, in ms. */
 export const OPENING_LEAD_IN = 1200;
 
+/** Waking up in the dark at the start of the lesson: how far off the guide starts (m), when it begins to walk in, how long the walk takes, and when and how slowly the dark lifts (ms). */
+export const WAKE = { distance: 16, startMs: 600, walkMs: 5200, liftAt: 3400, liftMs: 2400 } as const;
+
 /** The phase-two scene's light starts dying this long in (a moment after it's shown, so it fades). */
 export const IGNITE_DARK = 40;
 

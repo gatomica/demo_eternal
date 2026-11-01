@@ -331,6 +331,58 @@ export function drawDeadWaxed(g: CanvasRenderingContext2D, x: number, y: number,
   g.beginPath(); g.moveTo(X(-0.1), Y(foot - 0.2)); g.quadraticCurveTo(X(0.08), Y(foot - 0.26), X(0.16), Y(foot - 0.12)); g.stroke();
 }
 
+/**
+ * The Wax Blob on the map, seen from above: a round heap of wax two tiles across, three heads rising from it, and
+ * three arms stretched out toward where it is trying to go (`aimX`, `aimY` a unit vector; `reach` 0 to 1, how far
+ * out they are), stirring a little. When a wall stops it, the arms still reach for what it is after.
+ */
+export function drawBlobTop(g: CanvasRenderingContext2D, x: number, y: number, T: number, aimX: number, aimY: number, reach: number, t: number) {
+  const wax = WAXED_LOOK.wax!, rim = "#6b5b25";
+  const cx = x, cy = y + 0.36 * T, R = T; // its feet are 0.36 tiles below the point it is drawn from
+  g.lineCap = "round"; g.lineJoin = "round";
+  g.fillStyle = COLORS.shadow;
+  g.beginPath(); g.ellipse(cx, cy + 0.08 * T, R * 1.04, R * 0.98, 0, 0, Math.PI * 2); g.fill();
+  // The arms first, so the heap's edge covers their roots.
+  const ang = Math.atan2(aimY, aimX);
+  [-0.55, 0, 0.55].forEach((spread, i) => {
+    const a = ang + spread * (1.15 - 0.55 * reach);
+    const wave = Math.sin(t / 280 + i * 2.1) * 0.12;
+    // (Short: half as long as a waxed's own arms, past the heap's edge.)
+    const len = (0.04 + 0.08 * reach) * T;
+    const sx = cx + Math.cos(a) * R * 0.6, sy = cy + Math.sin(a) * R * 0.6;
+    const ex = cx + Math.cos(a + wave) * (R + len), ey = cy + Math.sin(a + wave) * (R + len);
+    const bow = Math.sin(t / 340 + i * 1.7) * 0.18 * T;
+    const mx = (sx + ex) / 2 + Math.cos(a + Math.PI / 2) * bow, my = (sy + ey) / 2 + Math.sin(a + Math.PI / 2) * bow;
+    g.strokeStyle = rim; g.lineWidth = 0.22 * T;
+    g.beginPath(); g.moveTo(sx, sy); g.quadraticCurveTo(mx, my, ex, ey); g.stroke();
+    g.strokeStyle = wax; g.lineWidth = 0.16 * T;
+    g.beginPath(); g.moveTo(sx, sy); g.quadraticCurveTo(mx, my, ex, ey); g.stroke();
+  });
+  // The heap: a circle, with its rim a little darker.
+  g.fillStyle = wax; g.strokeStyle = rim; g.lineWidth = Math.max(2, 0.07 * T);
+  g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill(); g.stroke();
+  // The three heads, rising out of it.
+  for (const [u, v] of [[0, -0.34], [-0.5, 0.26], [0.5, 0.26]]) {
+    g.fillStyle = wax; g.strokeStyle = rim; g.lineWidth = Math.max(1.5, 0.05 * T);
+    g.beginPath(); g.arc(cx + u * R, cy + v * R, 0.27 * R, 0, Math.PI * 2); g.fill(); g.stroke();
+  }
+}
+
+/** A beaten Wax Blob, seen from above: the heap slumped flat, a ring of dark wax (the middle part stands for the whole). */
+export function drawDeadBlob(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
+  const wax = WAXED_LOOK.wax!;
+  // (The middle part lies a little right of the heap's centre.)
+  const cx = x - 0.25 * T, cy = y + 0.36 * T + 0.08 * T;
+  g.fillStyle = COLORS.shadow;
+  g.beginPath(); g.ellipse(cx, cy + 0.06 * T, 0.98 * T, 0.9 * T, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#6b5b25";
+  g.beginPath(); g.arc(cx, cy, 0.92 * T, 0, Math.PI * 2); g.fill();
+  g.fillStyle = wax;
+  g.beginPath(); g.arc(cx, cy, 0.8 * T, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "rgba(60,48,16,0.5)";
+  for (const [u, v] of [[0, -0.3], [-0.45, 0.22], [0.45, 0.22]]) { g.beginPath(); g.arc(cx + u * T, cy + v * T, 0.17 * T, 0, Math.PI * 2); g.fill(); }
+}
+
 /** The Warden, beaten: his cloak lying in a low pyramid over a thick pool of wax. */
 export function drawCloakRemains(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
   const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
@@ -360,6 +412,9 @@ export function drawGuideRemains(g: CanvasRenderingContext2D, x: number, y: numb
 export const MAP_REMAINS: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number) => void> = {
   sleepwalker: drawRemains,
   waxed: drawDeadWaxed,
+  blobLeft: () => {},
+  blobMid: drawDeadBlob,
+  blobRight: () => {},
   warden: drawCloakRemains,
   guide: drawGuideRemains,
 };
@@ -515,6 +570,9 @@ function drawGuideMap(g: CanvasRenderingContext2D, x: number, y: number, T: numb
 export const MAP_FIGURES: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame) => void> = {
   sleepwalker: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, SLEEPWALKER_LOOK),
   waxed: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, WAXED_LOOK),
+  blobLeft: () => {},
+  blobMid: (g, x, y, T) => drawBlobTop(g, x, y, T, 0, 1, 0.2, performance.now()),
+  blobRight: () => {},
   warden: (g, x, y, T, facing) => drawWardenMap(g, x, y, T, facing),
   guide: (g, x, y, T) => drawGuideMap(g, x, y, T),
 };

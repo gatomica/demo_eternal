@@ -7,13 +7,12 @@
  * never as fast as you walk. Touching one starts its fight.
  */
 import { ENEMY_KINDS, type KindId } from "../core/bestiary";
-import { ENCOUNTERS } from "../core/encounters";
+import { waxBlob } from "../core/encounters";
 import type { EnemySetup } from "../core/types";
 import type { Walker } from "./movement";
 import type { GroundItem } from "./pickups";
-import { openFloor } from "./seals";
+import { DIAG, FLOOR, tileAt, WORLD } from "./world";
 import { HALF_D, HALF_W } from "./tuning";
-import { WORLD } from "./world";
 
 /** An enemy waiting somewhere on the map, and the fight it starts when it reaches you. */
 export interface MapFoe {
@@ -23,6 +22,13 @@ export interface MapFoe {
   home: { x: number; y: number; z: number };
   /** The fight. The map shows one figure per enemy in it, huddled together. */
   fight: EnemySetup[];
+  /** A big round body: its radius in tiles (yours is `HALF_W`). Too wide for a one-tile corridor, so it keeps to the rooms. */
+  girth?: number;
+  /**
+   * It only starts its fight when you are within this many tiles (a square) of where it started: inside the room it guards,
+   * or at its edge. Elsewhere it may chase you, but cannot reach you.
+   */
+  fightWithin?: number;
   /** It never notices you or moves: you walk up to it. */
   still?: boolean;
   /** Which of the original group's members are still standing, when some are dead for good (`fight` holds only those). */
@@ -77,48 +83,20 @@ export function livingDef(def: MapFoe, corpses: Record<string, Corpse>): MapFoe 
   return members.length === def.fight.length ? def : { ...def, fight: members.map(i => def.fight[i]), members };
 }
 
-/** The Warden's fight, as Test combat has it (his escorts, and the waxed whose flame he takes first). */
-const WARDEN_FIGHT = ENCOUNTERS.find(e => e.id === "warden")!.enemies;
-
-/** The tutorial, roughly in the order you'll meet it. Levels: 0-1 below ground, 2 ground, 3-6 above. */
+/**
+ * Every enemy on the map, in the order you meet them. The waxed stand in the labyrinth's
+ * one-tile corridors, so you must beat them to pass; the sleepwalker waits in the shaft room, too
+ * fat to follow you into a corridor, and the way out is the long ladder (it cannot climb): lure it
+ * to one corridor and come round to another.
+ */
 export const MAP_FOES: MapFoe[] = [
-  // Ground floor. In the hall: a lone waxed, then a pair further in.
-  { id: "hall-waxed", kind: "waxed", home: { x: 17.5, y: 4.5, z: 2 }, fight: [{ kind: "waxed" }] },
-  { id: "hall-pair", kind: "waxed", home: { x: 21.5, y: 11.5, z: 2 }, fight: [{ kind: "waxed" }, { kind: "waxed" }] },
-  // One left standing in the middle of the bridge.
-  { id: "bridge-waxed", kind: "waxed", home: { x: 20.5, y: 8.5, z: 3 }, fight: [{ kind: "waxed" }] },
-  // The first sleepwalker, in the room below the east stairs: your first read of its stances.
-  { id: "low-sleeper", kind: "sleepwalker", home: { x: 27.5, y: 16.6, z: 2 }, fight: [{ kind: "sleepwalker" }] },
-  // Up in the far room: a sleepwalker with a waxed at its side.
-  {
-    id: "far-room", kind: "sleepwalker", home: { x: 28.5, y: 7.6, z: 3 },
-    fight: [{ kind: "sleepwalker", line: "front" }, { kind: "waxed" }],
-  },
-
-  // Below: the cellar, then the crypt under it (off the way up, for those who look).
-  { id: "cold-pair", kind: "waxed", home: { x: 11.5, y: 25.5, z: 1 }, fight: [{ kind: "waxed" }, { kind: "waxed" }] },
-  {
-    id: "ossuary", kind: "sleepwalker", home: { x: 25.5, y: 30.5, z: 1 },
-    fight: [{ kind: "sleepwalker", line: "front" }, { kind: "waxed" }],
-  },
-  { id: "crypt-waxed", kind: "waxed", home: { x: 49.5, y: 23.5, z: 0 }, fight: [{ kind: "waxed" }] },
-  {
-    id: "crypt-pair", kind: "sleepwalker", home: { x: 43.5, y: 30.5, z: 0 },
-    fight: [{ kind: "sleepwalker", line: "front" }, { kind: "sleepwalker" }],
-  },
-
-  // Above: the gallery, the belfry, then the Warden.
-  { id: "gallery-waxed", kind: "waxed", home: { x: 41.5, y: 8.5, z: 4 }, fight: [{ kind: "waxed" }, { kind: "waxed" }] },
-  {
-    id: "gallery-pair", kind: "sleepwalker", home: { x: 48.5, y: 7.6, z: 4 },
-    fight: [{ kind: "sleepwalker", line: "front" }, { kind: "sleepwalker" }],
-  },
-  { id: "belfry-sleeper", kind: "sleepwalker", home: { x: 59.5, y: 22.5, z: 5 }, fight: [{ kind: "sleepwalker" }] },
-  {
-    id: "bell-hall", kind: "sleepwalker", home: { x: 70.5, y: 25.6, z: 5 },
-    fight: [{ kind: "sleepwalker", line: "front" }, { kind: "waxed" }, { kind: "waxed" }],
-  },
-  { id: "warden", kind: "warden", home: { x: 70.5, y: 5.5, z: 6 }, fight: WARDEN_FIGHT },
+  // The ring, clockwise from the start room: north side, east side, south side, west side.
+  { id: "wax-1", kind: "waxed", home: { x: 24.5, y: 13.5, z: 0 }, fight: [{ kind: "waxed" }] },
+  { id: "wax-2", kind: "waxed", home: { x: 33.5, y: 17.5, z: 0 }, fight: [{ kind: "waxed" }, { kind: "waxed" }] },
+  { id: "wax-3", kind: "waxed", home: { x: 26.5, y: 25.5, z: 0 }, fight: [{ kind: "waxed" }] },
+  { id: "wax-4", kind: "waxed", home: { x: 21.5, y: 21.5, z: 0 }, fight: [{ kind: "waxed" }] },
+  // In the shaft room: a Wax Blob (three targets, one body), too fat for the corridors, so it keeps to the room.
+  { id: "hurdle", kind: "blobMid", home: { x: 27.5, y: 19.5, z: 0 }, girth: 1, fightWithin: 3.5, fight: waxBlob("hurdle") },
 ];
 
 interface FoeTuning {
@@ -133,6 +111,10 @@ interface FoeTuning {
 
 export const FOE_TUNING: Record<KindId, FoeTuning> = {
   waxed: { notice: 3.2, chase: 0.85, walk: 0.6, wander: 0 },
+  // The blob drags itself along, a little faster than the waxed.
+  blobLeft: { notice: 4.0, chase: 1.0, walk: 0.6, wander: 0 },
+  blobMid: { notice: 4.0, chase: 1.0, walk: 0.6, wander: 0 },
+  blobRight: { notice: 4.0, chase: 1.0, walk: 0.6, wander: 0 },
   sleepwalker: { notice: 4.5, chase: 2.0, walk: 0.8, wander: 1.8 },
   // He waits in the middle of his arena, and only comes for you once you're well inside it.
   warden: { notice: 3.5, chase: 1.1, walk: 0.7, wander: 0 },
@@ -163,7 +145,7 @@ export const ENCOUNTER_FADE_MS = 650;
 /* ---------- Finding the way: step counts over the floor, no full path search ---------- */
 
 /** Tiles an enemy on level z can walk on (enemies keep to their level: floor only). */
-export const foeFloor = (z: number, x: number, y: number) => openFloor(z, x, y);
+export const foeFloor = (z: number, x: number, y: number) => tileAt(z, x, y) === FLOOR || tileAt(z, x, y) === DIAG;
 
 /**
  * How many steps each tile of level z is from tile (tx, ty), walking floor only (-1: can't get
@@ -188,10 +170,10 @@ export function stepsFrom(z: number, tx: number, ty: number): Int16Array {
 }
 
 /** Whether an enemy at (x, y) on level z could walk straight to (gx, gy) without brushing a wall. */
-function clearWalk(z: number, x: number, y: number, gx: number, gy: number) {
+function clearWalk(z: number, x: number, y: number, gx: number, gy: number, half?: number) {
   const len = Math.hypot(gx - x, gy - y);
   const n = Math.ceil(len / 0.2);
-  const rx = HALF_W + 0.05, ry = HALF_D + 0.05;
+  const rx = (half ?? HALF_W) + 0.05, ry = (half ?? HALF_D) + 0.05;
   for (let i = 1; i <= n; i++) {
     const px = x + ((gx - x) * i) / n, py = y + ((gy - y) * i) / n;
     for (const [cx, cy] of [[px - rx, py - ry], [px + rx, py - ry], [px - rx, py + ry], [px + rx, py + ry]]) {
@@ -206,8 +188,8 @@ function clearWalk(z: number, x: number, y: number, gx: number, gy: number) {
  * clear, otherwise the middle of the neighbouring tile that's fewest steps from the goal (so it
  * rounds corners and threads doorways instead of pushing into walls).
  */
-export function waypoint(z: number, x: number, y: number, goal: { x: number; y: number }, steps: Int16Array | null) {
-  if (!steps || clearWalk(z, x, y, goal.x, goal.y)) return goal;
+export function waypoint(z: number, x: number, y: number, goal: { x: number; y: number }, steps: Int16Array | null, half?: number) {
+  if (!steps || clearWalk(z, x, y, goal.x, goal.y, half)) return goal;
   const { w } = WORLD;
   const tx = Math.floor(x), ty = Math.floor(y);
   let best: { x: number; y: number } | null = null, bestSteps = steps[ty * w + tx];
@@ -240,6 +222,8 @@ export interface Foe extends Walker {
   lastSeen: { x: number; y: number; steps: Int16Array | null } | null;
   /** Where you were the last time it saw you. */
   seenAt: { x: number; y: number } | null;
+  /** Which way it reaches (a unit vector toward what it is after, even when it cannot get there), and how far it has its arms out (0 to 1): a big body's arms. */
+  aimX: number; aimY: number; reach: number;
 }
 
 /** Where to draw each member of a group of `n`, around the group's position (tiles). */
@@ -247,3 +231,11 @@ export const huddle = (n: number): [number, number][] =>
   n <= 1 ? [[0, 0]] : n === 2 ? [[-0.2, -0.1], [0.22, 0.06]] : n === 3 ? [[-0.25, -0.1], [0.25, -0.08], [0, 0.12]]
     // The Warden's fight: him in the middle, a waxed either side, the one whose flame he'll take behind.
     : [[-0.42, 0.14], [0, -0.05], [0.42, 0.14], [0.36, -0.3]];
+
+/** Whether you stand where this enemy will fight you (see `MapFoe.fightWithin`): anywhere, for most. */
+export function inFightArea(f: { def: MapFoe }, you: { x: number; y: number; alt: number }) {
+  const r = f.def.fightWithin;
+  if (r === undefined) return true;
+  const { home } = f.def;
+  return Math.abs(you.alt - home.z) < 0.5 && Math.abs(you.x - home.x) <= r && Math.abs(you.y - home.y) <= r;
+}

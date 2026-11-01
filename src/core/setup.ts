@@ -64,6 +64,7 @@ export function createCombat(
       flags: { ...kind.flags },
       revives: kind.revives ?? 0,
       reviving: false,
+      ...(setup.body ? { body: setup.body, part: setup.part } : {}),
     };
   });
 

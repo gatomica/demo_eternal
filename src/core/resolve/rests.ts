@@ -3,6 +3,7 @@
  * voluntary Rest; the forced Rest after a stagger always ends the stagger.
  */
 import { kindOf } from "../bestiary";
+import { bodyOf } from "../body";
 import { heal, restAmount } from "../rules";
 import { backOnFeet, fatigueGone } from "./statuses";
 import type { Turn } from "./turn";
@@ -55,8 +56,12 @@ export function settleRests(t: Turn) {
     if (f.fatigue < 0) {
       // Rested past zero Fatigue: half the excess heals.
       heal(f, -f.fatigue / 2);
+      // (A part of a multi-target enemy heals the whole body.)
+      for (const mate of bodyOf(t.s.enemies, f)) mate.hp = f.hp;
       f.fatigue = 0;
     }
+    // (Resting rests the whole body: they share one bar.)
+    for (const mate of bodyOf(t.s.enemies, f)) mate.fatigue = f.fatigue;
     if (f.fatigue <= 0) fatigueGone(f);
     t.emit({ kind: "rest", who: id, result: "rested", forced: false });
   }

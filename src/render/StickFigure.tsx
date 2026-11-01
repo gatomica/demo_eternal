@@ -416,9 +416,10 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
         {!freeBehind && freeArm}
         {!weaponBehind && weaponEl}
         {!weaponBehind && weaponArm}
-        {s.prop && <Prop prop={s.prop} />}
         {waxCaked && <WaxCaked s={s} near={nearShoulder} />}
         {encased && <WaxShell s={s} near={nearShoulder} far={farShoulder} />}
+        {/* (What it holds, a flame or a lump of wax, over the wax coat, not under it.) */}
+        {s.prop && <Prop prop={s.prop} />}
         {sides && <SideTags s={s} hand={hand} flip={front && !straight} />}
        </g>
       </g>

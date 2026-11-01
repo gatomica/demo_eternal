@@ -7,8 +7,9 @@
  * Rest, a move.
  */
 import { kindOf } from "../bestiary";
-import { attackCost, attackDamage, dodgeFatigue, resistance, WEAPONS } from "../rules";
-import type { Enemy, Fighter, Rng } from "../types";
+import { attackCost, attackDamage, dodgeFatigue, resistance, sixteenths, WEAPONS } from "../rules";
+import type { Enemy, Fighter, Rng, WeaponTier } from "../types";
+import { bodyOf } from "../body";
 import { waxOn } from "./statuses";
 import type { Turn } from "./turn";
 
@@ -51,11 +52,29 @@ export function resolveAttacks(t: Turn, rng: Rng) {
   }
 }
 
-/** Health lost to a blow or a burn. Nothing in the model viewer; in the guide's training, only you, and never your last point. */
+/** What an attack costs its attacker in Fatigue, and how much it deals: its action's own numbers when it sets them, otherwise its weight's. */
+const costOf = (f: Fighter, weight: WeaponTier) => {
+  const own = (f as Partial<Enemy>).intent?.cost;
+  return own !== undefined ? sixteenths(own, f.maxHP) : attackCost(f, weight);
+};
+const damageOf = (f: Fighter, weight: WeaponTier) => {
+  const own = (f as Partial<Enemy>).intent?.damage;
+  return own !== undefined ? sixteenths(own, f.maxHP) : attackDamage(f, weight);
+};
+
+/** Took health damage this turn, which breaks a Rest (a multi-target enemy's whole body shares the damage). */
+function hurt(t: Turn, f: Fighter) {
+  for (const m of bodyOf(t.s.enemies, f)) t.hurt.add(m.id);
+}
+
+/**
+ * Health lost to a blow or a burn. Nothing in the model viewer; in the guide's training, only you, and never your last point.
+ * The parts of a multi-target enemy (the Wax Blob) share one pool: the loss is every part's.
+ */
 function loseHealth(t: Turn, target: Fighter, amount: number) {
   const { dummy, sparring } = t.s.config;
   if (dummy) return;
-  if (!sparring) target.hp -= amount;
+  if (!sparring) for (const mate of bodyOf(t.s.enemies, target)) mate.hp -= amount;
   else if (target === t.p) target.hp = Math.max(1, target.hp - amount);
 }
 
@@ -67,13 +86,13 @@ function shockwave(t: Turn, attacker: Fighter) {
   if (attacker === t.p || t.cancelled.has(attacker.id)) return;
   const self = attacker as Enemy;
   if (!self.intent.tags?.includes("shockwave") || kindOf(self).shockwave?.(self) === false) return;
-  const dmg = attackDamage(self, t.weightOf(self));
+  const dmg = damageOf(self, t.weightOf(self));
   for (const ally of t.alive) {
     if (ally === self || !ally.alive || t.out.has(ally.id) || t.isReviving(ally)) continue;
     const resisted = dmg * resistance(ally, null);
     t.tire(ally, resisted);
     const through = dmg - resisted;
-    if (through > 0) t.hurt.add(ally.id);
+    if (through > 0) hurt(t, ally);
     loseHealth(t, ally, through);
     t.emit({ kind: "splash", attacker: self.id, target: ally.id, damage: through, fatigue: resisted });
   }
@@ -95,11 +114,11 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   const grit = attacker.hp <= 0 || (!attacker.staggered && attacker.fatigue >= attacker.hp);
   const weight = t.weightOf(attacker);
   const ranged = t.isRanged(attacker);
-  t.tire(attacker, attackCost(attacker, weight));
+  t.tire(attacker, costOf(attacker, weight));
   // Melee closes in on the target; a ranged attacker stays where it is.
   if (attacker === p) t.pulls.set(target.id, p.id);
   else if (!ranged) t.pulls.set(attacker.id, attacker.id);
-  const dmg = attackDamage(attacker, weight);
+  const dmg = damageOf(attacker, weight);
 
   if (t.isReviving(target)) {
     // The blow passes through someone reviving.
@@ -120,7 +139,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   if (!blocking) t.tire(target, resisted);
   else if (!ranged) t.tire(attacker, resisted);
   const through = dmg - resisted;
-  if (through > 0) t.hurt.add(target.id);
+  if (through > 0) hurt(t, target);
   loseHealth(t, target, through);
   const sentBack = blocking && ranged ? 0 : resisted;
   const self = attacker !== p ? (attacker as Enemy) : undefined;
@@ -132,7 +151,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
       self, target, damage: through, tags: self.intent.tags ?? [],
       burn: amount => {
         loseHealth(t, target, amount);
-        if (amount > 0) t.hurt.add(target.id);
+        if (amount > 0) hurt(t, target);
         t.emit({ kind: "burned", who: target.id, damage: amount });
       },
       wax: () => waxOn(t, target, through),

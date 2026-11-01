@@ -3,7 +3,7 @@
  * play.
  */
 import { PLAYER_MAX_HP } from "../combat/fight";
-import { ENEMY_KINDS, kindOf, type KindId, type StatusToggle } from "../core/bestiary";
+import { BODIES, type BodyId, bodySetups, ENEMY_KINDS, kindOf, type KindId, type StatusToggle } from "../core/bestiary";
 import { isAvailable } from "../core/conditions";
 import { describeAction } from "../core/intents";
 import type { ActionDef } from "../core/patterns";
@@ -11,7 +11,21 @@ import { createCombat } from "../core/setup";
 import type { PoseName } from "../render/poses";
 import type { ArmorTier, CombatState, PlayerAction, WeaponTier } from "../core/types";
 
-export const VIEWER_KINDS = Object.keys(ENEMY_KINDS) as KindId[];
+/** Kinds that are only a part of a multi-target enemy: the viewer shows the whole body instead. */
+const PART_KINDS = new Set<KindId>(Object.values(BODIES).flatMap(b => b.parts.map(p => p.kind)));
+
+/** What the viewer can look at, besides you: each enemy, and each multi-target enemy as one body (all its parts at once). */
+export type EnemySubject = KindId | BodyId;
+export const VIEWER_SUBJECTS: EnemySubject[] = [...(Object.keys(ENEMY_KINDS) as KindId[]).filter(k => !PART_KINDS.has(k)), ...(Object.keys(BODIES) as BodyId[])];
+
+/** The name the viewer gives a subject. */
+export const subjectName = (sub: EnemySubject) => (sub in BODIES ? BODIES[sub as BodyId].name : ENEMY_KINDS[sub as KindId].name);
+
+/** The kinds of its parts (one, for a plain enemy), left to right. */
+export const partsOf = (sub: EnemySubject): KindId[] => (sub in BODIES ? BODIES[sub as BodyId].parts.map(p => p.kind) : [sub as KindId]);
+
+/** The part's label in its body ("Blob, left"), or the enemy's name. */
+export const partLabel = (sub: EnemySubject, i: number) => (sub in BODIES ? BODIES[sub as BodyId].parts[i].label : ENEMY_KINDS[sub as KindId].name);
 
 /** Which line it stands on: every kind can be shown on either (its own statuses come from its kind). */
 export const LINE_TOGGLE: StatusToggle = { key: "back", off: "Front line", on: "Back line" };
@@ -29,26 +43,37 @@ export const MODEL_ANGLES: { id: ModelAngle; label: string }[] = [
 /** The angle as the combat screen draws a figure. */
 export const figureAngleOf = (a: ModelAngle) => ({ view: a.startsWith("back") ? "back" as const : "front" as const, straight: !a.endsWith("34"), sides: true });
 
-export interface ViewerShow {
+/** What one part of the enemy shows (an enemy with one part has one of these). */
+export interface PartShow {
   stance: string;
-  /** The Model stance: which way it's seen (default: 3/4 front). */
-  angle?: ModelAngle;
   /** The action played (or about to be). */
   action?: string;
-  /** Statuses that are on: "back", and the kind's own flags. */
+  /** The stance it moves on to after the action (picked when it's played). */
+  next?: string;
+  /** The action it does when all the parts play together (default: the first its stance allows). */
+  chosen?: string;
+}
+
+export interface ViewerShow {
+  /** One per part, left to right. */
+  parts: PartShow[];
+  /** The Model stance: which way it's seen (default: 3/4 front). */
+  angle?: ModelAngle;
+  /** Statuses that are on: "back" (shared), and the kinds' own flags. */
   on: Record<string, boolean>;
   /** The fight's turn as shown. Once it moves past this, the action has played. */
   turn: number;
-  /** The stance it moves on to after the action (picked when it's played). */
-  next?: string;
   /** Play the Rest but break it with a blow (to see its flinch). */
   interrupt?: boolean;
+  /** Who acts in the turn being played: all the parts, or one of them (the others hold their stance). */
+  acting?: "all" | number;
 }
 
-export function viewerFight(kind: KindId): CombatState {
+/** The fight for a subject: its one enemy, or all the parts of its body, on the front line. */
+export function viewerFight(subject: EnemySubject): CombatState {
   return createCombat(
     { name: "Dummy", maxHP: PLAYER_MAX_HP, weapon: "normal", armor: "light", charges: 0 },
-    [{ kind, line: "front" }],
+    subject in BODIES ? bodySetups(subject as BodyId, "viewer", { line: "front" }) : [{ kind: subject as KindId, line: "front" }],
     { dummy: true },
   );
 }
@@ -62,14 +87,22 @@ export const DEAD = "Dead";
 /** The viewer's other extra "stance": the enemy in a T-pose, seen from the angle you pick (no actions). */
 export const MODEL = "Model";
 
-/** Applies the viewer's choices to the enemy: its line, its statuses, its stance and action. */
+/** Applies the viewer's choices to the enemy: its line, its statuses, its stance and action (each part's own). */
 export function applyShow(s: CombatState, show: ViewerShow): CombatState {
   const v = structuredClone(s);
-  const e = v.enemies[0];
+  const played = s.turn > show.turn;
+  v.enemies.forEach((e, i) => applyPart(e, show.parts[i], show, played, shouldHold(show, i)));
+  v.status = "playing";
+  return v;
+}
+
+/** In a body, the parts that don't act in the turn being played hold their stance. */
+const shouldHold = (show: ViewerShow, i: number) => show.parts.length > 1 && typeof show.acting === "number" && show.acting !== i;
+
+function applyPart(e: CombatState["enemies"][number], part: PartShow, show: ViewerShow, played: boolean, hold: boolean) {
   const kind = kindOf(e);
   // Once the action has played, it stands in the stance it moved on to, statuses as the action left them.
-  const played = s.turn > show.turn;
-  const stanceName = played && show.next ? show.next : show.stance;
+  const stanceName = played && part.next ? part.next : part.stance;
   e.alive = true;
   e.staggered = false;
   e.reviving = false;
@@ -85,33 +118,34 @@ export function applyShow(s: CombatState, show: ViewerShow): CombatState {
     e.fatigue = e.hp;
     kind.staggerFlags?.(e.flags);
     e.intent = { type: "rest", dir: e.line === "back" ? "advance" : "retreat", forced: true };
-    v.status = "playing";
-    return v;
+    return;
   }
   if (stanceName === DEAD) {
     e.alive = false;
     e.hp = 0;
     e.fate = "fallen";
     e.intent = { type: "rest", dir: e.line === "back" ? "advance" : "retreat", forced: false };
-    v.status = "playing";
-    return v;
+    return;
   }
   if (stanceName === MODEL) {
     const poses = kind.modelPoses ?? { front: "t-pose", back: "t-pose-b" };
     e.intent = { type: "rest", dir: e.line === "back" ? "advance" : "retreat", forced: false, pose: figureAngleOf(show.angle ?? "front34").view === "back" ? poses.back : poses.front };
-    v.status = "playing";
-    return v;
+    return;
   }
   const stance = kind.pattern.stances.find(x => x.name === stanceName);
-  const actionName = !played && show.action ? show.action : stance?.actions[0].name ?? "";
+  const pose = kind.stancePoses[stanceName];
+  if (hold) {
+    // Holding still while another part acts: a Block with nothing to block, in its stance's pose throughout.
+    e.intent = { type: "block", dir: e.line === "back" ? "advance" : "retreat", forced: false, stance: stanceName, pose, windupPose: pose, guardPose: pose };
+    return;
+  }
+  const actionName = !played && part.action ? part.action : stance?.actions[0].name ?? "";
   const action = kind.pattern.actions.get(actionName.toLowerCase());
-  if (action) e.intent = { ...describeAction(e.kind, e.line, stanceName, action), pose: kind.stancePoses[stanceName] };
-  v.status = "playing";
-  return v;
+  if (action) e.intent = { ...describeAction(e.kind, e.line, stanceName, action), pose };
 }
 
 /** The actions a stance allows with the enemy as shown (conditions like *Sealed checked). */
-export function viewerActions(kindName: KindId, state: CombatState, stanceName: string) {
+export function viewerActions(kindName: KindId, state: CombatState, stanceName: string, partIx = 0) {
   const kind = ENEMY_KINDS[kindName];
   if (stanceName === DEAD) return [];
   // Staggered, the only way on is to recover (into a `Recover >` stance).
@@ -119,7 +153,7 @@ export function viewerActions(kindName: KindId, state: CombatState, stanceName: 
     return [{ action: { name: "Recover", type: "rest", needs: [] as string[] } as unknown as ActionDef, fixed: false, available: true }];
   }
   const stance = kind.pattern.stances.find(x => x.name === stanceName);
-  const e = state.enemies[0];
+  const e = state.enemies[partIx];
   // (Actions that play on their own, like the Warden's Usurp Flame, are in the stance's list like any other.)
   return (stance?.actions ?? []).map(a => ({
     action: a,

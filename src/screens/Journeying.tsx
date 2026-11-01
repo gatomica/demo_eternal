@@ -2,7 +2,7 @@
  * Journeying.tsx — exploration, with fights: walk the map, and touching an enemy opens its fight.
  * Win and you're back where you stood with it gone, and what it carried is yours; fall and you
  * wake by the keeper you last rested by, having lost all your gear but the eternal. You set out
- * with nothing: the guide's first fight, against the Waxed in the start room, is also its lesson.
+ * with nothing: a new game opens inside the guide's lesson, a fight in the dark.
  */
 import { useState } from "react";
 import { CombatScreen } from "../combat/CombatScreen";
@@ -18,7 +18,7 @@ import { clearSave, loadJourney, saveJourney } from "../explore/save";
 import { knotCharges, NEW_TUTORIAL } from "../explore/tutorial";
 
 /** `lesson`: the guide's tutorial fight (no map enemies; see combat/lesson.ts). */
-type Fight = { id: number; foes: MapFoe[]; state: CombatState; opening?: Opening; backTo: Journey; lesson?: boolean };
+type Fight = { id: number; foes: MapFoe[]; state: CombatState; opening?: Opening; backTo: Journey; lesson?: boolean; wake?: boolean };
 
 /**
  * The enemies of these map enemies, together. The one that touched you (the first map enemy's first) starts
@@ -27,7 +27,8 @@ type Fight = { id: number; foes: MapFoe[]; state: CombatState; opening?: Opening
 function enemiesOf(foes: MapFoe[]): EnemySetup[] {
   const all = foes.flatMap(f => f.fight);
   if (all.some(e => e.offering)) return all;
-  return foes.flatMap((f, i) => f.fight.map((e, j) => ({ ...e, line: i === 0 && j === 0 ? "front" as const : "back" as const })));
+  // (The parts of one body share a line, so they all go with the first.)
+  return foes.flatMap((f, i) => f.fight.map((e, j) => ({ ...e, line: i === 0 && (j === 0 || e.body) ? "front" as const : "back" as const })));
 }
 
 /** The guide's lesson: its fight is the Test combat "tutorial" encounter, with what you wear (nothing, at first), and it can't be lost. */
@@ -40,7 +41,7 @@ const fightFor = (foes: MapFoe[], backTo: Journey) =>
 
 /** A new game that skips the tutorial, for testing: the lesson is behind you, and all that is left is to rest with the guide. */
 function skippedTutorial(): Journey {
-  return { defeated: [], taken: [], tutorial: { greeted: true, beaten: true, done: false }, inventory: EMPTY_INVENTORY };
+  return { defeated: [], taken: [], tutorial: { beaten: true, done: false }, inventory: EMPTY_INVENTORY };
 }
 
 export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: boolean; skip?: boolean; onExit: () => void }) {
@@ -56,9 +57,8 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
   const leave = (j: Journey) => { saveJourney(j); onExit(); };
   // `id` gives every fight (and every return to the map) a fresh screen.
   // `foes`: the enemy that reached you plus everyone chasing you who piled in.
-  const [fight, setFight] = useState<Fight | null>(null);
-  // Just beat the lesson: back on the map, the guide's relief, and its asking you to rest with it.
-  const [finale, setFinale] = useState(false);
+  // A game whose lesson is not passed opens inside it: you wake in the dark as the guide comes.
+  const [fight, setFight] = useState<Fight | null>(() => (journey.tutorial.beaten ? null : { id: 1, foes: [], ...lessonFight(journey), backTo: journey, lesson: true, wake: true }));
   const [visit, setVisit] = useState(0);
 
   if (fight) {
@@ -69,14 +69,14 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
         initial={fight.state}
         opening={fight.opening}
         lesson={fight.lesson ? LESSON : undefined}
+        wakeUp={fight.wake}
         wonText={fight.lesson ? "The lesson is over" : undefined}
-        onRetry={() => setFight(f => f && { ...f, id: f.id + 1, ...(f.lesson ? lessonFight(f.backTo) : fightFor(f.foes, f.backTo)) })}
+        onRetry={() => setFight(f => f && { ...f, id: f.id + 1, wake: false, ...(f.lesson ? lessonFight(f.backTo) : fightFor(f.foes, f.backTo)) })}
         onExit={() => leave(backTo)}
         onDone={(won, charges) => {
           if (fight.lesson) {
-            // The lesson can't be lost. Passed, the guide is relieved and asks you to rest with it.
+            // The lesson can't be lost. Passed, you are on the map, in the labyrinth's first room.
             setJourney(won ? { ...backTo, tutorial: { ...backTo.tutorial, beaten: true } } : backTo);
-            setFinale(won);
             setFight(null);
             setVisit(v => v + 1);
             return;
@@ -99,7 +99,6 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
               ground: [...(backTo.ground ?? []), ...dropped],
               found: dropped.length ? gotNote("Dropped", dropped.map(d => d.gear), []) : undefined,
             });
-            setFinale(false);
           } else {
             // Wake by the keeper you last rested by (or at the start). Your progress stays, but the
             // gear you carried is gone. Coming back counts as a rest: the sleepwalkers get up again
@@ -124,16 +123,9 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
     <Exploration
       key={visit}
       journey={journey}
-      finale={finale}
       onSave={saveJourney}
-      onLesson={backTo => {
-        saveJourney(backTo);
-        setFinale(false);
-        setFight(f => ({ id: (f?.id ?? 0) + 1, foes: [], ...lessonFight(backTo), backTo, lesson: true }));
-      }}
       onEncounter={(foes, backTo) => {
         saveJourney(backTo);
-        setFinale(false);
         setFight(f => ({ id: (f?.id ?? 0) + 1, foes, ...fightFor(foes, backTo), backTo }));
       }}
       onExit={leave}

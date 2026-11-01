@@ -5,7 +5,7 @@
  */
 import type { Journey } from "./Exploration";
 
-const KEY = "demo-eternal-journey-v1";
+const KEY = "demo-eternal-journey-v3";
 
 /** Writes your progress down (without the one-off note about what the last fight dropped). */
 export function saveJourney(journey: Journey) {

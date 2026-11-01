@@ -3,6 +3,7 @@
  * happened to whom so far, and the steps it has recorded. Each phase of the turn (attacks.ts,
  * rests.ts, movement.ts, endTurn.ts) reads and changes it in turn.
  */
+import { bodyOf } from "../body";
 import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Player, PlayerAction, Step, WeaponTier } from "../types";
 
 /** The action the player is locked into this turn, if any. */
@@ -113,7 +114,8 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
     tire: (f, amount) => {
       if (amount <= 0) return;
       if (cfg.dummy) return;
-      if (!f.staggered) f.fatigue += amount;
+      // (The parts of a multi-target enemy share one bar: the Fatigue is the whole body's.)
+      for (const m of bodyOf(s.enemies, f)) if (!m.staggered) m.fatigue += amount;
     },
     pinStaggered: () => { for (const f of fighters) if (f.staggered) f.fatigue = Math.max(0, f.hp); },
     isReviving: f => (f === p ? reviving : foeReviving.has(f.id)),

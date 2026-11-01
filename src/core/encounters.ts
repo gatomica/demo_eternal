@@ -1,6 +1,7 @@
 /**
  * encounters.ts — ready-made encounters for Test combat (and the map's Warden fight).
  */
+import { bodySetups } from "./bestiary";
 import type { EnemySetup } from "./types";
 
 export interface Encounter {
@@ -14,6 +15,9 @@ export interface Encounter {
   /** The guide's lesson (combat/lesson.ts): the fight follows its script, and can't end early. */
   lesson?: boolean;
 }
+
+/** A Wax Blob: three parts that share one body (health and place). `id` tells bodies apart in a fight. */
+export const waxBlob = (id = "blob", extra: Partial<EnemySetup> = {}) => bodySetups("waxBlob", id, extra);
 
 export const ENCOUNTERS: Encounter[] = [
   { id: "one", label: "One sleepwalker", enemies: [{ kind: "sleepwalker" }] },
@@ -31,6 +35,7 @@ export const ENCOUNTERS: Encounter[] = [
     id: "tutorial", label: "Tutorial: the guide", lesson: true, wonText: "The lesson is over",
     enemies: [{ kind: "guide", line: "back", script: ["Hum", "Hum", "Halo Blast", "Halo Blast"] }],
   },
+  { id: "blob", label: "Wax blob (three targets)", enemies: waxBlob() },
   { id: "waxed-pair", label: "Two waxed", enemies: [{ kind: "waxed" }, { kind: "waxed" }] },
   {
     id: "mixed",

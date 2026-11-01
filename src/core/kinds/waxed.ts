@@ -26,7 +26,7 @@ export const WAXED: EnemyKind = {
   },
   pattern: parsePattern("Waxed", `
     actions:
-      Scratch:      attack, baseline
+      Scratch:      attack, baseline, damage 2, cost 2   // a punch, but it hurts and tires as much as a light blow
       Hurl Wax:     attack, light, ranged
       Brace:        block, baseline
       Drag Forward: maneuver, advance, *Far   // crawls in only when far away
