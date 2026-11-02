@@ -8,9 +8,29 @@ export const VOID = 0, FLOOR = 1, WALL = 2, STAIRS = 3, LADDER = 4, DIAG = 5;
 
 export type { Dir };
 
-const DIR_STEP: Record<Dir, [number, number]> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+/** Which way a ramp goes uphill: straight, or (for a diagonal corridor's stairs) toward a corner. */
+export type RampDir = Dir | "ne" | "nw" | "se" | "sw";
 
-const STAIR_CHARS: Record<string, Dir> = { "^": "up", v: "down", "<": "left", ">": "right" };
+const DIR_STEP: Record<RampDir, [number, number]> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0], ne: [1, -1], nw: [-1, -1], se: [1, 1], sw: [-1, 1] };
+
+const STAIR_CHARS: Record<string, RampDir> = { "^": "up", v: "down", "<": "left", ">": "right", "↖": "nw", "↗": "ne", "↙": "sw", "↘": "se" };
+
+/** Whether a ramp goes uphill toward a corner. */
+export const isDiagonalRamp = (dir: RampDir) => dir === "ne" || dir === "nw" || dir === "se" || dir === "sw";
+
+/** How far up a ramp going `dir` the point (fx, fy) of its tile is: 0 at its foot, 1 at its head, and on past them outside the tile. */
+export function rampAlong(dir: RampDir, fx: number, fy: number) {
+  switch (dir) {
+    case "up": return 1 - fy;
+    case "down": return fy;
+    case "right": return fx;
+    case "left": return 1 - fx;
+    case "se": return (fx + fy) / 2;
+    case "nw": return 1 - (fx + fy) / 2;
+    case "ne": return (fx + 1 - fy) / 2;
+    case "sw": return (1 - fx + fy) / 2;
+  }
+}
 
 /**
  * The plan characters for a diagonal tile: a floor triangle and a wall triangle split along a
@@ -28,11 +48,16 @@ export const HOLE_DIAG_CHARS = "◸◹◺◿";
 export const SHAFT_DIAG_CHARS = "▛▜▙▟";
 
 /** A stairs or ladder tile: which way is uphill (every ramp is one tile, rising one level). */
-export interface Ramp { dir: Dir; index: number; length: number }
+export interface Ramp { dir: RampDir; index: number; length: number }
+
+/** The diagonal stairs a diagonal tile beside them tilts with: the tile's floor half lies on the same slope. */
+export interface Slope { x: number; y: number; dir: RampDir }
 
 interface Level {
   tiles: Uint8Array;
   ramps: Map<number, Ramp>;
+  /** For the diagonal tiles beside diagonal stairs, by tile index. */
+  slopes: Map<number, Slope>;
   /** 1 where this level is empty but something walkable lies below (so it's open air, not rock). */
   open: Uint8Array;
   /** For diagonal tiles: which half is floor (an index into DIAG_CHARS). */
@@ -54,10 +79,10 @@ function buildWorld(plans: string[][]): World {
   const w = Math.max(...plans.flat().map(r => r.length)) + 2;
   const h = Math.max(...plans.map(p => p.length)) + 2;
   let start = { x: 1, y: 1, z: 0 };
-  const dirs: (Dir | null)[][] = [];
+  const dirs: (RampDir | null)[][] = [];
   const levels: Level[] = plans.map((plan, z) => {
     const tiles = new Uint8Array(w * h);
-    const d: (Dir | null)[] = new Array(w * h).fill(null);
+    const d: (RampDir | null)[] = new Array(w * h).fill(null);
     const diags = new Uint8Array(w * h);
     const shaft = new Uint8Array(w * h);
     const holes = new Uint8Array(w * h);
@@ -74,7 +99,7 @@ function buildWorld(plans: string[][]): World {
       if (c === "@") start = { x: x + 1, y: y + 1, z };
     }));
     dirs.push(d);
-    return { tiles, ramps: new Map(), open: new Uint8Array(w * h), diags, shaft, holes };
+    return { tiles, ramps: new Map(), slopes: new Map(), open: new Uint8Array(w * h), diags, shaft, holes };
   });
 
   // Ramps climb at 45 degrees: each stairs or ladder tile rises one whole level by itself (so a
@@ -82,6 +107,12 @@ function buildWorld(plans: string[][]): World {
   levels.forEach((lv, z) => {
     const d = dirs[z];
     for (let i = 0; i < w * h; i++) if (isRamp(lv.tiles[i])) lv.ramps.set(i, { dir: d[i]!, index: 0, length: 1 });
+    // You walk a diagonal corridor across the diagonal tiles beside its floor squares, so beside diagonal stairs those tilt too.
+    for (const [i, r] of lv.ramps) {
+      if (!isDiagonalRamp(r.dir)) continue;
+      const x = i % w, y = (i - x) / w;
+      for (const n of [i - 1, i + 1, i - w, i + w]) if (lv.tiles[n] === DIAG && !lv.holes[n]) lv.slopes.set(n, { x, y, dir: r.dir });
+    }
   });
 
   // Open air: empty cells with something walkable somewhere below.
@@ -123,8 +154,17 @@ export const rampAt = (z: number, x: number, y: number) => WORLD.levels[z]?.ramp
 export const isAir = (z: number, x: number, y: number) =>
   tileAt(z, x, y) === VOID && inside(x, y) && z < LEVELS && WORLD.levels[z].open[y * WORLD.w + x] === 1;
 
+/** The slope the diagonal tile (x, y) on level z tilts with, if it does. */
+export const slopeAt = (z: number, x: number, y: number) => (z >= 0 && z < LEVELS && inside(x, y) ? WORLD.levels[z].slopes.get(y * WORLD.w + x) : undefined);
+
+/** How far up a slope the point (px, py) is: 0 at its foot, 1 at its head, and flat beyond them. */
+export const slopeRise = (s: Slope, px: number, py: number) => Math.min(1, Math.max(0, rampAlong(s.dir, px - s.x, py - s.y)));
+
 /** Whether the ramp at (nx, ny) on level z-1 tops out into (x, y) on level z. */
 export function isArrival(z: number, x: number, y: number, nx: number, ny: number) {
+  // A tilted diagonal tile reaches the level above along the edge it shares with (x, y).
+  const s = slopeAt(z - 1, nx, ny);
+  if (s && slopeRise(s, (x + nx + 1) / 2, (y + ny + 1) / 2) >= 1 - 1e-6) return true;
   const r = z > 0 ? rampAt(z - 1, nx, ny) : undefined;
   if (!r || r.index !== r.length - 1) return false;
   const [sx, sy] = DIR_STEP[r.dir];
@@ -134,8 +174,7 @@ export function isArrival(z: number, x: number, y: number, nx: number, ny: numbe
 /** The height of a ramp tile at point (px, py) (clamped into the tile). */
 export function rampHeight(z: number, x: number, y: number, r: Ramp, px: number, py: number) {
   const fx = Math.min(1, Math.max(0, px - x)), fy = Math.min(1, Math.max(0, py - y));
-  const along = r.dir === "up" ? 1 - fy : r.dir === "down" ? fy : r.dir === "right" ? fx : 1 - fx;
-  return z + along;
+  return z + rampAlong(r.dir, fx, fy);
 }
 
 /** The highest level below z with something solid at (x, y), for how far a ledge drops. */
@@ -152,7 +191,7 @@ export function groundBelow(z: number, x: number, y: number) {
 export function levelOf(x: number, y: number, alt: number) {
   const tx = Math.floor(x), ty = Math.floor(y);
   for (const k of [Math.ceil(alt - 1e-3) - 1, Math.round(alt)]) {
-    if (k >= 0 && k < LEVELS && isRamp(tileAt(k, tx, ty)) && alt < k + 1 - 0.04) return k;
+    if (k >= 0 && k < LEVELS && (isRamp(tileAt(k, tx, ty)) || slopeAt(k, tx, ty)) && alt < k + 1 - 0.04) return k;
   }
   return Math.max(0, Math.min(LEVELS - 1, Math.round(alt)));
 }
@@ -177,6 +216,14 @@ export function boxOnDiagFloor(z: number, tx: number, ty: number, x0: number, y0
   const ax = Math.max(x0, tx) - tx, bx = Math.min(x1, tx + 1) - tx, ay = Math.max(y0, ty) - ty, by = Math.min(y1, ty + 1) - ty;
   // Depth is linear, so the worst place is a corner of the part of the box inside the tile.
   return Math.min(diagDepth(side, ax, ay), diagDepth(side, bx, ay), diagDepth(side, ax, by), diagDepth(side, bx, by)) >= -1e-6;
+}
+
+/** Whether any of the box [x0, x1] x [y0, y1] inside the diagonal tile (tx, ty) on level z is on its floor half. */
+export function boxTouchesDiagFloor(z: number, tx: number, ty: number, x0: number, y0: number, x1: number, y1: number) {
+  const side = WORLD.levels[z].diags[ty * WORLD.w + tx];
+  const ax = Math.max(x0, tx) - tx, bx = Math.min(x1, tx + 1) - tx, ay = Math.max(y0, ty) - ty, by = Math.min(y1, ty + 1) - ty;
+  if (bx < ax || by < ay) return false;
+  return Math.max(diagDepth(side, ax, ay), diagDepth(side, bx, ay), diagDepth(side, ax, by), diagDepth(side, bx, by)) >= -1e-6;
 }
 
 /** Which half of the diagonal tile (x, y) on level z is floor (an index into DIAG_CHARS). */
@@ -207,3 +254,77 @@ export function shaftDiagSide(z: number, x: number, y: number) {
   const v = z >= 0 && z < LEVELS && inside(x, y) ? WORLD.levels[z].shaft[y * WORLD.w + x] : 0;
   return v >= 2 ? v - 2 : -1;
 }
+
+/** Whether a wall stands at (x, y) on level z: a wall tile, or a diagonal tile's wall half. */
+export const wallStandsAt = (z: number, x: number, y: number) =>
+  tileAt(z, x, y) === WALL || shaftDiagSide(z, x, y) >= 0 || (tileAt(z, x, y) === DIAG && !isHoleDiag(z, x, y));
+
+/** Whether a wall beside (x, y) on level z shows its face or rim on that side: there is floor there, or a shaft's open air. */
+export const wallFacesInto = (z: number, x: number, y: number) => walkable(tileAt(z, x, y)) || isShaft(z, x, y);
+
+/**
+ * If you stand at (x, y) on level z in a walled room open above you (a shaft's open air or a ladder right overhead):
+ * for each column of the map, the northernmost row you can still see at floor level. That's the row
+ * under the room's north wall (a doorway shows, what's past it doesn't), and past the room's east and
+ * west ends the nearest end's row, as if the wall ran on. Null if you are not in such a room.
+ */
+export function roomLimit(z: number, x: number, y: number) {
+  const { w, h } = WORLD;
+  const open = (cx: number, cy: number) => isShaft(z + 1, cx, cy) || tileAt(z + 1, cx, cy) === LADDER;
+  if (!open(x, y) || shaftDiagSide(z + 1, x, y) >= 0) return null;
+  const north = new Int16Array(w).fill(h);
+  const seen = new Uint8Array(w * h);
+  const stack = [[x, y]];
+  seen[y * w + x] = 1;
+  while (stack.length) {
+    const [cx, cy] = stack.pop()!;
+    north[cx] = Math.min(north[cx], cy);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cx + dx, ny = cy + dy;
+      if (!inside(nx, ny) || seen[ny * w + nx] || !open(nx, ny)) continue;
+      seen[ny * w + nx] = 1;
+      stack.push([nx, ny]);
+    }
+  }
+  let first = 0, last = w - 1;
+  while (north[first] === h) first++;
+  while (north[last] === h) last--;
+  const out = new Int16Array(w);
+  for (let c = 0; c < w; c++) out[c] = north[Math.max(first, Math.min(last, c))] - 1;
+  return out;
+}
+
+/** One level's slice of a cliff: the block under a ledge, whose face shows south of it. */
+export interface CliffBlock {
+  /** The level of the floor it hangs from (its stone's colour). */
+  z: number;
+  /** Whether it is the block right under that floor, where the edge is. */
+  top: boolean;
+  /** For the rim of a hole, which half of the tile is floor (0 or 1: the cut slants); otherwise -1. */
+  diag: number;
+}
+
+/**
+ * The blocks of every cliff, per level, by tile index. A tall cliff is a stack of one-level blocks, so
+ * each can fade by its own distance from you. In a level's own coordinates a block's face fills
+ * its own tile's row, as a wall's face does.
+ */
+export const CLIFFS: Map<number, CliffBlock>[] = (() => {
+  const out = WORLD.levels.map(() => new Map<number, CliffBlock>());
+  const stack = (z: number, x: number, y: number, ground: number, diag: number) => {
+    for (let k = z - 1; k >= ground; k--) {
+      // Where a shaft's diagonal wall already stands, that wall is the face.
+      if (shaftDiagSide(k, x, y) < 0) out[k].set(y * WORLD.w + x, { z, top: k === z - 1, diag });
+      // A cliff hanging in a hall ends with the hall (a bridge's doesn't carry on down a hole in its floor).
+      if (isShaft(k + 1, x, y) && !isShaft(k, x, y)) break;
+    }
+  };
+  for (let z = 1; z < LEVELS; z++) for (let y = 0; y < WORLD.h; y++) for (let x = 0; x < WORLD.w; x++) {
+    if (tileAt(z, x, y) === FLOOR && isAir(z, x, y + 1) && !isArrival(z, x, y, x, y + 1)) {
+      // A bridge (open air on both sides) is only one block thick; anything else is solid down to what lies below.
+      stack(z, x, y, isAir(z, x, y - 1) ? z - 1 : groundBelow(z, x, y + 1), -1);
+    }
+    else if (isHoleDiag(z, x, y) && diagSide(z, x, y) < 2) stack(z, x, y, groundBelow(z, x, y), diagSide(z, x, y));
+  }
+  return out;
+})();

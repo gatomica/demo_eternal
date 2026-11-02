@@ -3,15 +3,16 @@
  * is in sight. The exploration screen and the Map viewer both draw through this, so the viewer
  * shows exactly what the game does.
  *
- * Each storey is drawn RISE tiles higher on screen than the one below, so ledges get cliff faces
- * and stairs visibly climb. Levels above the viewpoint are split at its row: what's behind it is
- * drawn first, then whoever stands there (the player), then what's in front or overhead (only where
- * sight reaches it: a floor above you is not drawn just for being above you).
+ * Each storey is drawn RISE tiles higher on screen than the one below, so stairs visibly climb. Walls
+ * and cliffs are blocks on their own levels, seen wherever no floor is in the way, and fade with
+ * their distance from your level (`wallFade`). Floors below you fade the same way; floors above
+ * you are never drawn. Walls above you are split at your row: what's behind you is drawn first,
+ * then whoever stands there (the player), then what's in front.
  */
-import { CHUNK, CHUNK_PAD_BOTTOM, CHUNK_PAD_TOP, makeCanvas, paintChunk } from "./paint";
+import { CHUNK, CHUNK_PAD_TOP, makeCanvas, paintChunk } from "./paint";
 import { seeThrough } from "./sight";
-import { BODY_ABOVE_FEET, COLORS, DEPTH_DIM, GHOST_ALPHA, RISE, SIGHT_EASE, TILES_TALL, VISION_FULL, VISION_RADIUS } from "./tuning";
-import { FLOOR, groundBelow, isAir, isHoleDiag, isRamp, levelOf, LEVELS, tileAt, WORLD } from "./world";
+import { BODY_ABOVE_FEET, COLORS, GHOST_ALPHA, RISE, SIGHT_EASE, TILES_TALL, VISION_FULL, VISION_RADIUS, wallFade } from "./tuning";
+import { CLIFFS, DIAG, diagSide, FLOOR, isHoleDiag, isRamp, levelOf, LEVELS, roomLimit, shaftDiagSide, slopeAt, STAIRS, tileAt, WALL, wallFacesInto, WORLD } from "./world";
 
 /** Draws what stands on level z (enemies, keepers, gear...) whose feet are in a row passing `test`. */
 export type ActorDrawer = (ctx: CanvasRenderingContext2D, z: number, ox: number, oy: number, T: number, test: (y: number) => boolean) => void;
@@ -38,11 +39,21 @@ export function seeAll(alt: number, into = WORLD.levels.map(() => new Float32Arr
   return into;
 }
 
+/** Per level, the tiles that hold a wall, a diagonal's wall half or a cliff block (sight asks for them every frame). */
+const WALL_TILES = WORLD.levels.map((_, z) => {
+  const out: { x: number; y: number }[] = [];
+  for (let y = 0; y < WORLD.h; y++) for (let x = 0; x < WORLD.w; x++) {
+    const t = tileAt(z, x, y);
+    if (t === WALL || t === DIAG || shaftDiagSide(z, x, y) >= 0 || CLIFFS[z].has(y * WORLD.w + x)) out.push({ x, y });
+  }
+  return out;
+});
+
 export function createMapRenderer(canvas: HTMLCanvasElement) {
   const g = canvas.getContext("2d")!;
   let T = 0;
   // Painted chunks of each level, as they've come into view (dropped once long out of view).
-  type Chunk = { surface: HTMLCanvasElement; faces: HTMLCanvasElement; used: number } | null;
+  type Chunk = { surface: HTMLCanvasElement; walls: HTMLCanvasElement; cliffs: HTMLCanvasElement; used: number } | null;
   const chunks = new Map<string, Chunk>();
   let frameNo = 0;
   const chunkAt = (z: number, cx: number, cy: number): Chunk => {
@@ -66,6 +77,10 @@ export function createMapRenderer(canvas: HTMLCanvasElement) {
   const sg = scene.getContext("2d")!;
   // What you can see of each level this frame: white where visible, shaded by distance.
   const lights = WORLD.levels.map(() => makeCanvas(1, 1));
+  // What you can see of each level's walls and cliffs this frame.
+  const wallLights = WORLD.levels.map(() => makeCanvas(1, 1));
+  // How brightly you see each tile from any level at or below yours (walls take their light from it).
+  const column = new Float32Array(WORLD.w * WORLD.h);
   // How brightly you currently see each tile of each level (eased toward what you see now).
   const glow = WORLD.levels.map(() => new Float32Array(WORLD.w * WORLD.h));
   // Brightness of sight, one pixel per tile, stretched (and smoothly blended) over the map.
@@ -85,7 +100,7 @@ export function createMapRenderer(canvas: HTMLCanvasElement) {
     if (width === canvas.width && height === canvas.height && T) return;
     canvas.width = width;
     canvas.height = height;
-    for (const c of [scene, layer, maskCanvas, ...lights]) { c.width = canvas.width; c.height = canvas.height; }
+    for (const c of [scene, layer, maskCanvas, ...lights, ...wallLights]) { c.width = canvas.width; c.height = canvas.height; }
     const next = Math.max(8, Math.round(Math.min(canvas.height / TILES_TALL, canvas.width / 13)));
     if (next !== T) {
       T = next;
@@ -97,8 +112,21 @@ export function createMapRenderer(canvas: HTMLCanvasElement) {
 
   // The level drawn last frame: when it changes, what shows and what goes happens at once, not as a fade.
   let lastLevel = -1;
+  // The room you stand in, worked out again only when you step onto another tile.
+  let limitKey = "";
+  let limit: Int16Array | null = null;
   const draw = (v: View, dtMs: number) => {
     const cur = levelOf(v.x, v.y, v.alt);
+    // With someone standing there, what they see depends on the room they're in (the Map viewer's free camera has no room).
+    const key = `${cur},${Math.floor(v.x)},${Math.floor(v.y)}`;
+    if (key !== limitKey) {
+      limitKey = key;
+      limit = roomLimit(cur, Math.floor(v.x), Math.floor(v.y));
+    }
+    /** What's north of your room's north wall is covered by it: pitch black. */
+    const walledOff = (x: number, y: number) => !!v.player && !!limit && y < limit[x];
+    /** Under or outside a walled room, the walls above you don't draw: they would only cover you. */
+    const noWallsAbove = !!v.player && !limit;
     const W = canvas.width, H = canvas.height;
     // Snap to whole pixels so the tiles don't shimmer while scrolling.
     const ox = Math.round(W / 2 - v.camX * T);
@@ -110,7 +138,7 @@ export function createMapRenderer(canvas: HTMLCanvasElement) {
     // - Levels at or below you: pinned to that level's own height, so they never slide as you
     //   climb, and seen across that level's own grid (from a bridge you look out over the hall
     //   below). If that level is solid rock where you stand, your own level's sight is used.
-    // - Levels above you: not drawn at all. On stairs you count as on the lower level until you
+    // - Levels above you: their floors are not drawn at all. On stairs you count as on the lower level until you
     //   reach their top end, then the level above is drawn and, in the same moment, the rest.
     const seenAll = v.seen;
     const strip = Math.ceil(T / 12) + 1, rise = RISE * T, fadeOver = VISION_RADIUS * (1 - VISION_FULL);
@@ -126,7 +154,7 @@ export function createMapRenderer(canvas: HTMLCanvasElement) {
       // Ease each tile's brightness toward what you see now, so sight fades in and out.
       for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
         const i = y * MW + x;
-        const target = seeThrough(gz, x, y) && left[i] >= 0 ? Math.min(1, left[i] / fadeOver) : 0;
+        const target = seeThrough(gz, x, y) && left[i] >= 0 && !walledOff(x, y) ? Math.min(1, left[i] / fadeOver) : 0;
         shown[i] += (target - shown[i]) * ease;
         if (shown[i] < 0.002) shown[i] = 0;
         else any = true;
@@ -138,29 +166,21 @@ export function createMapRenderer(canvas: HTMLCanvasElement) {
       // Tiles with light, or right next to some: the soft brightness below fades out across
       // these, so nothing switches on abruptly at the edge of your sight.
       const near = (x: number, y: number) => {
-        if (!seeThrough(gz, x, y)) return false;
+        if (!seeThrough(gz, x, y) || walledOff(x, y)) return false;
         for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (lit(x + dx, y + dy) > 0) return true;
         return false;
       };
 
-      // The shape of what you see, crisp at the walls: every tile near light, plus the
-      // near edges of the walls around them (their rim, and their face if it's toward you).
+      // The shape of what you see, crisp at the walls: every tile near light.
       mg.globalCompositeOperation = "source-over";
       mg.clearRect(0, 0, W, H);
       mg.fillStyle = "#fff";
       for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
         const px = ox + x * T, py = top + y * T;
         if (near(x, y)) {
-          const t = tileAt(gz, x, y);
-          // Stairs rise over the tile behind them; ledges hang a face over the tile in front.
-          const up = isRamp(t) ? rise : 0;
-          const down = (t === FLOOR || isHoleDiag(gz, x, y)) && isAir(gz, x, y + 1) ? (gz - groundBelow(gz, x, y + 1)) * rise : 0;
-          mg.fillRect(px, py - up, T, T + up + down);
-        } else if (!seeThrough(gz, x, y)) {
-          if (lit(x, y - 1) > 0) mg.fillRect(px, py, T, strip);
-          if (lit(x, y + 1) > 0) mg.fillRect(px, py + T - rise - strip, T, rise + strip);
-          if (lit(x - 1, y) > 0) mg.fillRect(px, py, strip, T);
-          if (lit(x + 1, y) > 0) mg.fillRect(px + T - strip, py, strip, T);
+          // Stairs, and the diagonal tiles tilting with them, rise over the tile behind them.
+          const up = isRamp(tileAt(gz, x, y)) || slopeAt(gz, x, y) ? rise : 0;
+          mg.fillRect(px, py - up, T, T + up);
         }
       }
 
@@ -194,81 +214,173 @@ export function createMapRenderer(canvas: HTMLCanvasElement) {
       inSight[z] = z <= cur && paintSight(z, z, seenAll[z], levelY(z), glow[z]);
     }
 
-    /**
-     * Draws rows r0..r1 of level z, with the actors standing in them that pass `test`,
-     * cut down to what you can see of that level.
-     */
-    const rows = (z: number, r0: number, r1: number, test: (y: number) => boolean = () => true) => {
-      if (r1 <= r0) return;
-      yg.globalCompositeOperation = "source-over";
-      yg.clearRect(0, 0, W, H);
-      // Only the chunks on screen, and only the slice of rows asked for.
-      const top = levelY(z);
-      const vr0 = Math.max(r0, Math.floor(-top / T) - 1), vr1 = Math.min(r1, Math.ceil((H - top) / T) + 1);
-      const cx0 = Math.max(0, Math.floor(-ox / T / CHUNK)), cx1 = Math.min(Math.ceil(WORLD.w / CHUNK) - 1, Math.floor((W - ox) / T / CHUNK));
-      const cyMax = Math.ceil(WORLD.h / CHUNK) - 1;
-      const piece = (img: HTMLCanvasElement, cx: number, from: number, a: number, b: number, shift: number) => {
-        // Rows a..b of a chunk layer whose first row is `from`.
-        if (b <= a) return;
-        const sx = 0, sy = (a - from) * T, sw = CHUNK * T, sh = (b - a) * T;
-        yg.drawImage(img, sx, sy, sw, sh, ox + cx * CHUNK * T, top + a * T + shift, sw, sh);
-      };
-      if (vr1 > vr0) {
-        // The cliff faces first (each hangs one row below the tile it belongs to, and may run on), so that this level's own floor,
-        // nearer the camera, covers whatever of a tall face runs on past the edge it hangs from.
-        for (let cy = Math.max(0, Math.floor((vr0 - CHUNK_PAD_BOTTOM) / CHUNK)); cy <= Math.min(cyMax, Math.floor(vr1 / CHUNK)); cy++) {
-          for (let cx = cx0; cx <= cx1; cx++) {
-            const c = chunkAt(z, cx, cy);
-            if (!c) continue;
-            const from = cy * CHUNK;
-            piece(c.faces, cx, from, Math.max(vr0, from), Math.min(vr1, from + CHUNK + CHUNK_PAD_BOTTOM), T);
+    // The light on walls and cliffs: how brightly each tile, or a tile beside it, is seen on any level up to yours.
+    column.fill(0);
+    for (let z = 0; z <= Math.min(cur, LEVELS - 1); z++) if (inSight[z]) {
+      const l = glow[z];
+      for (let i = 0; i < column.length; i++) if (l[i] > column[i]) column[i] = l[i];
+    }
+    const colAt = (x: number, y: number) => (x >= 0 && y >= 0 && x < MW && y < MH ? column[y * MW + x] : 0);
+    {
+      const pix = soft.data;
+      for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+        const k = (y * MW + x) * 4;
+        pix[k] = pix[k + 1] = pix[k + 2] = 255;
+        pix[k + 3] = Math.round(Math.max(colAt(x, y), colAt(x, y + 1), colAt(x, y - 1), colAt(x - 1, y), colAt(x + 1, y)) * 255);
+      }
+      sfg.putImageData(soft, 0, 0);
+    }
+    /** Whether a floor between you and level k, at tile (x, y), hides what's behind it. */
+    const floorInWay = (k: number, x: number, y: number) => {
+      const lo = k > cur ? cur + 1 : k + 1, hi = k > cur ? k : cur;
+      for (let j = lo; j <= hi; j++) {
+        const t = tileAt(j, x, y);
+        if (t === FLOOR || t === STAIRS || t === DIAG) return true;
+      }
+      return false;
+    };
+    /** Paints into `wallLights[k]` the part of level k's walls and cliffs you can see: faces lit from the tile in front of them. */
+    const paintWallSight = (k: number) => {
+      mg.globalCompositeOperation = "source-over";
+      mg.clearRect(0, 0, W, H);
+      mg.fillStyle = "#fff";
+      const top = levelY(k);
+      const seen = (x: number, y: number) => colAt(x, y) > 0 && !floorInWay(k, x, y);
+      if (!(k > cur && noWallsAbove)) for (const { x, y } of WALL_TILES[k]) {
+        const px = ox + x * T, py = top + y * T, t = tileAt(k, x, y);
+        const block = CLIFFS[k].get(y * MW + x);
+        // A cliff shows only from its own floor's level or above: from below, that floor isn't drawn, and neither is what hangs from it.
+        if (block && block.z <= cur && (colAt(x, y) > 0 || colAt(x, y + 1) > 0) && !floorInWay(k, x, y + 1)) {
+          if (block.diag < 0) mg.fillRect(px, py, T, T);
+          else {
+            // Exactly the slanted band: another level's cliff may be stored in the row it reaches into.
+            mg.beginPath();
+            if (block.diag === 0) { mg.moveTo(px + T, py - T); mg.lineTo(px, py); mg.lineTo(px, py + T); mg.lineTo(px + T, py); }
+            else { mg.moveTo(px, py - T); mg.lineTo(px + T, py); mg.lineTo(px + T, py + T); mg.lineTo(px, py); }
+            mg.closePath();
+            mg.fill();
           }
         }
-        // Then the surfaces, north to south (each chunk's top pad holds stairs rising into the row above).
-        for (let cy = Math.max(0, Math.floor(vr0 / CHUNK)); cy <= Math.min(cyMax, Math.floor(vr1 / CHUNK) + 1); cy++) {
-          for (let cx = cx0; cx <= cx1; cx++) {
-            const c = chunkAt(z, cx, cy);
-            if (!c) continue;
-            const from = cy * CHUNK - CHUNK_PAD_TOP;
-            piece(c.surface, cx, from, Math.max(vr0, from), Math.min(vr1, cy * CHUNK + CHUNK), 0);
-          }
+        if (t === WALL) {
+          if (wallFacesInto(k, x, y + 1) && seen(x, y + 1)) mg.fillRect(px, py - strip, T, T + strip);
+        } else if (((t === DIAG && !isHoleDiag(k, x, y)) || shaftDiagSide(k, x, y) >= 0) && (colAt(x, y) > 0 || colAt(x, y + 1) > 0)) {
+          // Which corner its wall half is in. A north corner has a face rising a level; a south corner faces away and shows nothing.
+          const corner = t === DIAG ? 3 - diagSide(k, x, y) : shaftDiagSide(k, x, y);
+          if (corner >= 2) continue;
+          // A diagonal's wall half above you is under the floor half of its own tile.
+          if (k > cur && floorInWay(k, x, y)) continue;
+          mg.fillRect(px, py - T, T, 2 * T);
         }
       }
-      v.actors?.(yg, z, ox, oy, T, y => y >= r0 && y < r1 && test(y));
-      yg.globalCompositeOperation = "destination-in";
-      yg.drawImage(lights[z], 0, 0);
-      sg.drawImage(layer, 0, 0);
+      mg.globalCompositeOperation = "destination-in";
+      mg.imageSmoothingEnabled = true;
+      mg.drawImage(softCanvas, ox, top, MW * T, MH * T);
+      const lg = wallLights[k].getContext("2d")!;
+      lg.clearRect(0, 0, W, H);
+      lg.drawImage(maskCanvas, 0, 0);
     };
-    /** Actors alone on level z, cut down to what you can see of it (those in front of you). */
-    const actorsOnly = (z: number, test: (y: number) => boolean) => {
+    for (let z = 0; z < LEVELS; z++) if (wallFade(Math.abs(z - cur)) > 0) paintWallSight(z);
+
+    // Only the chunks on screen, and only the slice of rows asked for.
+    const cx0 = Math.max(0, Math.floor(-ox / T / CHUNK)), cx1 = Math.min(Math.ceil(WORLD.w / CHUNK) - 1, Math.floor((W - ox) / T / CHUNK));
+    const cyMax = Math.ceil(WORLD.h / CHUNK) - 1;
+    /** Draws rows r0..r1 of one layer of level z's chunks onto the scratch layer. */
+    const chunkRows = (z: number, kind: "surface" | "walls" | "cliffs", r0: number, r1: number) => {
+      const top = levelY(z);
+      const vr0 = Math.max(r0, Math.floor(-top / T) - 1), vr1 = Math.min(r1, Math.ceil((H - top) / T) + 1);
+      if (vr1 <= vr0) return;
+      // North to south (each chunk's top pad holds what reaches into the row above).
+      for (let cy = Math.max(0, Math.floor(vr0 / CHUNK)); cy <= Math.min(cyMax, Math.floor(vr1 / CHUNK) + 1); cy++) {
+        for (let cx = cx0; cx <= cx1; cx++) {
+          const c = chunkAt(z, cx, cy);
+          if (!c) continue;
+          const from = cy * CHUNK - CHUNK_PAD_TOP;
+          const a = Math.max(vr0, from), b = Math.min(vr1, cy * CHUNK + CHUNK);
+          if (b <= a) continue;
+          const sy = (a - from) * T, sw = CHUNK * T, sh = (b - a) * T;
+          yg.drawImage(c[kind], 0, sy, sw, sh, ox + cx * CHUNK * T, top + a * T, sw, sh);
+        }
+      }
+    };
+    /** Draws rows r0..r1 of level z's walls or cliffs, cut down to what you can see of them and darkened by their distance from you: they stay solid, covering what's behind them. */
+    const blocks = (z: number, kind: "walls" | "cliffs", r0: number, r1: number) => {
+      const fade = wallFade(Math.abs(z - cur));
+      if (fade <= 0 || r1 <= r0) return;
       yg.globalCompositeOperation = "source-over";
       yg.clearRect(0, 0, W, H);
-      v.actors?.(yg, z, ox, oy, T, test);
+      chunkRows(z, kind, r0, r1);
+      yg.globalCompositeOperation = "source-atop";
+      yg.fillStyle = `rgb(0 0 0 / ${1 - fade})`;
+      yg.fillRect(0, 0, W, H);
       yg.globalCompositeOperation = "destination-in";
-      yg.drawImage(lights[z], 0, 0);
+      yg.drawImage(wallLights[z], 0, 0);
       sg.drawImage(layer, 0, 0);
     };
+    /** What's on the scratch layer joins the scene, cut down to what you can see of level z. A level below you is darkened by its distance: it stays solid, so what's under it doesn't show through. */
+    const place = (z: number, mask: HTMLCanvasElement = lights[z]) => {
+      if (z < cur) {
+        yg.globalCompositeOperation = "source-atop";
+        yg.fillStyle = `rgb(0 0 0 / ${1 - wallFade(cur - z)})`;
+        yg.fillRect(0, 0, W, H);
+      }
+      yg.globalCompositeOperation = "destination-in";
+      yg.drawImage(mask, 0, 0);
+      sg.drawImage(layer, 0, 0);
+    };
+    /** Draws level z's floor. */
+    const floors = (z: number) => {
+      yg.globalCompositeOperation = "source-over";
+      yg.clearRect(0, 0, W, H);
+      chunkRows(z, "surface", 0, WORLD.h);
+      // A floor hides everything under it, however dimly it is lit itself: what's below it is wiped before it goes down.
+      sg.globalCompositeOperation = "destination-out";
+      sg.drawImage(layer, 0, 0);
+      sg.globalCompositeOperation = "source-over";
+      place(z);
+    };
+    /** Draws the actors on level z whose feet are in a row passing `test`. */
+    const actorsOnly = (z: number, test: (y: number) => boolean) => {
+      if (!v.actors) return;
+      yg.globalCompositeOperation = "source-over";
+      yg.clearRect(0, 0, W, H);
+      v.actors(yg, z, ox, oy, T, test);
+      // From inside a walled room, whoever stands in a doorway is cut off at the wall over it.
+      if (v.player && limit) {
+        yg.globalCompositeOperation = "destination-out";
+        yg.fillStyle = "#000";
+        for (let x = 0; x < MW; x++) yg.fillRect(ox + x * T, 0, T, levelY(z) + limit[x] * T);
+      }
+      // Their bodies rise above the floor they're lit on (over a wall behind them, say), so the light reaches up with them.
+      mg.globalCompositeOperation = "source-over";
+      mg.clearRect(0, 0, W, H);
+      for (let up = 0; up <= 2; up++) mg.drawImage(lights[z], 0, -up * T);
+      place(z, maskCanvas);
+    };
 
-    // Levels at or below you go down whole. Levels above are split at your row: the part
-    // behind you first, then you, then the part in front of or over you. With nobody standing
-    // there, every level goes down whole.
+    // Going up the stack: each level's walls, its floor, the cliffs hanging in front of that floor,
+    // and only then whoever stands there, so no block of their own level covers them. Levels at or
+    // below you go down whole. Above you there are only walls, split at your row: the part behind
+    // you first, then whoever stands on your level north of you, then you, then the part in front,
+    // then whoever is south of you. With nobody standing there, every level goes down whole.
     sg.clearRect(0, 0, W, H);
     const base = cur;
     const split = v.player ? Math.max(0, Math.min(WORLD.h, Math.floor(v.y))) : WORLD.h;
-    // On your own level, actors further down the screen than you go in front of you.
     for (let z = 0; z < LEVELS; z++) {
-      if (inSight[z]) rows(z, 0, z <= base ? WORLD.h : split, y => z !== base || !v.player || y <= v.y);
-      // Whatever lies below you is dimmed, more so the further down: it reads as depth.
-      const below = Math.min(1, Math.max(0, cur - z));
-      if (below > 0 && z < LEVELS - 1) {
-        sg.fillStyle = `rgb(0 0 0 / ${DEPTH_DIM * below})`;
-        sg.fillRect(0, 0, W, H);
-      }
+      const end = z <= base ? WORLD.h : split;
+      blocks(z, "walls", 0, end);
+      // (Even a level with nothing in sight: its floors still cover what's under them.)
+      if (z <= base && wallFade(cur - z) > 0) floors(z);
+      blocks(z, "cliffs", 0, end);
+      if (z < base && inSight[z] && wallFade(cur - z) > 0) actorsOnly(z, () => true);
     }
+    if (inSight[base]) actorsOnly(base, y => !v.player || y <= v.y);
     if (v.player) {
       v.player.draw(sg, fx, fy - BODY_ABOVE_FEET * T, T, true);
-      if (base < LEVELS && inSight[base]) actorsOnly(base, y => y > v.y);
-      for (let z = base + 1; z < LEVELS; z++) if (inSight[z]) rows(z, split, WORLD.h);
+      for (let z = base + 1; z < LEVELS; z++) {
+        blocks(z, "walls", split, WORLD.h);
+        blocks(z, "cliffs", split, WORLD.h);
+      }
+      if (inSight[base]) actorsOnly(base, y => y > v.y);
     }
     evictChunks();
 

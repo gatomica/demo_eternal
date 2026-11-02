@@ -9,10 +9,10 @@
  * step through.
  */
 import { GAP_PEEK, VISION_RADIUS } from "./tuning";
-import { inside, isAir, isRamp, isShaft, LEVELS, tileAt, VOID, walkable, WORLD } from "./world";
+import { inside, isAir, isRamp, isShaft, LEVELS, slopeAt, tileAt, VOID, walkable, WORLD } from "./world";
 
 /** Tiles sight travels over on level z: walkable ones, plus the space above stairs from below. */
-const seesThrough = (z: number, x: number, y: number) => walkable(tileAt(z, x, y)) || isRamp(tileAt(z - 1, x, y)) || isShaft(z, x, y);
+const seesThrough = (z: number, x: number, y: number) => walkable(tileAt(z, x, y)) || isRamp(tileAt(z - 1, x, y)) || !!slopeAt(z - 1, x, y) || isShaft(z, x, y);
 
 /** The same, worked out once per tile when the map loads (sight asks it many times a frame). */
 const SEE = WORLD.levels.map((_, z) => {
@@ -44,7 +44,7 @@ const NARROW = WORLD.levels.map((_, z) => {
  * How much sight is left on each tile of every level, seen by you at (px, py) and height `alt`:
  * negative where you can't see at all, counting down from VISION_RADIUS with distance.
  * Sight spreads across your own level and, over the edge of a ledge, drops down onto the floor
- * below, carrying only GAP_PEEK further (you glimpse what's down there, like around a corner).
+ * below and spreads on there, as far as your sight reaches.
  * Worked out into `left` (one array per level), if given.
  */
 export function sight(px: number, py: number, alt: number, left = WORLD.levels.map(() => new Float32Array(WORLD.w * WORLD.h))) {
@@ -61,8 +61,7 @@ export function sight(px: number, py: number, alt: number, left = WORLD.levels.m
   // shifts smoothly as you walk rather than jumping from tile to tile. On stairs, you see from
   // both the level you're leaving and the one you're heading to.
   const lo = Math.floor(alt + 1e-3), hi = Math.max(lo, Math.ceil(alt - 1e-3));
-  for (let z = lo; z <= Math.min(hi, LEVELS - 1); z++) {
-    if (!seeThrough(z, sx, sy)) continue;
+  const seed = (z: number) => {
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       const nx = sx + dx, ny = sy + dy, ni = ny * w + nx;
       if (!seeThrough(z, nx, ny)) continue;
@@ -71,6 +70,16 @@ export function sight(px: number, py: number, alt: number, left = WORLD.levels.m
       if (NARROW[z][ni] !== NARROW[z][sy * w + sx]) v = Math.min(v, GAP_PEEK);
       relax(z, ni, v);
     }
+  };
+  let seeded = false;
+  for (let z = lo; z <= Math.min(hi, LEVELS - 1); z++) {
+    if (!seeThrough(z, sx, sy)) continue;
+    seed(z);
+    seeded = true;
+  }
+  // Falling past rock (off the side of some stairs, say): you see from the floor you're falling toward.
+  if (!seeded) for (let z = Math.min(lo, LEVELS) - 1; z >= 0; z--) {
+    if (seeThrough(z, sx, sy)) { seed(z); break; }
   }
   while (queue.length) {
     const e = queue.pop()!, z = Math.floor(e / N), i = e % N, x = i % w, y = (i - x) / w;
@@ -92,10 +101,10 @@ export function sight(px: number, py: number, alt: number, left = WORLD.levels.m
         if (narrow[ni] !== narrow[i]) next = Math.min(next, GAP_PEEK);
         relax(z, ni, next);
       } else if (!dx !== !dy && isAir(z, nx, ny)) {
-        // Over a ledge: down to the first thing below. If that's floor, you glimpse it.
+        // Over a ledge: down to the first thing below. If that's floor, sight lands on it and spreads on as usual.
         for (let k = z - 1; k >= 0; k--) {
           if (tileAt(k, nx, ny) === VOID && !isShaft(k, nx, ny)) continue;
-          if (seeThrough(k, nx, ny)) relax(k, ni, Math.min(here - 1, GAP_PEEK));
+          if (seeThrough(k, nx, ny)) relax(k, ni, here - 1);
           break;
         }
       }

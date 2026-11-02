@@ -2,7 +2,7 @@
  * movement.ts — walking: bumping into walls, sliding along them, stepping up and dropping down.
  */
 import { CORNER_ASSIST, HALF_D, HALF_W, STEP_TOLERANCE } from "./tuning";
-import { boxOnDiagFloor, type Dir, DIAG, FLOOR, isRamp, LADDER, onDiagFloor, LEVELS, rampAt, rampHeight, tileAt } from "./world";
+import { boxOnDiagFloor, boxTouchesDiagFloor, type Dir, DIAG, FLOOR, isHoleDiag, isRamp, LADDER, onDiagFloor, LEVELS, rampAt, rampHeight, slopeAt, slopeRise, tileAt, WALL } from "./world";
 
 /* ============================================================
  * Standing and moving: surfaces near your height
@@ -34,17 +34,26 @@ const halves = (me: { half?: number }): [number, number, boolean] => (me.half ? 
  * The surface you'd end up on in tile (tx, ty), at point (px, py), coming from height `alt`
  * (`box`: for your whole footprint around the point, which matters at a diagonal wall):
  * the highest floor or ramp there that isn't more than a step above you. Anything lower is
- * fair game — you step down onto it, or drop down onto it from a ledge.
+ * fair game — you step down onto it, or drop down onto it from a ledge. But a wall at or below your
+ * height, above that surface, stands in the way: you can't walk through it to what's under it.
  */
 export function surfaceNear(tx: number, ty: number, px: number, py: number, alt: number, box = false, hw = HALF_W, hd = HALF_D) {
   let best: { h: number; t: number } | null = null;
+  let wall = -1;
   for (let z = 0; z < LEVELS; z++) {
     const t = tileAt(z, tx, ty);
     let hgt: number | null = null;
+    if (t === WALL && z <= alt + 1e-3) wall = z;
     if (t === FLOOR) hgt = z;
     else if (t === DIAG) {
-      // Only its floor half: a point must be on it, and with `box` your whole footprint must be.
-      if (box ? boxOnDiagFloor(z, tx, ty, px - hw, py - hd, px + hw, py + hd) : onDiagFloor(z, tx, ty, px, py)) hgt = z;
+      // Only its floor half: a point must be on it. With `box` your whole footprint must be, if the other half is a wall
+      // you could bump into. The rim of a hole has open air there, and a diagonal far below you is no wall at your height: touching is enough.
+      const x0 = px - hw, y0 = py - hd, x1 = px + hw, y1 = py + hd;
+      const slope = slopeAt(z, tx, ty);
+      const open = isHoleDiag(z, tx, ty) || (alt - z > STEP_TOLERANCE && !slope);
+      if (!box ? onDiagFloor(z, tx, ty, px, py) : open ? boxTouchesDiagFloor(z, tx, ty, x0, y0, x1, y1) : boxOnDiagFloor(z, tx, ty, x0, y0, x1, y1)) hgt = slope ? z + slopeRise(slope, px, py) : z;
+      // Into its wall half: as solid as any wall, whatever lies under it.
+      else if (!isHoleDiag(z, tx, ty) && z <= alt + 1e-3) wall = z;
     } else if (t === LADDER) {
       // A ladder is climbed in place: whatever height you are at, within its level.
       hgt = Math.min(z + 1, Math.max(z, alt));
@@ -52,7 +61,7 @@ export function surfaceNear(tx: number, ty: number, px: number, py: number, alt:
     if (hgt === null || hgt > alt + STEP_TOLERANCE) continue;
     if (!best || hgt > best.h) best = { h: hgt, t };
   }
-  return best;
+  return best && wall > best.h ? null : best;
 }
 
 /** Whether your footprint, with feet at (x, y), overlaps tile (tx, ty). */

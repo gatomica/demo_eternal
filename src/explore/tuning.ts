@@ -74,8 +74,11 @@ export const GAP_PEEK = 2.5;
 /** The figure is drawn this far above its feet, in tiles. */
 export const BODY_ABOVE_FEET = 0.36;
 
-/** How much each storey below you is darkened (0 = not at all, 1 = black). */
-export const DEPTH_DIM = 0.45;
+/** How many levels above or below you a wall or a floor below you is gone at: it fades evenly on the way there. */
+export const WALL_FADE_LEVELS = 5;
+
+/** How much of a wall (or a floor below you) shows, this many levels from yours: 1 on your own level, 0 once it can't be seen. */
+export const wallFade = (levels: number) => Math.max(0, 1 - levels / WALL_FADE_LEVELS);
 
 /** How strongly your outline shows through things that cover you. */
 export const GHOST_ALPHA = 0.3;
@@ -95,7 +98,7 @@ const SHAFT: Partial<Palette> = {
   ledgeFace: "#1c1c20", ledgeRim: "#47474f", rung: "#55555d",
 };
 
-/** Overrides of `COLORS` for the levels that have a look of their own, by level number: the labyrinth is level 0, the shaft 1 to 6. Floor A (7 to 9) keeps the plain stone, Floor B (10 to 12) is blue-grey, Floor C (13) a darker, warmer stone. */
+/** Overrides of `COLORS` for the levels that have a look of their own, by level number: the labyrinth is level 0, the shaft 1 to 5. Floor A (6 to 9) keeps the plain stone, Floor B (10 to 12) is blue-grey, Floor C (13) a darker, warmer stone. */
 /** Floor B, the Gallery: a cooler blue-grey stone. */
 const COOL: Partial<Palette> = {
   floor: "#3a4252", floorGrout: "#323946", wallFace: "#262b36", wallEdge: "#30374a",
@@ -109,8 +112,8 @@ const WARM: Partial<Palette> = {
 };
 
 export const LEVEL_LOOKS: (Partial<Palette> | undefined)[] = [
-  WAXED, SHAFT, SHAFT, SHAFT, SHAFT, SHAFT, SHAFT, // the labyrinth and the shaft
-  undefined, undefined, undefined, // Floor A (the Nave) and its stair levels: the plain stone
+  WAXED, SHAFT, SHAFT, SHAFT, SHAFT, SHAFT, // the labyrinth and the shaft
+  undefined, undefined, undefined, undefined, // Floor A (the wheel on level 6, the Nave on 7) and its stair levels: the plain stone
   COOL, COOL, COOL, // Floor B (the Gallery) and its stair levels
   WARM, // Floor C (the Sanctum)
 ];

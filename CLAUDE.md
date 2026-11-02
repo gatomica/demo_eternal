@@ -53,7 +53,7 @@ What is planned but not built is in `docs/todo.md`: read it when starting a task
   two), `scenes.ts` (`IGNITE` timings).
 - `guide/`: the guide's figure (`GuideFigure.tsx`: cloak, orb, string, bare feet), its poses (`poses.ts`: a few numbers each) and its `look.ts`. The kind is `core/kinds/guide.ts`.
 - `explore/`: the exploration map. `plans.ts` (`LEVEL_PLANS`, one ASCII plan per level on a
-  shared, stacked grid: the tutorial segment: level 0 the waxed ring labyrinth with the shaft room at its centre, 0-6 the shaft's ladder; then the dungeon: Floor A on level 7 (the Nave), B on 10 and C on 13, each 3 levels above the last), `world.ts` (tiles,
+  shared, stacked grid: the tutorial segment: level 0 the waxed ring labyrinth with the shaft room at its centre, 0-6 the shaft's ladder; then the dungeon: Floor A on level 7 (the Nave) with its outer wheel on 6, B on 10 and C on 13), `world.ts` (tiles,
   ramps), `movement.ts`, `sight.ts`, `paint.ts` (chunked level painting), `render.ts` (draws the whole stack cut down to what is in sight; used by `Exploration` and the Map viewer), `figures.ts` (map
   figures, `MAP_FIGURES` by kind), `foes.ts` (`MAP_FOES`, chasing), `keepers.ts` (`KEEPERS`, rest
   points; the guide fades in at each), `tutorial.ts` (the guide's teaching: state, the gift, the
@@ -98,5 +98,7 @@ What is planned but not built is in `docs/todo.md`: read it when starting a task
   in a real Test combat fight. Mid-turn timing bugs (a pose flashing for a frame, a status shown too
   early) usually come from `viewAt` / step snapshots vs. the final `fight` state in `combat/CombatScreen.tsx`.
 - Map plans: a diagonal tile (◤ ◥ ◣ ◢: the character shows its floor half; the other half is wall) cuts corners for non-square rooms. Ladders (`H`, an `H` on consecutive levels at one tile is one tall ladder) are climbed in place. Floors are stacked on one shared footprint (a higher floor may sit right over a lower one; one level is `RISE` = one tile of height on screen). Stairs
-  are one tile at 45 degrees (it climbs a whole level), sit on the lower level and point uphill, with floor past their top end on the level above and a hole in that floor above the stairs themselves. While you are on the stairs the level above is not drawn (not even the hole); it appears when you reach the top (`levelOf` in `world.ts`, drawn by `render.ts`).
+  are one tile at 45 degrees (it climbs a whole level), sit on the lower level and point uphill, with floor past their top end on the level above and a hole in that floor above the stairs themselves. While you are on the stairs the level above's floors are not drawn (not even the hole); they appear when you reach the top (`levelOf` in `world.ts`, drawn by `render.ts`).
+- Diagonal stairs (`↖ ↗ ↙ ↘`, pointing uphill) go on a floor square of a diagonal corridor, on the lower level; the diagonal tiles beside them tilt with them (`slopeAt` in `world.ts`).
+- Map walls: a wall or cliff is a block on its own level, faded by its distance from yours (`wallFade` in `tuning.ts`, gone at `WALL_FADE_LEVELS`), and hidden where a floor is in the way. Floors below you fade the same way; floors above you are never drawn, and a cliff shows only from its floor's level or above. A chunk has three layers (`paint.ts`: walls, surface, cliffs; cliff blocks are `CLIFFS` in `world.ts`). To make a wall taller, write its `#` and `:` on the levels above in the plan.
 - Don't change gameplay numbers or enemy patterns unless asked; propose them first.
