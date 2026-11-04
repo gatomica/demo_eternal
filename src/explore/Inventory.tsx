@@ -20,7 +20,7 @@ export interface ChoiceList {
 export function Inventory({ inv, knot, focus, onFocus, onActivate, list, onListHover, onListPick, swap }: {
   inv: Bag;
   knot?: Knot;
-  /** 0-3: the places (weapon eternal, weapon ordinary, armor eternal, armor ordinary); 4: the way back to the main menu. */
+  /** 0-3: the places (weapon eternal, weapon ordinary, armor eternal, armor ordinary); 4: Reawaken; 5: the way back to the main menu. */
   focus: number;
   onFocus: (i: number) => void;
   /** E or a click on a place (or the menu button). */
@@ -32,7 +32,7 @@ export function Inventory({ inv, knot, focus, onFocus, onActivate, list, onListH
   /** Gear lying on the ground where you stand, that you could swap for what you wear (E): you leave what you wear in its place. */
   swap?: { gear: GearSpec; worn: GearSpec };
 }) {
-  const menu = SLOTS.length * SIDES.length;
+  const reawaken = SLOTS.length * SIDES.length, menu = reawaken + 1;
   return (
     <div className="result" role="dialog" aria-label="Inventory">
       <div className="inventory">
@@ -104,6 +104,9 @@ export function Inventory({ inv, knot, focus, onFocus, onActivate, list, onListH
         <div className="inventory-note">You carry one ordinary weapon and one ordinary armor besides eternal gear. Falling loses all gear but the eternal.</div>
         {!list && <div className="inventory-keys"><kbd>W</kbd><kbd>S</kbd><kbd>A</kbd><kbd>D</kbd> move · <kbd>E</kbd> wield / choose · <kbd>Esc</kbd> close</div>}
       </div>
+      <button className={`inventory-exit menu-button ${focus === reawaken ? "is-focused" : ""}`} onMouseEnter={() => onFocus(reawaken)} onClick={() => onActivate(reawaken)}>
+        Reawaken <span className="inventory-exit-note">(die here, wake by the last safe spot)</span>
+      </button>
       <button className={`inventory-exit menu-button ${focus === menu ? "is-focused" : ""}`} onMouseEnter={() => onFocus(menu)} onClick={() => onActivate(menu)}>
         Back to main menu <span className="inventory-exit-note">(saves)</span>
       </button>

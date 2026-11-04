@@ -70,6 +70,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* ---------- Exploration: one canvas, black beyond the walls ---------- */
 .explore { position: absolute; inset: 0; background: #000; }
 .explore-canvas { display: block; width: 100%; height: 100%; }
+/* Shown over the dark while the map near you is painted. */
+.explore-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text); font-size: 1rem; letter-spacing: 0.08em; pointer-events: none; }
 /* Standing by a keeper, and the line after resting. */
 .explore-prompt {
   position: absolute; left: 50%; bottom: 14vh; transform: translateX(-50%);

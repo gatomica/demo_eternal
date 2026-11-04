@@ -56,14 +56,20 @@ export const STEP_TOLERANCE = 0.35;
 /** How quickly falls speed up, in storeys per second squared. */
 export const GRAVITY = 10;
 
+/** The height of a plane under the whole map (level -10): whoever falls through the cracks of the geometry lands on it, and that is the end of them (they wake by the keeper they last rested by). */
+export const FALL_DEATH_ALT = -10;
+
 /** How quickly the camera catches up with you (higher = tighter). */
 export const CAMERA_FOLLOW = 9;
 
 /** How far you can see, in tiles. */
 export const VISION_RADIUS = 5.5;
 
-/** Share of that radius that's fully lit before it starts fading to black. */
-export const VISION_FULL = 0.5;
+/** How far the flood of sight reaches: past the circle by a tenth (steps over the grid are longer than straight lines, so the circle isn't clipped on the diagonals) and by half a tile more, so the edge of what sight reaches lies beyond the fade of the light and adds no fade of its own; the renderer cuts the light to the true circle. */
+export const SIGHT_REACH = VISION_RADIUS * 1.1 + 0.5;
+
+/** How wide the fade at the edge of your sight is, in tiles: everything inside it is fully lit, and past it nothing is drawn. */
+export const VISION_FADE = 1;
 
 /** How quickly what you see catches up as you move (higher = snappier, lower = softer fades). */
 export const SIGHT_EASE = 7;
@@ -86,10 +92,34 @@ export const GHOST_ALPHA = 0.3;
 /** The colors of the map's tiles: what `COLORS` holds for the tile kinds. */
 export type Palette = Pick<typeof COLORS, "wallFace" | "wallEdge" | "ledgeFace" | "ledgeRim" | "floor" | "floorGrout" | "stairs" | "rung">;
 
+/** The colour of a floor of wax: the wax-filled floors, the wax ramp and the labyrinth's floor are all this. */
+export const WAX_FLOOR = "#8a7a40";
+
 /** The labyrinth: floor, walls and ledges all of dark, yellowed wax. */
 const WAXED: Partial<Palette> = {
-  floor: "#76652f", floorGrout: "#5e4f25", wallFace: "#4d4120", wallEdge: "#8a7637",
+  floor: WAX_FLOOR, floorGrout: "#5e4f25", wallFace: "#4d4120", wallEdge: "#8a7637",
   ledgeFace: "#3c3218", ledgeRim: "#a08b48", stairs: "#806c33", rung: "#b09a52",
+};
+
+/** Walls of wax: pale, smooth candle wax. */
+export const WAX_WALL: Palette = {
+  ...COLORS,
+  floor: WAX_FLOOR, floorGrout: "#85763a", wallFace: "#c3b274", wallEdge: "#eadda5",
+  ledgeFace: "#8a7a3e", ledgeRim: "#eadda5", stairs: WAX_FLOOR, rung: "#eadda5",
+};
+
+/** Wood: the planks and stairs of the bridge. */
+export const WOOD: Palette = {
+  ...COLORS,
+  floor: "#7b5b37", floorGrout: "#4a3520", wallFace: "#50391f", wallEdge: "#6c4e2e",
+  ledgeFace: "#3d2b18", ledgeRim: "#8a6840", stairs: "#8a6840", rung: "#c0a070",
+};
+
+/** The mined tunnels below the wheel: dark, rough rock, cobbled underfoot (see `minedAt` in world.ts). */
+export const MINED: Palette = {
+  ...COLORS,
+  floor: "#34302b", floorGrout: "#1b1917", wallFace: "#2a2c33", wallEdge: "#3b3e48",
+  ledgeFace: "#171513", ledgeRim: "#3d3833", stairs: "#3a352f", rung: "#4d463e",
 };
 
 /** The shaft: bare, cold stone, darker than the first floor. */
@@ -115,8 +145,11 @@ export const LEVEL_LOOKS: (Partial<Palette> | undefined)[] = [
   WAXED, SHAFT, SHAFT, SHAFT, SHAFT, SHAFT, // the labyrinth and the shaft
   undefined, undefined, undefined, undefined, // Floor A (the wheel on level 6, the Nave on 7) and its stair levels: the plain stone
   COOL, COOL, COOL, // Floor B (the Gallery) and its stair levels
-  WARM, // Floor C (the Sanctum)
+  WARM, WARM, WARM, WARM, WARM, WARM, WARM, WARM, WARM, WARM, WARM, WARM, // Floor C (the Sanctum) and the walls above it
 ];
+
+/** Whether level z is one of the waxed levels (the labyrinth): its walls and cliffs get the wax's drips. */
+export const isWaxedLevel = (z: number) => LEVEL_LOOKS[z] === WAXED;
 
 /** The colors to paint level z's tiles with. */
 export const paletteOf = (z: number): Palette => ({ ...COLORS, ...LEVEL_LOOKS[z] });
@@ -129,3 +162,15 @@ export const SEALED_DENSITY = { wall: 0.3, floor: 0.06 };
 
 /** How the sleepers sealed in the wax look: the dark body, the light edge it catches, and the sheen of the wax skin over the ones on the floor. */
 export const SEALED_COLORS = { body: "rgb(30 24 10 / 0.6)", rim: "rgb(190 165 90 / 0.35)", sheen: "rgb(230 205 130 / 0.1)" };
+
+/** The most device pixels the map is drawn at per CSS pixel: high-density screens are drawn a little softer, for a much lighter frame. */
+export const MAX_PIXEL_RATIO = 1.5;
+
+/** The map is drawn at this share of the screen's pixels (after MAX_PIXEL_RATIO) and scaled up by the browser: a lighter frame and lighter baked pictures, for slightly softer tiles. */
+export const RENDER_SCALE = 0.85;
+
+/**
+ * How far the light of an entrance reaches, in tiles, when you stand `distance` tiles from it:
+ * what is left of your sight past it (a test: it used to be GAP_PEEK, shrinking evenly to nothing at the edge of your sight).
+ */
+export const lampRadius = (distance: number) => Math.max(0, VISION_RADIUS - distance);

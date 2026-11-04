@@ -53,6 +53,22 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
   });
   // Every change of where you stand is written down.
   const setJourney = (j: Journey) => { saveJourney(j); setJourneyState(j); };
+  /**
+   * Falling (a lost fight, Reawaken, or falling through the map): you wake by the keeper you last rested by (or at the start). Your
+   * progress stays, but the gear you carried is gone. Coming back counts as a rest: the sleepwalkers get up again, and the knot is
+   * wound again.
+   */
+  const fall = (backTo: Journey) => {
+    const woke = wakeEnemies({ corpses: withCorpses(backTo.corpses ?? {}, backTo.defeated), defeated: backTo.defeated });
+    setJourney({
+      ...woke,
+      taken: backTo.taken,
+      rested: backTo.rested,
+      tutorial: backTo.tutorial,
+      knot: backTo.knot && "wound",
+      inventory: lose(backTo.inventory),
+    });
+  };
   /** Back to the main menu, keeping `j`. */
   const leave = (j: Journey) => { saveJourney(j); onExit(); };
   // `id` gives every fight (and every return to the map) a fresh screen.
@@ -100,18 +116,7 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
               found: dropped.length ? gotNote("Dropped", dropped.map(d => d.gear), []) : undefined,
             });
           } else {
-            // Wake by the keeper you last rested by (or at the start). Your progress stays, but the
-            // gear you carried is gone. Coming back counts as a rest: the sleepwalkers get up again
-            //, and the knot is wound again.
-            const woke = wakeEnemies({ corpses: withCorpses(backTo.corpses ?? {}, backTo.defeated), defeated: backTo.defeated });
-            setJourney({
-              ...woke,
-              taken: backTo.taken,
-              rested: backTo.rested,
-              tutorial: backTo.tutorial,
-              knot: backTo.knot && "wound",
-              inventory: lose(backTo.inventory),
-            });
+            fall(backTo);
           }
           setFight(null);
           setVisit(v => v + 1);
@@ -124,6 +129,7 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
       key={visit}
       journey={journey}
       onSave={saveJourney}
+      onDie={j => { fall(j); setVisit(v => v + 1); }}
       onEncounter={(foes, backTo) => {
         saveJourney(backTo);
         setFight(f => ({ id: (f?.id ?? 0) + 1, foes, ...fightFor(foes, backTo), backTo }));

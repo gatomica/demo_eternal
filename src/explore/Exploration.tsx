@@ -28,11 +28,11 @@ import { type GroundItem, lookOfGear, PICKUP_REACH, PICKUPS } from "./pickups";
 import { CHASE_MEMORY, type Corpse, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, foeFloor, GRACE_MS, huddle, inFightArea, livingDef, MAP_FOES, type MapFoe, MAX_IN_FIGHT, memberKey, stepsFrom, TOUCH, wakeEnemies, waypoint, withCorpses } from "./foes";
 import { FADE_FAR, FADE_NEAR, KEEPER_REACH, KEEPERS, REST_NOTE_MS } from "./keepers";
 import { cornerNudge, slide, surfaceNear, type Walker } from "./movement";
-import { createMapRenderer } from "./render";
+import { createMapRenderer, type Light } from "./render";
 import { sight } from "./sight";
 import { type After, FIRST_FLOOR_KEEPER, GIFT, type Knot, type Talk, type TutorialState } from "./tutorial";
-import { ACCEL, BODY_ABOVE_FEET, CAMERA_FOLLOW, GRAVITY, HALF_W, LADDER_SPEED, RISE, SPEED, STAIRS_SPEED, STEP_TOLERANCE, STRIDE, VISION_RADIUS } from "./tuning";
-import { type Dir, LADDER, ladderSpan, STAIRS, WORLD } from "./world";
+import { ACCEL, BODY_ABOVE_FEET, CAMERA_FOLLOW, FALL_DEATH_ALT, GRAVITY, HALF_W, LADDER_SPEED, RISE, SPEED, STAIRS_SPEED, STEP_TOLERANCE, STRIDE, VISION_RADIUS } from "./tuning";
+import { type Dir, LADDER, ladderSpan, LEVELS, STAIRS, WORLD } from "./world";
 
 /** Resting is a sleep: how long the screen is dark in all, and when, in the dark, it happens. */
 const SLEEP_MS = 2400;
@@ -64,7 +64,7 @@ export interface Journey {
   found?: string;
 }
 
-export function Exploration({ journey, onEncounter, onSave, onExit }: {
+export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   journey: Journey;
   /**
    * A fight starts: the enemy that reached you, then any others chasing you that join in, and
@@ -73,15 +73,19 @@ export function Exploration({ journey, onEncounter, onSave, onExit }: {
   onEncounter: (foes: MapFoe[], journey: Journey) => void;
   /** Your progress is worth keeping now (you rested, the guide gave you something). */
   onSave: (journey: Journey) => void;
+  /** You fall where you stand (you chose to reawaken, or fell through the map): you wake by the keeper you last rested by, as after a lost fight. */
+  onDie: (journey: Journey) => void;
   /** Back to the main menu, with where you stand. */
   onExit: (journey: Journey) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // The screen goes dark as a fight begins; input stops.
   const [entering, setEntering] = useState(false);
+  // The map being got ready before the first frame (how far along it is, 0 to 1), or null once it is.
+  const [preparing, setPreparing] = useState<number | null>(0);
   const leaving = useRef(false);
-  const latest = useRef({ journey, onEncounter, onSave });
-  latest.current = { journey, onEncounter, onSave };
+  const latest = useRef({ journey, onEncounter, onSave, onDie });
+  latest.current = { journey, onEncounter, onSave, onDie };
   // Escape opens the inventory screen, which also holds the way back to the main menu.
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
@@ -110,11 +114,14 @@ export function Exploration({ journey, onEncounter, onSave, onExit }: {
   const [choice, setChoice] = useState<ChoiceList | null>(null);
   const choiceRef = useRef<ChoiceList | null>(null);
   choiceRef.current = choice;
-  const INV_MENU = SLOTS.length * SIDES.length;
+  /** After the places: the button to reawaken, then the one back to the main menu. */
+  const INV_REAWAKEN = SLOTS.length * SIDES.length;
+  const INV_MENU = INV_REAWAKEN + 1;
   useEffect(() => { if (!paused) setChoice(null); }, [paused]);
   /** E (or a click) on a place of the inventory: wield what lies there, or on the one you wield, open the list to pick another. */
   const activatePlace = (i: number) => {
     if (i === INV_MENU) { onExit(snapshot.current()); return; }
+    if (i === INV_REAWAKEN) { reawakenRef.current(); return; }
     const slot = SLOTS[Math.floor(i / SIDES.length)], side = SIDES[i % SIDES.length];
     if (equippedSide(invRef.current, slot) === side) {
       // (The list starts with "Unequip", then the pieces: the cursor begins on what you wield.)
@@ -214,6 +221,17 @@ export function Exploration({ journey, onEncounter, onSave, onExit }: {
   const [sleeping, setSleeping] = useState(false);
   const sleepTimers = useRef<number[]>([]);
   useEffect(() => () => sleepTimers.current.forEach(t => window.clearTimeout(t)), []);
+  /** Dying where you stand (the pause menu's Reawaken, or falling through the map): the screen goes dark, and you wake by the keeper you last rested by, having lost your ordinary gear, as after a lost fight. */
+  const reawaken = () => {
+    if (leaving.current) return;
+    held.current = [];
+    leaving.current = true;
+    setPaused(false);
+    setSleeping(true);
+    sleepTimers.current.push(window.setTimeout(() => latest.current.onDie(snapshot.current()), SLEEP_MID_MS));
+  };
+  const reawakenRef = useRef(reawaken);
+  reawakenRef.current = reawaken;
   const rest = () => {
     const id = nearRef.current;
     if (!id) return;
@@ -291,9 +309,9 @@ export function Exploration({ journey, onEncounter, onSave, onExit }: {
         else if (key === "q") setChoice(null);
       } else if (dir === "up" || dir === "down") {
         // Rows of places, then the way back to the menu.
-        setInvFocus(i => (i === INV_MENU ? (dir === "up" ? INV_MENU - SIDES.length : 0) : dir === "up" ? (i < SIDES.length ? INV_MENU : i - SIDES.length) : i + SIDES.length >= INV_MENU ? INV_MENU : i + SIDES.length));
+        setInvFocus(i => (i === INV_MENU ? (dir === "up" ? INV_REAWAKEN : 0) : i === INV_REAWAKEN ? (dir === "up" ? INV_REAWAKEN - SIDES.length : INV_MENU) : dir === "up" ? (i < SIDES.length ? INV_MENU : i - SIDES.length) : i + SIDES.length >= INV_REAWAKEN ? INV_REAWAKEN : i + SIDES.length));
       } else if (dir === "left" || dir === "right") {
-        setInvFocus(i => (i === INV_MENU ? i : Math.floor(i / SIDES.length) * SIDES.length + (dir === "left" ? 0 : 1)));
+        setInvFocus(i => (i >= INV_REAWAKEN ? i : Math.floor(i / SIDES.length) * SIDES.length + (dir === "left" ? 0 : 1)));
       } else if (accept) activatePlace(invFocus);
       else if (key === "q") { setSwapId(null); setPaused(false); }
       return;
@@ -373,6 +391,10 @@ export function Exploration({ journey, onEncounter, onSave, onExit }: {
     let seenLast: Float32Array[] | null = null;
     // Sight only changes when you move: worked out again then, into the same arrays.
     const seen = WORLD.levels.map(() => new Float32Array(WORLD.w * WORLD.h));
+    // And where each tile's light comes from (you, or the doorway it was seen through): the renderer fades light round those.
+    const origins = WORLD.levels.map(() => new Int32Array(WORLD.w * WORLD.h));
+    // Which levels sight reached at all.
+    const reached = new Uint8Array(LEVELS);
     let seenFrom = "";
     // Step counts toward you, redone whenever you step onto a new tile.
     let toYou: { key: string; steps: Int16Array | null } = { key: "", steps: null };
@@ -477,7 +499,8 @@ export function Exploration({ journey, onEncounter, onSave, onExit }: {
 
       // Your height follows whatever you're standing on: this is what carries you up and down.
       // Small differences (stairs, ladders) you simply step across; anything bigger, you fall.
-      const under = surfaceNear(Math.floor(me.x), Math.floor(me.y), me.x, me.y, me.alt);
+      // (Where nothing at all lies under you, a plane under the whole map catches you, and that is the end of you.)
+      const under = surfaceNear(Math.floor(me.x), Math.floor(me.y), me.x, me.y, me.alt) ?? { h: FALL_DEATH_ALT, t: 0 };
       if (under) {
         if (me.fall === 0 && under.h >= me.alt - STEP_TOLERANCE) {
           me.alt = under.h;
@@ -487,6 +510,7 @@ export function Exploration({ journey, onEncounter, onSave, onExit }: {
           if (me.alt <= under.h) { me.alt = under.h; me.fall = 0; }
         }
         me.ground = under.h;
+        if (me.alt <= FALL_DEATH_ALT + 1e-3) reawakenRef.current();
       }
       }
 
@@ -642,11 +666,11 @@ export function Exploration({ journey, onEncounter, onSave, onExit }: {
      * Draws the enemies and keepers on level z whose feet are on a row that passes `test`, as
      * seen from the camera at (ox, oy), back ones first.
      */
-    const drawFoes = (ctx: CanvasRenderingContext2D, z: number, ox: number, oy: number, T: number, test: (y: number) => boolean) => {
-      const list: { y: number; draw: () => void }[] = [];
+    const drawFoes = (ctx: CanvasRenderingContext2D, z: number, ox: number, oy: number, T: number, test: (y: number) => boolean, light: Light) => {
+      const list: { x: number; y: number; draw: () => void }[] = [];
       for (const f of foes) {
         if (Math.round(f.alt) !== z || !test(f.y)) continue;
-        list.push({ y: f.y, draw: () => {
+        list.push({ x: f.x, y: f.y, draw: () => {
           const phase = Math.floor(f.walked / STRIDE) % 4;
           const frame: Frame = f.walked <= 0 ? "stand" : phase === 0 ? "stepR" : phase === 2 ? "stepL" : "stand";
           // Each member of the group drawn as what it is, back ones first.
@@ -671,32 +695,47 @@ export function Exploration({ journey, onEncounter, onSave, onExit }: {
       }
       for (const p of floorItems()) {
         if (Math.round(p.at.z) !== z || !test(p.at.y)) continue;
-        list.push({ y: p.at.y, draw: () => drawPickup(ctx, ox + p.at.x * T, oy + (p.at.y - p.at.z * RISE - BODY_ABOVE_FEET) * T, T, performance.now(), p.look) });
+        list.push({ x: p.at.x, y: p.at.y, draw: () => drawPickup(ctx, ox + p.at.x * T, oy + (p.at.y - p.at.z * RISE - BODY_ABOVE_FEET) * T, T, performance.now(), p.look) });
       }
       // Whoever lies beaten, where it fell.
       for (const c of Object.values(corpsesRef.current)) {
         if (Math.round(c.alt) !== z || !test(c.y)) continue;
-        list.push({ y: c.y, draw: () => MAP_REMAINS[c.kind](ctx, ox + c.x * T, oy + (c.y - c.alt * RISE - BODY_ABOVE_FEET) * T, T) });
+        list.push({ x: c.x, y: c.y, draw: () => MAP_REMAINS[c.kind](ctx, ox + c.x * T, oy + (c.y - c.alt * RISE - BODY_ABOVE_FEET) * T, T) });
       }
       for (const k of KEEPERS) {
         const at = k.at;
         if (Math.round(at.z) !== z || !test(at.y) || fade[k.id] < 0.02) continue;
-        list.push({ y: at.y, draw: () => {
+        list.push({ x: at.x, y: at.y, draw: () => {
           const px = ox + at.x * T, py = oy + (at.y - at.z * RISE - BODY_ABOVE_FEET) * T;
-          ctx.globalAlpha = fade[k.id];
+          ctx.globalAlpha = fade[k.id] * light(at.x, at.y);
           drawKeeper(ctx, px, py, T, (restedAt.current ?? "start") === k.id, performance.now());
           ctx.globalAlpha = 1;
         } });
       }
-      list.sort((a, b) => a.y - b.y).forEach(d => d.draw());
+      if (!list.length) return false;
+      list.sort((a, b) => a.y - b.y).forEach(d => {
+        // Each is as bright as the light where it stands (the keepers fade in on top of that).
+        const lit = light(d.x, d.y);
+        if (lit < 0.01) return;
+        ctx.globalAlpha = lit;
+        d.draw();
+        ctx.globalAlpha = 1;
+      });
     };
+
+    /** Whether anyone or anything is on level z at all (the renderer keeps a still picture of the levels below you while nothing moves on them). */
+    const actorsOn = (z: number) =>
+      foes.some(f => Math.round(f.alt) === z) ||
+      floorItems().some(p => Math.round(p.at.z) === z) ||
+      Object.values(corpsesRef.current).some(c => Math.round(c.alt) === z) ||
+      KEEPERS.some(k => Math.round(k.at.z) === z && fade[k.id] >= 0.02);
 
     const draw = (dtMs: number) => {
       fadeKeepers(dtMs);
       // Sight only changes when you move: worked out again then, into the same arrays.
       const from = `${me.x},${me.y},${me.alt}`;
       if (from !== seenFrom) {
-        sight(me.x, me.y, me.alt, seen);
+        sight(me.x, me.y, me.alt, seen, origins, reached);
         seenFrom = from;
       }
       seenLast = seen;
@@ -706,8 +745,9 @@ export function Exploration({ journey, onEncounter, onSave, onExit }: {
       // You wear what you have equipped.
       const look = playerLook(loadoutOf(invRef.current));
       renderer.draw({
-        camX: cam.x, camY: cam.y, x: me.x, y: me.y, alt: me.alt, seen,
+        camX: cam.x, camY: cam.y, x: me.x, y: me.y, alt: me.alt, seen, origin: origins, reached,
         actors: drawFoes,
+        actorsOn,
         player: { draw: (ctx, px, py, T, solid) => drawWalker(ctx, px, py, T, me.facing, frame, solid, solid ? (me.alt - me.ground) * RISE : 0, look) },
       }, dtMs);
     };
@@ -721,13 +761,21 @@ export function Exploration({ journey, onEncounter, onSave, onExit }: {
       draw(dt);
       raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
-    return () => { cancelAnimationFrame(raf); window.clearTimeout(fadeTimer); renderer.dispose(); };
+    // The map near you is painted before the first frame, so walking in doesn't stutter.
+    let gone = false;
+    void renderer.warm(me.x, me.y, me.alt, p => { if (!gone) setPreparing(p); }).then(() => {
+      if (gone) return;
+      setPreparing(null);
+      last = performance.now();
+      raf = requestAnimationFrame(tick);
+    });
+    return () => { gone = true; cancelAnimationFrame(raf); window.clearTimeout(fadeTimer); renderer.dispose(); };
   }, []);
 
   return (
     <div className="explore">
       <canvas ref={canvasRef} className="explore-canvas" />
+      {preparing !== null && <div className="explore-loading">Preparing the map… {Math.round(preparing * 100)}%</div>}
       {nearPickup && !paused && !entering && !talk && (
         <div className="explore-prompt"><kbd>E</kbd> Pick Up</div>
       )}

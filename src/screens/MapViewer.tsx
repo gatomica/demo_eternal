@@ -89,8 +89,15 @@ export function MapViewer({ onExit }: { onExit: () => void }) {
       if (here !== shown) { shown = here; setAt({ x: eye.x, y: eye.y }); setCopied(false); }
       raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
+    // The map is painted first, so panning around doesn't stutter.
+    let gone = false;
+    void renderer.warm(eye.x, eye.y, altRef.current).then(() => {
+      if (gone) return;
+      last = performance.now();
+      raf = requestAnimationFrame(tick);
+    });
     return () => {
+      gone = true;
       cancelAnimationFrame(raf);
       renderer.dispose();
       window.removeEventListener("keydown", onDown);

@@ -2,7 +2,7 @@
  * movement.ts — walking: bumping into walls, sliding along them, stepping up and dropping down.
  */
 import { CORNER_ASSIST, HALF_D, HALF_W, STEP_TOLERANCE } from "./tuning";
-import { boxOnDiagFloor, boxTouchesDiagFloor, type Dir, DIAG, FLOOR, isHoleDiag, isRamp, LADDER, onDiagFloor, LEVELS, rampAt, rampHeight, slopeAt, slopeRise, tileAt, WALL } from "./world";
+import { barsAt, boxOnDiagFloor, boxTouchesDiagFloor, type Dir, DIAG, FLOOR, isHoleDiag, isRamp, LADDER, onDiagFloor, LEVELS, rampAt, rampHeight, slopeAt, slopeRise, tileAt, WALL } from "./world";
 
 /* ============================================================
  * Standing and moving: surfaces near your height
@@ -43,8 +43,10 @@ export function surfaceNear(tx: number, ty: number, px: number, py: number, alt:
   for (let z = 0; z < LEVELS; z++) {
     const t = tileAt(z, tx, ty);
     let hgt: number | null = null;
+    // Bars across a tile: it is shut to anyone at its height (they are seen through, never walked through).
+    if (barsAt(z, tx, ty) && z <= alt + 1e-3 && alt < z + 1) return null;
     if (t === WALL && z <= alt + 1e-3) wall = z;
-    if (t === FLOOR) hgt = z;
+    if (t === FLOOR) { const slope = slopeAt(z, tx, ty); hgt = slope ? z + slopeRise(slope, px, py) : z; }
     else if (t === DIAG) {
       // Only its floor half: a point must be on it. With `box` your whole footprint must be, if the other half is a wall
       // you could bump into. The rim of a hole has open air there, and a diagonal far below you is no wall at your height: touching is enough.
@@ -58,7 +60,12 @@ export function surfaceNear(tx: number, ty: number, px: number, py: number, alt:
       // A ladder is climbed in place: whatever height you are at, within its level.
       hgt = Math.min(z + 1, Math.max(z, alt));
     } else if (isRamp(t)) hgt = rampHeight(z, tx, ty, rampAt(z, tx, ty)!, px, py);
-    if (hgt === null || hgt > alt + STEP_TOLERANCE) continue;
+    if (hgt !== null && hgt > alt + STEP_TOLERANCE) {
+      // A stair (or the tilt beside diagonal stairs) too high to step onto is solid from its top end as from its sides, as long as you are at its height: else you would walk into its column and drop through to whatever lies below.
+      if ((isRamp(t) || (t === DIAG && slopeAt(z, tx, ty))) && t !== LADDER && z <= alt + 1e-3) wall = Math.max(wall, z);
+      continue;
+    }
+    if (hgt === null) continue;
     if (!best || hgt > best.h) best = { h: hgt, t };
   }
   return best && wall > best.h ? null : best;

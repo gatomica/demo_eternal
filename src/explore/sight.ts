@@ -2,59 +2,59 @@
  * sight.ts — what you can see from where you stand: a flood over the tiles, held back at doorways.
  *
  * No geometry: sight spreads from your tile across walkable tiles, one step at a time, until it
- * runs out of range. Narrow passages (doorways, corridors, stairs: anything with walls on both
- * sides) are told apart from open space once, when the map loads. Whenever sight crosses
- * between the two, it can only carry GAP_PEEK tiles further. So from a room you see just the
- * mouth of a corridor, and from a corridor just the near corner of the room ahead, until you
- * step through.
+ * runs out of range. The map is cut into rooms once, when it loads (see `rooms`: a corridor, a
+ * doorway or a stair is a room of its own; a hall with its bridges and the floors under them is
+ * one). Whenever sight steps from one room into another, that is a doorway: what lies past it is
+ * lit only by a small light of its own there, and it can only carry GAP_PEEK tiles further. So
+ * from a room you see just the mouth of a corridor, and from a corridor just the near corner of
+ * the room ahead, until you step through. Past a doorway the doorway's light is the only light:
+ * the circle of your sight never lights another room by itself.
  */
-import { GAP_PEEK, VISION_RADIUS } from "./tuning";
-import { inside, isAir, isRamp, isShaft, LEVELS, slopeAt, tileAt, VOID, walkable, WORLD } from "./world";
+import { lampRadius, SIGHT_REACH } from "./tuning";
+import { NARROW, ROOM, seeThrough } from "./rooms";
+import { isAir, isRamp, isShaft, LEVELS, tileAt, VOID, WORLD } from "./world";
 
-/** Tiles sight travels over on level z: walkable ones, plus the space above stairs from below. */
-const seesThrough = (z: number, x: number, y: number) => walkable(tileAt(z, x, y)) || isRamp(tileAt(z - 1, x, y)) || !!slopeAt(z - 1, x, y) || isShaft(z, x, y);
-
-/** The same, worked out once per tile when the map loads (sight asks it many times a frame). */
-const SEE = WORLD.levels.map((_, z) => {
-  const out = new Uint8Array(WORLD.w * WORLD.h);
-  for (let y = 0; y < WORLD.h; y++) for (let x = 0; x < WORLD.w; x++) if (seesThrough(z, x, y)) out[y * WORLD.w + x] = 1;
-  return out;
-});
-
-export const seeThrough = (z: number, x: number, y: number) =>
-  z >= 0 && z < LEVELS && inside(x, y) ? SEE[z][y * WORLD.w + x] === 1 : seesThrough(z, x, y);
+export { NARROW, seeThrough };
 
 /**
- * Per level, 1 for tiles in a narrow passage. A tile is open space if it's part of some 2x2
- * block of tiles you can see across, as every tile of a room is; anything else (corridors and
- * their corners, doorways, bridges, staircases) is narrow.
+ * The light of a doorway is centred on the middle of the line between the two rooms: the point
+ * halfway between the centres of the last tile of one and the first of the other. It is written
+ * (in `origin`) in half tiles, as `y * 128 + x`; these give it back in tiles.
  */
-const NARROW = WORLD.levels.map((_, z) => {
-  const out = new Uint8Array(WORLD.w * WORLD.h);
-  const open = (x: number, y: number) =>
-    seeThrough(z, x, y) && seeThrough(z, x + 1, y) && seeThrough(z, x, y + 1) && seeThrough(z, x + 1, y + 1);
-  for (let y = 0; y < WORLD.h; y++) for (let x = 0; x < WORLD.w; x++) {
-    if (!seeThrough(z, x, y)) continue;
-    if (!(open(x, y) || open(x - 1, y) || open(x, y - 1) || open(x - 1, y - 1))) out[y * WORLD.w + x] = 1;
-  }
-  return out;
-});
+export const lampX = (o: number) => (o & 127) / 2;
+export const lampY = (o: number) => (o >> 7) / 2;
 
 /**
  * How much sight is left on each tile of every level, seen by you at (px, py) and height `alt`:
  * negative where you can't see at all, counting down from VISION_RADIUS with distance.
  * Sight spreads across your own level and, over the edge of a ledge, drops down onto the floor
  * below and spreads on there, as far as your sight reaches.
- * Worked out into `left` (one array per level), if given.
+ * Worked out into `left` (one array per level), if given. With `origin` (one array per level too),
+ * also where each tile's light comes from: -1 for you, or the middle of the line (see `lampX`) at the
+ * doorway or corridor mouth it was seen through, which then is a source of light of its own, GAP_PEEK
+ * wide at most (less the farther you stand from it).
+ * With `touched`, also 1 for every level that sight reached anywhere.
  */
-export function sight(px: number, py: number, alt: number, left = WORLD.levels.map(() => new Float32Array(WORLD.w * WORLD.h))) {
+export function sight(px: number, py: number, alt: number, left = WORLD.levels.map(() => new Float32Array(WORLD.w * WORLD.h)), origin?: Int32Array[], touched?: Uint8Array) {
   const { w, h } = WORLD, N = w * h;
   for (const l of left) l.fill(-1);
+  if (origin) for (const o of origin) o.fill(-1);
+  if (touched) touched.fill(0);
   const sx = Math.floor(px), sy = Math.floor(py);
   const queue: number[] = [];
-  const relax = (z: number, i: number, v: number) => {
+  /** The middle of the line between tile i and tile j (on one grid), in half tiles. */
+  const mid = (i: number, j: number) => (Math.floor(i / w) + Math.floor(j / w) + 1) * 128 + ((i % w) + (j % w) + 1);
+  /**
+   * How much sight is left just past a doorway, whatever is left of yours: the reach of its light
+   * (how far it shines, which depends on how far you are) and a tile more, so that where sight stops lies
+   * beyond where the light has faded and the two don't each fade the picture.
+   */
+  const past = (o: number) => lampRadius(Math.hypot(px - lampX(o), py - lampY(o))) + 1;
+  const relax = (z: number, i: number, v: number, from = -1) => {
     if (v < 0 || v <= left[z][i]) return;
     left[z][i] = v;
+    if (origin) origin[z][i] = from;
+    if (touched) touched[z] = 1;
     queue.push(z * N + i);
   };
   // Your own tile and the ones around it are measured from exactly where you stand, so sight
@@ -66,9 +66,10 @@ export function sight(px: number, py: number, alt: number, left = WORLD.levels.m
       const nx = sx + dx, ny = sy + dy, ni = ny * w + nx;
       if (!seeThrough(z, nx, ny)) continue;
       if (dx && dy && (!seeThrough(z, sx + dx, sy) || !seeThrough(z, sx, sy + dy))) continue;
-      let v = VISION_RADIUS - Math.hypot(px - (nx + 0.5), py - (ny + 0.5));
-      if (NARROW[z][ni] !== NARROW[z][sy * w + sx]) v = Math.min(v, GAP_PEEK);
-      relax(z, ni, v);
+      let v = SIGHT_REACH - Math.hypot(px - (nx + 0.5), py - (ny + 0.5));
+      let from = -1;
+      if (ROOM[z][ni] !== ROOM[z][sy * w + sx]) { from = mid(sy * w + sx, ni); v = past(from); }
+      relax(z, ni, v, from);
     }
   };
   let seeded = false;
@@ -83,13 +84,19 @@ export function sight(px: number, py: number, alt: number, left = WORLD.levels.m
   }
   while (queue.length) {
     const e = queue.pop()!, z = Math.floor(e / N), i = e % N, x = i % w, y = (i - x) / w;
-    const here = left[z][i], narrow = NARROW[z];
+    const here = left[z][i], room = ROOM[z], from = origin ? origin[z][i] : -1;
     // Stairs and ladders join two levels: sight passes along them from one level to the
     // other, glimpsing only a little way onto the far floor (like past a doorway).
-    if (isRamp(tileAt(z, x, y)) && z + 1 < LEVELS) relax(z + 1, i, Math.min(here, GAP_PEEK));
-    if (z > 0 && isRamp(tileAt(z - 1, x, y))) relax(z - 1, i, Math.min(here, GAP_PEEK));
+    if (isRamp(tileAt(z, x, y)) && z + 1 < LEVELS) {
+      const enters = from < 0 && ROOM[z + 1][i] !== room[i];
+      relax(z + 1, i, enters ? past(mid(i, i)) : here, enters ? mid(i, i) : from);
+    }
+    if (z > 0 && isRamp(tileAt(z - 1, x, y))) {
+      const enters = from < 0 && ROOM[z - 1][i] !== room[i];
+      relax(z - 1, i, enters ? past(mid(i, i)) : here, enters ? mid(i, i) : from);
+    }
     // Inside a shaft the light runs straight down (and up) its length, as far as it is open.
-    if (isShaft(z, x, y) && z > 0 && seeThrough(z - 1, x, y)) relax(z - 1, i, here);
+    if (isShaft(z, x, y) && z > 0 && seeThrough(z - 1, x, y)) relax(z - 1, i, here, from);
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dy) continue;
       const nx = x + dx, ny = y + dy, ni = ny * w + nx;
@@ -98,13 +105,14 @@ export function sight(px: number, py: number, alt: number, left = WORLD.levels.m
         // No squeezing diagonally between two corners.
         if (dx && dy && (!seeThrough(z, x + dx, y) || !seeThrough(z, x, y + dy))) continue;
         let next = here - (dx && dy ? Math.SQRT2 : 1);
-        if (narrow[ni] !== narrow[i]) next = Math.min(next, GAP_PEEK);
-        relax(z, ni, next);
+        let source = from;
+        if (from < 0 && room[ni] !== room[i]) { source = mid(i, ni); next = past(source); }
+        relax(z, ni, next, source);
       } else if (!dx !== !dy && isAir(z, nx, ny)) {
         // Over a ledge: down to the first thing below. If that's floor, sight lands on it and spreads on as usual.
         for (let k = z - 1; k >= 0; k--) {
           if (tileAt(k, nx, ny) === VOID && !isShaft(k, nx, ny)) continue;
-          if (seeThrough(k, nx, ny)) relax(k, ni, here - 1);
+          if (seeThrough(k, nx, ny)) relax(k, ni, here - 1, from);
           break;
         }
       }

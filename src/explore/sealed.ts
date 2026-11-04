@@ -6,6 +6,7 @@
  * (`SEALED_LEVELS`), as dense as `SEALED_DENSITY` says.
  */
 import { SEALED_COLORS, SEALED_DENSITY, SEALED_LEVELS } from "./tuning";
+import { splodgeAt, waxAt } from "./world";
 
 /** A well-mixed number from 0 to 1 for tile (x, y) of level z, different for each `salt`. */
 function roll(z: number, x: number, y: number, salt: number) {
@@ -15,8 +16,8 @@ function roll(z: number, x: number, y: number, salt: number) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
-/** Whether level z has sealed sleepers at all. */
-export const hasSealed = (z: number) => SEALED_LEVELS.includes(z);
+/** Whether tile (x, y) of level z can hold sealed sleepers: anywhere on the labyrinth's levels, and in anything that is filled with wax (a wall of wax, a floor all waxed over). */
+export const sealedAt = (z: number, x: number, y: number) => SEALED_LEVELS.includes(z) || waxAt(z, x, y) || splodgeAt(z, x, y) >= 250;
 
 /** A shape drawn as relief: a light rim a little off to one side, then the dark body over it. */
 function relief(g: CanvasRenderingContext2D, T: number, shape: () => void) {

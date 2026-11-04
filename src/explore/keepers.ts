@@ -12,8 +12,10 @@ interface Keeper {
 export const KEEPERS: Keeper[] = [
   // The start room's safe spot, by its north wall.
   { id: "start", at: { x: 16.5, y: 11.6, z: 0 } },
-  // The Nave's safe spot, a few tiles from the top of the ladder: the guide gives you the knot here.
-  { id: "floor1", at: { x: 30.5, y: 15.6, z: 7 } },
+  // The Nave's safe spot, in line with the top of the ladder and a few tiles north of it: the guide gives you the knot here.
+  { id: "floor1", at: { x: 27.5, y: 14.6, z: 7 } },
+  // The Gallery's west room, before the stairs up to the last floor.
+  { id: "floor2", at: { x: 15.5, y: 18.6, z: 10 } },
 ];
 
 
