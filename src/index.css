@@ -314,6 +314,7 @@ kbd {
 .menu-button.is-quiet:hover, .menu-button.is-quiet.is-focused { opacity: 0.9; }
 .pause-menu { display: grid; gap: 10px; width: min(280px, 80vw); }
 .volume-slider { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; padding: 6px 4px 0; font-size: 0.85rem; opacity: 0.85; }
+.menu-volume { width: min(280px, 80vw); }
 .volume-slider input { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
 /* ---------- Health bar: waking room, white Fatigue, black Death ----------

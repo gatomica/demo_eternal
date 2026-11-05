@@ -6,7 +6,7 @@ import { isMuted, play, prepare, setMuted } from "../audio/sfx";
 import { useKeys, wrapIndex } from "../ui/input";
 import { hasSave } from "../explore/save";
 import { useDev } from "../ui/dev";
-import { MenuButtons } from "../ui/Menu";
+import { MenuButtons, MusicSlider } from "../ui/Menu";
 
 export type Screen = "menu" | "test" | "explore" | "class" | "explore-new" | "explore-skip" | "viewer" | "map";
 
@@ -40,6 +40,7 @@ export function MainMenu({ onStart }: { onStart: (screen: Screen) => void }) {
       <nav className="menu-options" aria-label="Main menu">
         <MenuButtons options={MENU_OPTIONS.map(o => ({ label: o.label, run: () => onStart(o.screen) }))} focus={Math.min(focus, MENU_OPTIONS.length - 1)} onFocus={setFocus} />
       </nav>
+      <div className="menu-volume"><MusicSlider /></div>
       {/* Sounds start after a click or key press, so this is also where you can check them. */}
       <button className="hud-button" onClick={() => { setMuted(!muted); setMute(!muted); if (muted) play("clang"); }}>
         Sound: {muted ? "off" : "on"}

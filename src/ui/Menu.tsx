@@ -43,7 +43,7 @@ export function PauseMenu(props: { options: MenuOption[]; focus: number; onFocus
 }
 
 /** The music's volume, a slider under the pause menu's buttons. */
-function MusicSlider() {
+export function MusicSlider() {
   const [value, setValue] = useState(musicVolume);
   return (
     <label className="volume-slider">
