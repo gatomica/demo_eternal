@@ -3,6 +3,9 @@
  * the mouse), and the pause menu built from them.
  */
 
+import { useState } from "react";
+import { musicVolume, setMusicVolume } from "../audio/music";
+
 export interface MenuOption {
   label: string;
   run: () => void;
@@ -33,7 +36,24 @@ export function PauseMenu(props: { options: MenuOption[]; focus: number; onFocus
     <div className="result" role="dialog" aria-label="Paused">
       <nav className="pause-menu">
         <MenuButtons {...props} />
+        <MusicSlider />
       </nav>
     </div>
+  );
+}
+
+/** The music's volume, a slider under the pause menu's buttons. */
+function MusicSlider() {
+  const [value, setValue] = useState(musicVolume);
+  return (
+    <label className="volume-slider">
+      <span>Music</span>
+      <input
+        type="range" min={0} max={100} value={Math.round(value * 100)} aria-label="Music volume"
+        onChange={e => { const v = Number(e.target.value) / 100; setValue(v); setMusicVolume(v); }}
+        // (Its own keys are the arrows: the menu's keys must not also act.)
+        onKeyDown={e => { if (e.key.startsWith("Arrow")) e.stopPropagation(); }}
+      />
+    </label>
   );
 }

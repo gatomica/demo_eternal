@@ -32,6 +32,11 @@ export interface View {
   actors?: ActorDrawer;
   /** Whether anyone (or anything) stands on level z at all, cheaply. Without it, a view with actors is never taken for still. */
   actorsOn?: (z: number) => boolean;
+  /**
+   * The rows (tile rows, whole numbers) that anyone or anything stands in on level z, so the walls above can be drawn between the rows: whoever stands
+   * behind a wall (north of it) must be covered by it. Without it, everyone south of you is drawn over every wall above you.
+   */
+  actorRows?: (z: number) => number[];
   player?: ViewPlayer;
 }
 
@@ -64,3 +69,29 @@ export const WALL_TILES = WORLD.levels.map((_, z) => {
   return out;
 });
 
+
+/** Per level, the tile rows that hold any of those (a wall on a higher level can cover whoever stands behind it, so the actors are only cut apart at such rows). */
+const WALL_ROWS = WALL_TILES.map(tiles => {
+  const rows = new Uint8Array(WORLD.h);
+  for (const t of tiles) rows[t.y] = 1;
+  return rows;
+});
+
+/**
+ * Groups rows that actors stand in, for drawing them between the walls above level `base`: neighbouring rows stay together unless a wall of a level
+ * above lies in a row between them (then the walls must be drawn between the two). Each group is the first and last row of it.
+ */
+export function groupRows(rows: number[], base: number): [number, number][] {
+  const sorted = [...new Set(rows)].sort((a, b) => a - b);
+  const wallsBetween = (a: number, b: number) => {
+    for (let z = base + 1; z < WALL_ROWS.length; z++) for (let r = a; r <= b && r < WORLD.h; r++) if (WALL_ROWS[z][r]) return true;
+    return false;
+  };
+  const out: [number, number][] = [];
+  for (const r of sorted) {
+    const last = out[out.length - 1];
+    if (last && !wallsBetween(last[1] + 1, r)) last[1] = r;
+    else out.push([r, r]);
+  }
+  return out;
+}

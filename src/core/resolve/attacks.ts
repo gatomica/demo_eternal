@@ -7,7 +7,7 @@
  * Rest, a move.
  */
 import { kindOf } from "../bestiary";
-import { attackCost, attackDamage, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, resistance, sixteenths, spendEternity, WEAPONS } from "../rules";
+import { attackCost, attackDamage, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, ITEM_SHARE, resistance, sixteenths, spendEternity, WEAPONS } from "../rules";
 import type { Enemy, Fighter, Player, Rng, WeaponTier } from "../types";
 import { bodyOf } from "../body";
 import { waxOn } from "./statuses";
@@ -111,27 +111,39 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
     t.emit({ kind: "canceled", who: attacker.id, action: "attack", reason: "no target" });
     return;
   }
+  // (How your own blow swings, from your stance.)
+  const swing = attacker === p ? t.swing : undefined;
   const grit = attacker.hp <= 0 || (!attacker.staggered && attacker.fatigue >= attacker.hp);
   const weight = t.weightOf(attacker);
   const ranged = t.isRanged(attacker);
-  t.tire(attacker, costOf(attacker, weight));
+  const dmg = damageOf(attacker, weight);
+  let cost = costOf(attacker, weight);
+  // The Bronze Shortsword: attacking again right after an attack costs you less Fatigue, for Eternity.
+  if (attacker === p && p.weaponItem === "shortsword" && p.eternal && !t.s.config.dummy && p.lastAction === "attack" && isWeaponBlow(attacker, weight)) {
+    const saved = Math.min(cost, dmg * ITEM_SHARE);
+    if (saved > 0) {
+      cost -= saved;
+      const paid = spendEternity(p, saved * ETERNITY_PRICE.shortsword);
+      t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: "shortsword", damage: 0, fatigue: saved, ...paid });
+    }
+  }
+  t.tire(attacker, cost);
   // Melee closes in on the target; a ranged attacker stays where it is.
   if (attacker === p) t.pulls.set(target.id, p.id);
   else if (!ranged) t.pulls.set(attacker.id, attacker.id);
-  const dmg = damageOf(attacker, weight);
   // Whom it attacked with its weapon this turn, however the blow goes (for the Jagged Chisel, next turn; not a Hurl Wax).
   if (isWeaponBlow(attacker, weight)) t.attacked.set(attacker.id, target.id);
 
   if (t.isReviving(target)) {
     // The blow passes through someone reviving.
-    t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: 0, ranged, grit });
+    t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: 0, ranged, grit, swing });
     return;
   }
   if (t.isDodging(target, attacker)) {
     // Out of the way: no damage, only the effort of the dodge.
     const effort = dodgeFatigue(target, dmg);
     t.tire(target, effort);
-    t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: effort, ranged, grit });
+    t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: effort, ranged, grit, swing });
     return;
   }
   const blocking = t.isBlocking(target, attacker);
@@ -145,7 +157,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   loseHealth(t, target, through);
   const sentBack = blocking && ranged ? 0 : resisted;
   const self = attacker !== p ? (attacker as Enemy) : undefined;
-  t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, grit, fire: !!self?.intent.tags?.includes("fire") });
+  t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, grit, fire: !!self?.intent.tags?.includes("fire"), swing });
   eternalEffect(t, attacker, target, blocking ? "blocked" : "hit", ranged, weight, dmg);
   // A direct hit may do more, by the attacker's own rules (the Warden's flail waxes, or burns).
   const onHit = self && kindOf(self).onDirectHit;
@@ -182,10 +194,22 @@ function isWeaponBlow(attacker: Fighter, weight: WeaponTier) {
  */
 function eternalEffect(t: Turn, attacker: Fighter, target: Fighter, result: "hit" | "blocked", ranged: boolean, weight: WeaponTier, dmg: number) {
   if (!attacker.eternal || !isWeaponBlow(attacker, weight) || t.s.config.dummy) return;
-  const effect = ETERNAL_EFFECT[weight as keyof typeof ETERNAL_EFFECT];
-  const amount = dmg * ETERNAL_SHARE;
+  // Your class's weapon has an effect of its own (half the damage); every other weapon's follows its weight (a quarter).
+  const item = attacker === t.p ? t.p.weaponItem : undefined;
+  const effect = item ?? ETERNAL_EFFECT[weight as keyof typeof ETERNAL_EFFECT];
+  const amount = dmg * (item ? ITEM_SHARE : ETERNAL_SHARE);
   let damage = 0, fatigue = 0;
-  if (effect === "chisel" && result === "hit" && attacker.lastTarget === target.id) {
+  if (effect === "axe" && result === "hit" && t.p.lastAction === "rest") {
+    // The Barbarian's Axe: a direct hit after a turn of rest bites deeper.
+    damage = amount;
+    hurt(t, target);
+    loseHealth(t, target, amount);
+  } else if (effect === "sickle" && result === "hit" && t.wasStaggered.has(target.id)) {
+    // The Nomadic Sickle: a direct hit on a staggered enemy bites deeper.
+    damage = amount;
+    hurt(t, target);
+    loseHealth(t, target, amount);
+  } else if (effect === "chisel" && result === "hit" && attacker.lastTarget === target.id) {
     damage = amount;
     hurt(t, target);
     loseHealth(t, target, amount);

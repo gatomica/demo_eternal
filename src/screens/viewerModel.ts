@@ -9,7 +9,7 @@ import { describeAction } from "../core/intents";
 import type { ActionDef } from "../core/patterns";
 import { createCombat } from "../core/setup";
 import type { PoseName } from "../render/poses";
-import type { ArmorTier, CombatState, PlayerAction, WeaponTier } from "../core/types";
+import type { ArmorTier, CombatState, Line, PlayerAction, Stance, WeaponTier } from "../core/types";
 
 /** Kinds that are only a part of a multi-target enemy: the viewer shows the whole body instead. */
 const PART_KINDS = new Set<KindId>(Object.values(BODIES).flatMap(b => b.parts.map(p => p.kind)));
@@ -167,7 +167,7 @@ export function viewerActions(kindName: KindId, state: CombatState, stanceName: 
  * ============================================================ */
 
 /** The poses you can hold still, to look at them (the ones a player figure uses). */
-export const PLAYER_POSES: PoseName[] = ["idle", "attack", "strike", "punch", "block", "maneuver", "rest", "flinch", "kneel", "fallen"];
+export const PLAYER_POSES: PoseName[] = ["idle", "low", "low-left", "low-right", "attack", "strike", "swing-right-up", "swing-right", "swing-left-up", "swing-left", "punch", "block", "dodge-fwd", "dodge-back", "maneuver", "rest-in", "rest", "flinch", "kneel", "fallen"];
 
 /** What the dummy in front of you does while you act. */
 type FoeDoes = "strike" | "rest";
@@ -181,10 +181,17 @@ export interface PlayerScenario {
   foe: FoeDoes;
   /** You start staggered, so the turn is your forced recovery. */
   staggered?: boolean;
+  /** The stance you start in (default idle), and the line the dummy stands on (default front): an attack swings by both. */
+  stance?: Stance;
+  foeLine?: Line;
 }
 
 export const PLAYER_SCENARIOS: PlayerScenario[] = [
   { id: "attack", label: "Attack", action: { type: "attack", target: "foe" }, foe: "rest" },
+  { id: "attack-low", label: "Attack from lowered", action: { type: "attack", target: "foe" }, foe: "rest", stance: "low" },
+  { id: "attack-lead-left", label: "Attack, left leg leading", action: { type: "attack", target: "foe" }, foe: "rest", stance: "lead-left" },
+  { id: "attack-lead-right", label: "Attack, right leg leading", action: { type: "attack", target: "foe" }, foe: "rest", stance: "lead-right" },
+  { id: "attack-back", label: "Attack the back line", action: { type: "attack", target: "foe" }, foe: "rest", stance: "low", foeLine: "back" },
   { id: "block", label: "Block", action: { type: "block", target: "foe" }, foe: "strike" },
   { id: "dodge-fwd", label: "Dodge forward", action: { type: "maneuver", target: "foe" }, foe: "strike" },
   { id: "dodge-back", label: "Dodge back", action: { type: "maneuver", target: "self" }, foe: "strike" },
@@ -218,6 +225,7 @@ export function applyPlayerShow(s: CombatState, weapon: WeaponTier, armor: Armor
   v.player.weapon = weapon;
   v.player.armor = armor;
   v.player.staggered = !!scenario?.staggered;
+  v.player.stance = scenario?.stance ?? "idle";
   v.player.fatigue = scenario?.staggered ? v.player.hp : 0;
   const e = v.enemies[0];
   const kind = kindOf(e);
@@ -226,7 +234,7 @@ export function applyPlayerShow(s: CombatState, weapon: WeaponTier, armor: Armor
   e.reviving = false;
   e.hp = e.maxHP;
   e.fatigue = 0;
-  e.line = "front";
+  e.line = scenario?.foeLine ?? "front";
   const strike = scenario?.foe === "strike";
   const stance = strike ? "Charging" : "Struggling";
   const action = kind.pattern.actions.get(strike ? "weapon strike" : "despair");

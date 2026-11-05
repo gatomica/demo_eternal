@@ -2,22 +2,27 @@
  * CombatScreen.tsx — the combat screen: planning, then the turn played back step by step.
  */
 import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { PHASE_TWO, playMusic } from "../audio/music";
 import { play as playSfx, prepare as prepareSfx, sfxFor } from "../audio/sfx";
 import { ActionWheel, type Anchor } from "./ActionWheel";
 import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_SIDE, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
 import { LessonBox } from "./LessonBox";
+import { prepareWalk, speak } from "../audio/walk";
+import { useDev } from "../ui/dev";
 import { DETOUR, isWanted, type Beat, lessonAllows, lessonMet, typeDelay } from "./lesson";
 import { defaultSelection, moveSelection, rowsOf, sameSel, type Selection, type Wheel, type WheelOption } from "./selection";
 import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveTurn } from "../core/resolve";
 import { attackCost, restRecovery } from "../core/rules";
-import type { CombatState, Enemy, Opening, PlayerAction } from "../core/types";
+import type { CombatState, Enemy, Opening, PlayerAction, Stance, Swing } from "../core/types";
 import { behind, bodiesOfEnemies, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
 import type { Projectile } from "../render/effects";
 import { type BarValues, HealthBar, PlayerBars } from "../render/HealthBar";
 import { lookOf } from "../render/looks";
 import { actionPose, asPose, downPoseOf, flinchPoseOf, handOffOf, idlePoseOf, impactPoint, poseForIntent, type PoseName, strikePose, windUpPose } from "../render/poses";
 import { Scene, type SceneFigure } from "../render/Scene";
+import { StringFx, type StringBurst } from "../render/StringFx";
+import type { StringPop } from "../render/StringCounter";
 import { type Dir, useKeys, wrapIndex } from "../ui/input";
 import { type MenuOption, PauseMenu } from "../ui/Menu";
 import { IGNITE } from "../warden/scenes";
@@ -28,7 +33,7 @@ const barValues =(f: { hp: number; fatigue: number; death: number }): BarValues 
 /** How an enemy's look draws it differently (its kind's variant). */
 const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 
-export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, playerAction, playerHold, playerAngle, playerDead, light = true, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, figureAngle, playTarget }: {
+export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, playerAction, playerHold, playerAngle, playerDead, light = true, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, figureAngle, playTarget, string: carried = 0, eternalString = 0 }: {
   initial: CombatState;
   /** A scene to play before the first turn (it leaves the fight as `initial`). */
   opening?: Opening;
@@ -65,6 +70,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   lesson?: Beat[];
   /** The lesson opens with you waking in the dark, the guide's light approaching (a new game's start): nothing can be done until it has arrived. */
   wakeUp?: boolean;
+  /** Plays the fight's music (the model viewer's fights have none): the church's in the lesson, the Penitent Warden's in his fight, else the dungeon's. */
+  music?: boolean;
   /** The title when you win (fights off the map have their own). */
   wonText?: string;
   /** Called as a turn finishes playing, with the fight as it now stands. */
@@ -74,7 +81,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   onChangeLoadout?: () => void;
   onExit: () => void;
   /** Set for fights from the map: when it's over, carry on (won or not) instead of retrying. */
-  onDone?: (won: boolean, charges: number, eternity: number) => void;
+  onDone?: (won: boolean, charges: number, eternity: number, result: { earned: number; killedBy?: string }) => void;
+  /** The String you carry into the fight (the counter at the top right); a fight from Test combat starts with none. */
+  string?: number;
+  /** Your eternal String (death never takes it). */
+  eternalString?: number;
 }) {
   const [fightRaw, setFight] = useState(initial);
   const fight = useMemo(() => (override ? override(fightRaw) : fightRaw), [fightRaw, override]);
@@ -105,6 +116,21 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    * `beat` is where the lesson stands; `written` how much of its words are on screen. */
   const [beat, setBeat] = useState(0);
   const [typed, setTyped] = useState({ beat: 0, n: 0 });
+  // (The guide's voice is made ready as the fight opens, so its first words sound.)
+  useEffect(() => { prepareWalk(); }, []);
+  // String: lots on their way to you from the fallen, what has landed so far (the counter), the "+X" pops under it, who has paid, and the total earned.
+  const [bursts, setBursts] = useState<StringBurst[]>([]);
+  const [landed, setLanded] = useState(0);
+  const [pops, setPops] = useState<StringPop[]>([]);
+  const paid = useRef(new Set<string>());
+  const earned = useRef(0);
+  const burstIds = useRef(0);
+  /** A lot of String reaches you: the counter goes up, and "+X" pops up under it. */
+  const stringLanded = (b: StringBurst) => {
+    setLanded(n => n + b.amount);
+    setPops(p => [...p, { id: b.id, amount: b.amount }]);
+    window.setTimeout(() => setPops(p => p.filter(x => x.id !== b.id)), 1800);
+  };
   const written = typed.beat === beat ? typed.n : 0;
   const setWritten = (n: number | ((w: number) => number)) => setTyped(t => ({ beat, n: typeof n === "number" ? n : n(t.beat === beat ? t.n : 0) }));
   /** Waking in the dark, before the lesson: the guide walks in out of the black (see `WAKE`). */
@@ -537,6 +563,20 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   // The screen only changes at the scene's few moments (the dark falls, he stands, it flares), so
   // it only updates then; at the end, the step itself plays.
   const igniteStart = igniteState?.start;
+  // The music. The Warden's has two halves: the second starts, with no fade in and a moment of silence, as the phase-two scene begins.
+  const [phaseTwoMusic, setPhaseTwoMusic] = useState(() => initial.enemies.some(e => e.flags.phase2));
+  useEffect(() => { if (igniteStart !== undefined) setPhaseTwoMusic(true); }, [igniteStart]);
+  // (Back in phase one, as the model viewer can put him, the first half plays again.)
+  const inPhaseTwo = fight.enemies.some(e => e.flags.phase2);
+  useEffect(() => { if (!inPhaseTwo) setPhaseTwoMusic(false); }, [inPhaseTwo]);
+  const warden = fight.enemies.some(e => e.kind === "warden");
+  useEffect(() => {
+    if (!music) return;
+    if (lesson) playMusic("church");
+    else if (!warden) playMusic("dungeon");
+    else if (phaseTwoMusic) playMusic("wardenTwo", PHASE_TWO.fade, PHASE_TWO);
+    else playMusic("wardenOne");
+  }, [music, !!lesson, warden, phaseTwoMusic]);
   useEffect(() => {
     if (igniteStart === undefined) return;
     const since = performance.now() - igniteStart;
@@ -619,15 +659,25 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     setPlayback(null);
     setFight(f => ({ ...f, status: "won", enemies: f.enemies.map(e => ({ ...e, hp: 0, alive: false, fate: "fallen" as const })) }));
   };
+  // Giving up a fight from the map: you fall as if you had lost it (the lesson can't be lost).
+  const forfeit = () => { setPaused(false); onDone?.(false, fight.player.charges, fight.player.eternity, { earned: earned.current }); };
+  const dev = useDev();
+  // (The rest are the developer tools' (`ui/dev.ts`): on the map they only show while those are on. Test combat and the viewers are tools themselves.)
+  const tools = dev || !onDone;
   const pauseOptions: MenuOption[] = [
     { label: "Resume", run: () => setPaused(false) },
-    { label: "Restart fight", run: onRetry },
-    ...(onChangeLoadout ? [{ label: changeLabel ?? "Change loadout", run: onChangeLoadout }] : []),
-    { label: exitLabel ?? "Main menu", run: onExit },
+    ...(onDone && !lesson ? [{ label: "Reawaken", run: forfeit }] : []),
+    ...(tools ? [{ label: "Restart fight", run: onRetry }] : []),
+    ...(tools && onChangeLoadout ? [{ label: changeLabel ?? "Change loadout", run: onChangeLoadout }] : []),
+    ...(tools ? [{ label: exitLabel ?? "Main menu", run: onExit }] : []),
     // A shortcut for testing: win the fight on the spot (every enemy lies down).
-    ...(playing && playSignal === undefined ? [{ label: "Skip battle", quiet: true, run: skipBattle }] : []),
+    ...(tools && playing && playSignal === undefined ? [{ label: "Skip battle", quiet: true, run: skipBattle }] : []),
   ];
-  const finish = () => onDone?.(fight.status === "won", fight.player.charges, fight.player.eternity);
+  const finish = () => {
+    // Fallen for good: whose blow it was, so what you lost can be found on it.
+    const defeat = fight.status === "lost" ? fight.lastTurn.flatMap(st => st.events).find(ev => ev.kind === "defeat") : undefined;
+    onDone?.(fight.status === "won", fight.player.charges, fight.player.eternity, { earned: earned.current, killedBy: defeat?.kind === "defeat" ? defeat.by : undefined });
+  };
 
   /* ---------- the lesson's gate ---------- */
   const goalTarget: Selection | undefined = current?.goal
@@ -648,13 +698,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   useEffect(() => { setDetourN(0); }, [detour]);
   useEffect(() => {
     if (!detour || busy || paused || detourN >= DETOUR.say.length) return;
-    const t = window.setTimeout(() => setDetourN(n => n + 1), typeDelay(DETOUR.say, detourN));
+    const t = window.setTimeout(() => { speak(DETOUR.say[detourN], detourN); setDetourN(n => n + 1); }, typeDelay(DETOUR.say, detourN));
     return () => window.clearTimeout(t);
   }, [detour, detourN, busy, paused]);
   // Each beat's words are written out from the start, once the last turn has played out.
   useEffect(() => {
     if (!current || busy || paused || written >= current.say.length) return;
-    const t = window.setTimeout(() => setWritten(w => w + 1), typeDelay(current.say, written));
+    const t = window.setTimeout(() => { speak(current.say[written], written); setWritten(w => w + 1); }, typeDelay(current.say, written));
     return () => window.clearTimeout(t);
   }, [current, written, busy, paused]);
   // Undo the step the previous beat asked for (move away, close the wheel, light another option): its instruction is back.
@@ -821,13 +871,34 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const punching = p.weapon === "baseline";
   /** Your forced Rest (or revive) has landed this turn: you're back on your feet. */
   const playerBackUp = reached(stepOf("backUp", "player"));
+  // You hold your stance (see core/stance.ts) between turns, whatever you hover; each action takes you out of it and, as it ends, into the next.
+  const stancePose = (st: Stance): PoseName => (st === "low" ? "low" : st === "lead-left" ? "low-left" : st === "lead-right" ? "low-right" : "idle");
+  const startStance = playback ? playback.from.player.stance : fight.player.stance;
+  /** How your attack swings this turn (it is on your attack event), and the poses it winds up in and lands in. */
+  const swingOf: Swing = playback
+    ? (playback.steps.flatMap(st => st.events).find(ev => ev.kind === "attack" && ev.attacker === "player") as { swing?: Swing } | undefined)?.swing ?? "overhead"
+    : "overhead";
+  const swingPoses: Record<Swing, { windUp: PoseName; strike: PoseName }> = {
+    overhead: { windUp: "attack", strike: punching ? "punch" : "strike" },
+    // A sideways swing uses the two lowered stances and nothing else: a swing to the right winds up with the right leg leading and lands with the left,
+    // a swing to the left the other way round.
+    right: { windUp: "low-right", strike: "low-left" },
+    left: { windUp: "low-left", strike: "low-right" },
+  };
+  const forcedTurn = playback?.playerPose === "kneel";
   const playerPose: PoseName = !playback && walkOff?.player ? walkOff.player : playback
     ? playbackPose("player", p.staggered, {
-        // A forced turn kneels until the Rest (or revive) brings you back; then you're up.
-        telegraph: playerBackUp ? "idle" : playback.playerPose, down: "kneel", windUp: "attack", strike: punching ? "punch" : "strike", idle: "idle",
-        guard: playback.action?.type === "block" || playback.action?.type === "maneuver" ? { hold: "idle", react: playback.playerPose, keepAfterDodge: playback.action.type === "maneuver" } : undefined,
+        // A forced turn kneels until the Rest (or revive) brings you back; then you're up. A Rest breathes in from the start of the turn.
+        telegraph: forcedTurn ? (playerBackUp ? "idle" : "kneel") : playback.action?.type === "rest" ? "rest-in" : stancePose(startStance),
+        down: "kneel", windUp: swingPoses[swingOf].windUp, strike: swingPoses[swingOf].strike, idle: stancePose(fight.player.stance),
+        // A Rest's pose, as it goes through: the breath out.
+        rested: playback.action?.type === "rest" ? "rest" : undefined,
+        // A Block or a Maneuver holds your stance, and only takes its pose as the blow lands: blocking, or dodging forward (a Maneuver at an enemy) or back.
+        guard: playback.action?.type === "block" || playback.action?.type === "maneuver"
+          ? { hold: stancePose(startStance), react: playback.action.type === "block" ? "block" : playback.action.target === "self" ? "dodge-back" : "dodge-fwd", keepAfterDodge: playback.action.type === "maneuver" }
+          : undefined,
       })
-    : forced ? "kneel" : playerHold ?? (chosen?.action.type as PoseName | undefined) ?? "idle";
+    : forced ? "kneel" : playerHold ?? stancePose(fight.player.stance);
   // While you plan, an enemy only shows its stance; as the turn plays, its action shows.
   // After its attack, an enemy already settles into the stance it takes next (if it's still up).
   /** Still on its feet once the turn is over (not staggered, fallen or reviving). */
@@ -1112,6 +1183,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       eternalFlash: impact && step?.events.some(ev => ev.kind === "eternal" && ev.attacker === "player" && ev.spent > 0) ? stepKey : undefined,
       weapon: p.weapon,
       armor: p.armor,
+      weaponItem: p.weaponItem,
+      armorItem: p.armorItem,
+      headItem: p.headItem,
+      // A sideways swing's level arc, as the blow lands (the poses are the two stances, which have no trail of their own).
+      trail: playback && impact && swingOf !== "overhead" && !punching && strikeStep("player") === playback.index ? 235 : undefined,
       // Fallen, you drop and stay there, a little faded (instead of fading out).
       classes: youDead
         ? [...(fx.get("player")?.classes ?? []).filter(c => c !== "fx-fall"), ...(justFell("player") ? ["fx-die"] : []), "is-remains"]
@@ -1168,6 +1244,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         selected: !busy && sel.kind === "enemy" && sel.id === e.id && e.alive && !looksDead(e),
         disabled: busy || !playing || forced !== null || !e.alive || looksDead(e),
         label: `Select ${e.name}`,
+        // It holds String you lost.
+        holdsString: !!e.holds,
         onPick: () => { if (playSignal === undefined) openWheel({ kind: "enemy", id: e.id }); },
         // While you plan, the bar of whoever you're targeting, right below it (mid-turn it sits on the black strip instead).
         // (A part of a body, the Wax Blob: the bar always hangs below its middle part, whichever part is the target.)
@@ -1176,6 +1254,28 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           : undefined,
       })),
   ];
+
+  // Each enemy truly defeated (no revive left) sends its String to you as its remains lie down: its max health, and any String it held.
+  // (The waxed the Warden raises pay nothing a second time: each pays once. A body of several parts pays once.)
+  useEffect(() => {
+    if (lesson || fight.config.sparring || fight.config.dummy) return;
+    const fresh: StringBurst[] = [];
+    for (const e of view.enemies) {
+      const key = e.body ?? e.id;
+      if (paid.current.has(key) || !looksDead(e)) continue;
+      const parts = e.body ? view.enemies.filter(x => x.body === e.body) : [e];
+      if (!parts.every(looksDead)) continue;
+      const final = parts.map(x => fight.enemies.find(y => y.id === x.id) ?? x);
+      const fallen = final.some(x => x.fate === "fallen");
+      const held = final.reduce((sum, x) => sum + (x.holds ?? 0), 0);
+      if (!fallen && !(final.some(x => x.fate === "encased") && held > 0)) continue;
+      const amount = (fallen ? e.maxHP : 0) + held;
+      paid.current.add(key);
+      earned.current += amount;
+      fresh.push({ id: ++burstIds.current, from: parts.find(x => x.part === "mid")?.id ?? e.id, amount });
+    }
+    if (fresh.length) setBursts(b => [...b, ...fresh]);
+  });
 
   // A flame just put out (lit → out) leaves a puff of smoke.
   const armsSig = Object.entries(arms).join(";");
@@ -1210,7 +1310,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
 
       {/* Your health bar sits in a fixed slot, so nothing else on screen can push it around. The target's hangs right below it, in the scene. */}
-      <PlayerBars player={p} preview={previewCost} recover={previewRecover} />
+      <PlayerBars player={p} preview={previewCost} recover={previewRecover} string={carried + landed} stringPops={pops} eternalString={eternalString} />
+      <StringFx bursts={bursts} root={hudRef} onLand={stringLanded} />
 
       {/* While a turn plays, the target's bar sits bottom right, mirroring yours (in planning it hangs below the enemy). */}
       {busy && (

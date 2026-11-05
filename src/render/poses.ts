@@ -8,6 +8,7 @@ import type { Pt } from "./geom";
 import { GUIDE_POSES, type GuidePoseName } from "../guide/poses";
 import { flailOf, WARDEN_POSES, type WardenPoseName } from "../warden/skeleton";
 import { checkAdjust, type BoneAdjust } from "./rig";
+import { PLAYER_POSES_BUILT } from "./playerPoses";
 
 export interface Skeleton {
   head: Pt;
@@ -69,6 +70,24 @@ export interface Skeleton {
   crossing?: boolean;
   /** Something held: a wax lump or a small flame. */
   prop?: { kind: "wax" | "flame"; at: Pt };
+  /**
+   * A strike's swing trail: how many degrees it sweeps round the neck (clockwise on the page when positive), ending at the weapon's tip.
+   * Default 140 (the overhead swing).
+   */
+  sweep?: number;
+  /** A level swing: the trail is a flat crescent at the weapon's height, this much of a full circle's height (0 to 1). */
+  flat?: number;
+  /**
+   * The player's body as it is really turned (see body.ts): the shoulders and the pelvis each turned this many degrees (positive: to the right,
+   * so the left side leads). With it the player's right side is the near one, and the shoulders and hips are placed from these angles.
+   */
+  yaw?: { shoulders: number; hips: number };
+  /** The player standing facing the camera (the inventory, the class screen): shoulders and hips turned that way too. */
+  faceCamera?: boolean;
+  /** With `yaw`: the weapon's forearm and blade pass behind the torso (a weapon held across the chest). */
+  foreBehind?: boolean;
+  /** With `yaw`: which side of the torso an arm is drawn on, whatever the turn says (a weapon held out in front of the player is behind the torso, seen from behind). */
+  weaponLayer?: "behind" | "front"; freeLayer?: "behind" | "front";
 }
 
 /**
@@ -83,6 +102,8 @@ export interface Skeleton {
  */
 export type PoseName =
   | "idle" | "attack" | "block" | "maneuver" | "rest"
+  | "low" | "low-left" | "low-right" | "dodge-fwd" | "dodge-back" | "rest-in"
+  | "swing-right-up" | "swing-right" | "swing-left-up" | "swing-left" | "stand"
   | "ready" | "intimidating" | "cautious"
   | "strike" | "fallen" | "kneel" | "punch"
   | "t-pose" | "t-pose-b" | "w-t" | "w-t-b"
@@ -110,64 +131,19 @@ const bare = (hand: Pt) => ({ at: hand, angle: 0 });
  * to the front means toward the camera (lower on screen), to the back away from it (higher).
  */
 const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton> = {
-  idle: {
-    head: [50, 22], neck: [50, 33], hip: [50, 66],
-    weaponArm: { elbow: [58, 47], hand: [64, 58] },
-    freeArm: { elbow: [43, 48], hand: [41, 62] },
-    leadLeg: { knee: [56, 90], foot: [61, 114] },
-    rearLeg: { knee: [44, 90], foot: [39, 114] },
-    weapon: { at: [64, 58], angle: -55 },
+  // The player standing easy, at 3/4 to the camera (turned toward the screen's right, the way the inventory's slots and the class screen's preview are): for
+  // the inventory and the class screen. Arms and legs straight and relaxed, the weapon hanging; the right (near) side toward the camera, the left a little behind.
+  stand: {
+    head: [52, 21], neck: [50.5, 32.5], hip: [50, 65],
+    // Plumb: the shins and the forearms hang straight down, the knees and elbows bent outward, away from the body (the legs only a little apart).
+    weaponArm: { elbow: [41.9, 49], hand: [41.9, 63] },
+    freeArm: { elbow: [58.5, 49], hand: [58.5, 63] },
+    leadLeg: { knee: [54.2, 89.5], foot: [54.2, 114] },
+    rearLeg: { knee: [45.6, 89.5], foot: [45.6, 114] },
+    weapon: { at: [41.9, 63], angle: 84 }, faceCamera: true,
   },
-  // Weapon reared back over the head, free hand reaching forward, legs wide.
-  attack: {
-    head: [47, 24], neck: [48, 35], hip: [53, 66],
-    adjust: { freeFore: 0.76 },
-    weaponArm: { elbow: [39, 38], hand: [31, 27] },
-    freeArm: { elbow: [59, 45], hand: [67, 52] },
-    leadLeg: { knee: [64, 88], foot: [72, 114] },
-    rearLeg: { knee: [41, 89], foot: [32, 114] },
-    weapon: { at: [31, 27], angle: -115 },
-  },
-  // Crouched behind the weapon, held upright as a guard.
-  block: {
-    head: [47, 33], neck: [48, 44], hip: [48, 74],
-    adjust: { weaponUpper: 0.7, weaponFore: 0.75, freeFore: 0.74 },
-    weaponArm: { elbow: [60, 50], hand: [63, 40] },
-    freeArm: { elbow: [56, 55], hand: [61, 46] },
-    leadLeg: { knee: [59, 94], foot: [63, 114] },
-    rearLeg: { knee: [38, 94], foot: [34, 114] },
-    weapon: { at: [63, 44], angle: -88 },
-  },
-  // Low to the ground, ready to move.
-  maneuver: {
-    head: [63, 62], neck: [57, 68], hip: [38, 79],
-    adjust: { torso: 0.69, rearThigh: 0.79 },
-    weaponArm: { elbow: [66, 82], hand: [74, 92] },
-    freeArm: { elbow: [48, 84], hand: [45, 98] },
-    leadLeg: { knee: [51, 96], foot: [59, 114] },
-    rearLeg: { knee: [27, 95], foot: [16, 114] },
-    weapon: { at: [74, 92], angle: 15 },
-  },
-  // Clasping the head, looking up. The weapon lies on the ground.
-  rest: {
-    head: [50, 19], neck: [50, 30], hip: [50, 66],
-    adjust: { weaponUpper: 0.8 },
-    weaponArm: { elbow: [64, 30], hand: [56, 17] },
-    freeArm: { elbow: [36, 30], hand: [44, 17] },
-    leadLeg: { knee: [54, 91], foot: [57, 114] },
-    rearLeg: { knee: [46, 91], foot: [44, 114] },
-    weapon: { at: [58, 112], angle: -3 },
-  },
-  // Flinch: a Rest broken by a blow, recoiling back, arms up before the face.
-  flinch: {
-    head: [42, 22], neck: [45, 33], hip: [52, 67],
-    adjust: { weaponUpper: 0.74, freeUpper: 0.48 },
-    weaponArm: { elbow: [57, 40], hand: [52, 25] },
-    freeArm: { elbow: [36, 40], hand: [42, 26] },
-    leadLeg: { knee: [59, 91], foot: [63, 114] },
-    rearLeg: { knee: [47, 91], foot: [39, 114] },
-    weapon: { at: [52, 25], angle: -120 },
-  },
+  // The player's own, built from how the body is turned (see playerPoses.ts).
+  ...PLAYER_POSES_BUILT,
   // Ready: en garde. Knees bent, weight forward, the blade levelled at you, free arm back for balance.
   ready: {
     head: [53, 30], neck: [52, 41], hip: [47, 72],
@@ -198,15 +174,6 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
     rearLeg: { knee: [28, 97], foot: [21, 114] },
     weapon: { at: [62, 52], angle: -168 },
   },
-  // Follow-through: lunging forward, the weapon swept down and out past the body.
-  strike: {
-    head: [60, 30], neck: [57, 41], hip: [47, 70],
-    weaponArm: { elbow: [70, 50], hand: [81, 60] },
-    freeArm: { elbow: [43, 52], hand: [33, 60] },
-    leadLeg: { knee: [67, 92], foot: [79, 114] },
-    rearLeg: { knee: [36, 94], foot: [22, 114] },
-    weapon: { at: [81, 60], angle: 28 },
-  },
   // Down on the ground, propped on one arm, head lifted, trying to rise. The weapon has fallen away.
   fallen: {
     head: [70, 86], neck: [62, 94], hip: [38, 106],
@@ -226,16 +193,8 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
     leadLeg: { knee: [64, 92], foot: [64, 114] },
     rearLeg: { knee: [42, 112], foot: [26, 114] },
     weapon: { at: [68, 80], angle: 84 },
-  },
-  // A bare-handed blow: the free fist driven forward, the weapon held back and low.
-  punch: {
-    head: [59, 29], neck: [56, 40], hip: [48, 70],
-    adjust: { weaponFore: 0.77 },
-    weaponArm: { elbow: [44, 56], hand: [40, 66] },
-    freeArm: { elbow: [70, 42], hand: [84, 40] },
-    leadLeg: { knee: [66, 91], foot: [76, 114] },
-    rearLeg: { knee: [37, 93], foot: [24, 114] },
-    weapon: { at: [40, 66], angle: 120 },
+    // The body turned with its front toward the enemies (the shoulders and the pelvis a little round to the right), like the player's other poses.
+    yaw: { shoulders: 10, hips: 5 },
   },
 
   /* ---------- T-poses, for the Model viewer: the rig's proportions laid out ---------- */

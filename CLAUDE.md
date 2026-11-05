@@ -63,6 +63,10 @@ What is planned but not built is in `docs/todo.md`: read it when starting a task
   under `combat/lesson.ts` (`CombatScreen`'s `lesson` prop).
 - `audio/sfx.ts`: the combat's sounds, synthesized with Tone.js (no files; loaded on the first sound); `sfxFor(event)` maps a
   combat event to a sound and `CombatScreen` plays it as the step's blow lands. Muted from the main menu.
+- `audio/music.ts`: the music, mp3s in `public/music/` (Web Audio, not Tone; loop points per track, slow crossfades, muted with the sounds): `playMusic(track)`. Menu and class select (`App.tsx`) and the lesson: church; map: temple below level 6, quella from it up (`Exploration.tsx`); fights (`CombatScreen`'s `music` prop): dungeon, the Warden's two halves of `beast.mp3` (split at 1:25, phase one fades out as its scene begins, and phase two starts 2 seconds later with no fade in).
+- `audio/walk.ts`: the map's sounds (Tone.js, like `sfx.ts`): footsteps by floor (`explore/ground.ts`: `groundAt`) and by walker, enemies' cries (howl, moan, gurgle, slosh), wax drips, a landing, and the guide's speech blips (`speak`, used by the map's dialogue and the lesson's text box).
+- `render/StringCounter.tsx` (the String counter, the yarn ball, the aura round an enemy holding String) and `render/StringFx.tsx` (String flying from a fallen enemy to you). The rules are in `docs/enemies.md`; where it lives: `Journey.string`/`held`, `Enemy.holds`, the `defeat` event's `by`, `screens/Journeying.tsx`.
+- `ui/dev.ts`: the developer tools, kept secret (nothing on screen mentions them): **F4** turns them on and off. On: the main menu also lists Test combat, Exploration (skip tutorial), the Model viewer and the Map viewer, and a map fight's pause menu also offers Restart fight, Skip battle and Main menu (off, it offers only Resume and Reawaken, which forfeits the fight). F5 (light debug) works only with them on. Don't add text that announces them.
 - `index.css`: all styles.
 
 ### Adding an enemy

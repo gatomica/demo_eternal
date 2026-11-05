@@ -77,10 +77,12 @@ function setSealed(r: TurnReport, on: boolean) {
 
 export const WARDEN: EnemyKind = {
   name: "Penitent Warden",
-  maxHP: 30,
+  maxHP: 20,
   weapon: "normal",
   // (His flail: not one of the demo's weapons, so no eternal effect.)
   ownWeapon: true,
+  // He drops nothing, for now.
+  noDrops: true,
   armor: "normal",
   revives: 1,
   flags: { sealed: false, phase2: false, flaming: false, phase2Pending: false },

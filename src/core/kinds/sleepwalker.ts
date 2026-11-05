@@ -8,7 +8,7 @@ import { parsePattern } from "../patterns";
 
 export const SLEEPWALKER: EnemyKind = {
   name: "Depraved Sleepwalker",
-  maxHP: 20,
+  maxHP: 10,
   weapon: "light", // the Jagged Chisel (its effect and all)
   armor: "none", // none for now; some may wear armor later
   // On the map it gets up again when you rest by a keeper.
@@ -48,6 +48,9 @@ export const SLEEPWALKER: EnemyKind = {
  */
 const armedSleepwalker = (name: string, weapon: EnemyKind["weapon"], more: Partial<EnemyKind> = {}): EnemyKind => ({ ...SLEEPWALKER, name, weapon, ...more });
 
+/** The ones found on the map unless said otherwise: the same wretch, bare-handed (a baseline weapon, no effect, nothing to drop). */
+export const SLEEPWALKER_BARE = armedSleepwalker("Depraved Sleepwalker", "baseline");
+
 /** A select few carry a Brick Hammer. */
 export const SLEEPWALKER_HAMMER = armedSleepwalker("Hammer Sleepwalker", "heavy");
 
@@ -55,4 +58,4 @@ export const SLEEPWALKER_HAMMER = armedSleepwalker("Hammer Sleepwalker", "heavy"
  * The patrol wardens: sleepwalkers who walk the wardens' rounds, carrying the Waxed Torch and
  * wearing the Penitent Warden's pointed hood, though no wax beak and no cloak. Otherwise a sleepwalker.
  */
-export const PATROL_WARDEN = armedSleepwalker("Patrol Warden", "normal", { hood: true });
+export const PATROL_WARDEN = armedSleepwalker("Patrol Warden", "normal", { hood: true, maxHP: 12 });

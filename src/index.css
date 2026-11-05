@@ -70,6 +70,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* ---------- Exploration: one canvas, black beyond the walls ---------- */
 .explore { position: absolute; inset: 0; background: #000; }
 .explore-canvas { display: block; width: 100%; height: 100%; }
+/* The stir at the edge of your light, toward enemies hunting you out of sight. */
+.explore-disturb { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 /* Shown over the dark while the map near you is painted. */
 .explore-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text); font-size: 1rem; letter-spacing: 0.08em; pointer-events: none; }
 /* Standing by a keeper, and the line after resting. */
@@ -92,6 +94,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 .dialogue-speaker { color: var(--accent); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; }
 .dialogue-text { margin: 0; font-size: 1.05rem; line-height: 1.5; }
+.dialogue-unwritten { visibility: hidden; }
 .dialogue-next { justify-self: end; font-size: 0.85rem; opacity: 0.7; }
 /* Resting: dark, then light again. */
 .explore-sleep { position: absolute; inset: 0; z-index: 20; background: #000; pointer-events: none; animation: explore-sleep 2.4s ease-in-out forwards; }
@@ -124,6 +127,33 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .letterbox-bottom { bottom: 0; transform: translateY(100%); }
 .is-cinematic .letterbox { transform: none; }
 .bar-slot-player { top: var(--bar-inset-top); left: var(--bar-inset-x); justify-items: start; }
+/* Your String: top right, on the health bar's row, a ball of yarn to the right of the number. */
+.string-slot { position: absolute; z-index: 10; top: var(--bar-inset-top); right: var(--bar-inset-x); height: var(--bar-h); display: flex; align-items: center; justify-content: flex-end; gap: 22px; font-variant-numeric: tabular-nums; pointer-events: none; }
+.string-group { position: relative; display: flex; align-items: center; gap: 8px; }
+.string-group.is-eternal .string-count { color: #cfe6f7; text-shadow: 0 0 8px rgb(190 228 255 / 0.35); }
+.string-group.is-eternal .string-ball { filter: drop-shadow(0 0 5px rgb(190 228 255 / 0.5)); }
+.string-count { font-size: 1.2rem; letter-spacing: 0.03em; color: var(--text); text-shadow: 0 0 8px rgb(255 250 235 / 0.25); }
+.string-ball { width: 24px; height: 24px; filter: drop-shadow(0 0 5px rgb(255 250 235 / 0.35)); }
+/* "+X" under the counter as String lands: pops in, floats down a little, fades. */
+.string-pop { position: absolute; right: 32px; top: 100%; white-space: nowrap; margin-top: 6px; font-size: 1rem; color: #f4f1e6; text-shadow: 0 0 8px rgb(255 250 235 / 0.5); animation: string-pop 1.7s ease-out forwards; }
+/* "-X" under a counter: what Empower Self would spend of that String (the eternal String last). */
+.string-spend { position: absolute; right: 32px; top: 100%; white-space: nowrap; margin-top: 6px; font-size: 1rem; color: #e9b7a8; }
+@keyframes string-pop { 0% { opacity: 0; transform: translateY(-4px) scale(0.8); } 14% { opacity: 1; transform: translateY(2px) scale(1.12); } 70% { opacity: 1; } 100% { opacity: 0; transform: translateY(14px); } }
+/* String on its way from a fallen enemy to you: a canvas over the whole fight. */
+.string-fx { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 20; pointer-events: none; }
+/* Empower Self: a row per stat, its change and what it costs. */
+.empower-row { display: flex; align-items: center; gap: 20px; min-width: 300px; padding: 9px 14px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.empower-row.is-focused { border-color: var(--line); background: rgb(255 255 255 / 0.06); }
+.empower-row.is-short { opacity: 0.45; }
+.empower-name { width: 84px; }
+.empower-value { font-variant-numeric: tabular-nums; }
+.empower-cost { display: flex; align-items: center; gap: 6px; margin-left: auto; font-variant-numeric: tabular-nums; }
+.empower-cost .string-ball { width: 20px; height: 20px; }
+/* The faint string round an enemy that holds some of what you lost. */
+.string-aura { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; opacity: 0.55; }
+.string-aura path { fill: none; stroke: #f2efe4; stroke-width: 0.9; stroke-linecap: round; stroke-dasharray: 5 3; animation: string-flow 3.2s linear infinite; filter: drop-shadow(0 0 2px rgb(255 250 235 / 0.7)); }
+@keyframes string-flow { to { stroke-dashoffset: -32; } }
+@media (prefers-reduced-motion: reduce) { .string-aura path { animation: none; } }
 /* While a turn plays, the target's bar sits bottom right: the same distance from the bottom edge as yours is from the top, and from the right as yours is from the left. */
 .bar-slot-target { bottom: var(--bar-inset-top); right: var(--bar-inset-x); justify-items: end; text-align: right; }
 .hud-target { display: grid; gap: 6px; justify-items: end; width: 100%; }
@@ -283,6 +313,8 @@ kbd {
 .menu-button.is-quiet { opacity: 0.4; font-size: 0.75rem; padding: 4px 10px; justify-self: center; width: auto; }
 .menu-button.is-quiet:hover, .menu-button.is-quiet.is-focused { opacity: 0.9; }
 .pause-menu { display: grid; gap: 10px; width: min(280px, 80vw); }
+.volume-slider { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; padding: 6px 4px 0; font-size: 0.85rem; opacity: 0.85; }
+.volume-slider input { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
 /* ---------- Health bar: waking room, white Fatigue, black Death ----------
  * Two stacked layers: the current values cut instantly on top, and a lighter trail
@@ -371,6 +403,11 @@ kbd {
 .fig-ribcage { fill: var(--ink); }
 .fig-rib { fill: var(--ink-shade); }
 /* Debugging, dev server only: the right arm and leg (see StickFigure.tsx). */
+/* The starting classes' armor covers the arms and legs too: the Soldier's white cloth (leather over the hands and feet is drawn on top), the Hunter's black, the Nomad's pale gray cloth. Round ends all. */
+.armor-bronze-chestplate .fig-limb { stroke: #efece4; stroke-width: 5.4; }
+.armor-garb .fig-limb { stroke: #17171c; stroke-width: 5.2; }
+.armor-robe .fig-limb { stroke: #d6d4de; stroke-width: 4.8; }
+.fig-limb.dbg-red { stroke: #e0201b !important; }
 .fig-limb.dbg-far { stroke: #3b82f6; }
 .fig-limb.dbg-lead { stroke: #ef4444; }
 .fig-limb.dbg-both { stroke: #a855f7; }
@@ -657,7 +694,7 @@ kbd {
   transition: border-color 0.12s;
 }
 .inv-place-icon { flex: none; width: 60px; height: 60px; display: block; }
-.inv-place-icon .gear-sprite.is-weapon, .inv-place-icon .gear-sprite.is-armor { width: 100%; height: 100%; }
+.inv-place-icon .gear-sprite.is-weapon, .inv-place-icon .gear-sprite.is-armor, .inv-place-icon .gear-sprite.is-head { width: 100%; height: 100%; }
 /* The place under the cursor stretches sideways to show its name and its weight. */
 .inv-place.is-open { padding-right: 16px; }
 .inv-place-text { display: grid; gap: 2px; white-space: nowrap; animation: inv-open 0.14s ease-out both; }
@@ -765,3 +802,18 @@ kbd {
 .lesson-next { position: absolute; right: 14px; bottom: 10px; animation: lesson-blink 1s ease-in-out infinite alternate; }
 @keyframes lesson-blink { from { opacity: 0.35; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .lesson-next { animation: none; } .lesson-hint { transition: none; } }
+
+/* ---------- Choosing a class at a new game: only the characters, looking at the camera ---------- */
+.class-screen { gap: 0; justify-content: center; }
+.class-lineup { display: flex; gap: clamp(8px, 3vw, 48px); justify-content: center; align-items: flex-end; width: min(1100px, 96vw); }
+.class-figure { display: grid; justify-items: center; gap: 8px; width: min(22vw, 250px); padding: 0; border: 0; background: none; color: var(--text); font: inherit; cursor: pointer; opacity: 0.45; filter: saturate(0.7); transition: opacity 0.15s, transform 0.15s, filter 0.15s; }
+.class-figure .figure { transform: scaleX(-1); }
+.class-figure.is-focused { opacity: 1; filter: none; transform: translateY(-8px) scale(1.05); }
+.class-name { font-size: 1.15rem; letter-spacing: 0.05em; }
+/* The preview's middle: what the slot under the cursor holds, between the character and the slots. */
+.class-middle { position: absolute; left: 50%; top: 50%; transform: translate(-52%, -50%); width: min(340px, 27vw); z-index: 2; }
+/* The question before a new game begins: a box over the preview. */
+.class-confirm { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 30; display: grid; gap: 16px; justify-items: center; padding: 22px 28px; border: 1px solid var(--line); border-radius: 10px; background: rgb(21 20 27 / 0.96); color: var(--text); box-shadow: 0 0 40px rgb(0 0 0 / 0.6); }
+.class-confirm p { margin: 0; font-size: 1.05rem; }
+.class-confirm-buttons { display: flex; gap: 12px; }
+.class-confirm-buttons .menu-button { width: auto; min-width: 110px; }

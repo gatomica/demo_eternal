@@ -9,10 +9,11 @@
  */
 import { ENEMY_KINDS } from "../core/bestiary";
 import { ARMOR, WEAPONS } from "../core/rules";
-import type { ArmorTier, EnemySetup, WeaponTier } from "../core/types";
+import { type ItemId, ITEMS } from "./items";
+import type { ArmorItem, ArmorTier, EnemySetup, HeadItem, WeaponItem, WeaponTier } from "../core/types";
 import type { Loadout } from "../combat/fight";
 
-export type Slot = "weapon" | "armor";
+export type Slot = "weapon" | "armor" | "head";
 
 /** What a piece of gear is. */
 export type GearSpec = {
@@ -21,6 +22,8 @@ export type GearSpec = {
   read?: boolean;
   /** What it is called, if not by its tier. */
   name?: string;
+  /** One of the starting classes' own pieces (its name, lore, look and effect come from `ITEMS`). */
+  item?: ItemId;
   /**
    * The remains it dropped from (a key of the journey's corpses). Remains that stay for good (enemies that don't
    * get up again) get it back when you reawaken, if you no longer have it.
@@ -29,6 +32,7 @@ export type GearSpec = {
 } & (
   | { slot: "weapon"; tier: WeaponTier }
   | { slot: "armor"; tier: ArmorTier }
+  | { slot: "head"; tier: ArmorTier }
 );
 
 /** One piece of gear you own. */
@@ -40,6 +44,7 @@ export interface Inventory {
   /** The ids of what you wear in each slot (null: bare hands, no armor). */
   weapon: string | null;
   armor: string | null;
+  head?: string | null;
   /** For making ids. */
   made: number;
   /** Which eternal piece sits in each slot's eternal place (the first one you own, if unset). */
@@ -55,11 +60,11 @@ export const SIDES: Side[] = ["eternal", "normal"];
 /** Nothing at all: where you begin. */
 export const EMPTY_INVENTORY: Inventory = { bag: [], weapon: null, armor: null, made: 0 };
 
-export const SLOTS: Slot[] = ["weapon", "armor"];
+export const SLOTS: Slot[] = ["weapon", "armor", "head"];
 
 /** "Waxed Torch", "Heavy armor"...; an eternal piece whose dreams are unread: "Memory of Brick Hammer". */
 export function gearName(g: GearSpec): string {
-  const base = g.name ?? (g.slot === "weapon" ? WEAPONS[g.tier].name : `${ARMOR[g.tier].label} armor`);
+  const base = g.name ?? (g.item ? ITEMS[g.item].name : g.slot === "weapon" ? WEAPONS[g.tier].name : `${ARMOR[g.tier].label} armor`);
   return g.eternal && !g.read ? `Memory of ${base}` : base;
 }
 
@@ -77,11 +82,15 @@ function wornIn(inv: Inventory, slot: Slot): Gear | undefined {
 
 /** What you wear, as a fight wants it: bare hands and no armor in an empty slot. */
 export function loadoutOf(inv: Inventory): Loadout {
-  const weapon = wornIn(inv, "weapon"), armor = wornIn(inv, "armor");
+  const weapon = wornIn(inv, "weapon"), armor = wornIn(inv, "armor"), head = wornIn(inv, "head");
   return {
     weapon: weapon?.slot === "weapon" ? weapon.tier : "baseline",
     armor: armor?.slot === "armor" ? armor.tier : "none",
     eternal: weapon?.slot === "weapon" && !!weapon.eternal && !!weapon.read,
+    weaponItem: weapon?.slot === "weapon" ? (weapon.item as WeaponItem | undefined) : undefined,
+    armorItem: armor?.slot === "armor" ? (armor.item as ArmorItem | undefined) : undefined,
+    head: head?.slot === "head" ? head.tier : "none",
+    headItem: head?.slot === "head" ? (head.item as HeadItem | undefined) : undefined,
   };
 }
 
@@ -94,8 +103,11 @@ export function dropsOf(enemies: EnemySetup[]): GearSpec[] {
   return enemies.flatMap(setup => {
     const kind = ENEMY_KINDS[setup.kind];
     const out: GearSpec[] = [];
+    if (kind.noDrops) return out;
     if (kind.weapon !== "baseline") out.push({ slot: "weapon", tier: kind.weapon });
     if (kind.armor !== "none") out.push({ slot: "armor", tier: kind.armor });
+    // A patrol warden's pointed hood comes off with it.
+    if (kind.hood) out.push({ slot: "head", tier: "light", item: "wardenhood" });
     return out;
   });
 }
@@ -131,7 +143,7 @@ export function receive(inv: Inventory, found: GearSpec[], wear = true): { inven
 export function lose(inv: Inventory): Inventory {
   const bag = inv.bag.filter(g => g.eternal);
   const keeps = (id: string | null) => (bag.some(g => g.id === id) ? id : null);
-  return { ...inv, bag, weapon: keeps(inv.weapon), armor: keeps(inv.armor) };
+  return { ...inv, bag, weapon: keeps(inv.weapon), armor: keeps(inv.armor), head: keeps(inv.head ?? null) };
 }
 
 /** What lies in a slot's eternal or normal place, or null if it is empty (the eternal place: the read piece set there at a safe spot). */

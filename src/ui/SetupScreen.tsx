@@ -1,30 +1,27 @@
 /**
- * SetupScreen.tsx — picking a loadout (and, for Test combat, an encounter).
+ * SetupScreen.tsx — picking the gear to wear (and, for Test combat, an encounter): the starting classes' own weapons, armors and head gear (all
+ * eternal), or nothing in a slot.
  */
 import { useState } from "react";
-import type { Loadout } from "../combat/fight";
 import { ENCOUNTERS } from "../core/encounters";
-import { ARMOR, WEAPONS } from "../core/rules";
-import type { ArmorTier, WeaponTier } from "../core/types";
+import type { ArmorItem, HeadItem, WeaponItem } from "../core/types";
+import { ITEMS, loadoutOfItems, type Picks } from "../explore/items";
 import { StickFigure } from "../render/StickFigure";
 import { cycle, useKeys } from "./input";
 import { Picker } from "./Picker";
 
-/** Weapons to pick from. "None" (baseline) fights bare-handed: weak, fast attacks and a Block with no bonus. */
-const TIER_KEYS = Object.keys(WEAPONS) as WeaponTier[];
+const WEAPON_KEYS = ["none", "shortsword", "axe", "sickle"] as const;
+const ARMOR_KEYS = ["none", "bronze-chestplate", "garb", "robe"] as const;
+const HEAD_KEYS = ["none", "helm", "hood", "mask", "wardenhood"] as const;
 
-/** Each weight by the weapon it is in this demo. */
-const TIER_LABELS: Record<string, string> = { ...Object.fromEntries(TIER_KEYS.map(k => [k, WEAPONS[k].name])), baseline: "None" };
-
-const ETERNAL_LABELS: Record<string, string> = { no: "Ordinary", yes: "Eternal" };
-
-const ARMOR_KEYS = Object.keys(ARMOR) as ArmorTier[];
+/** What each choice is called. */
+const LABELS: Record<string, string> = { none: "None", ...Object.fromEntries(Object.entries(ITEMS).map(([id, i]) => [id, i.name])) };
 
 /**
  * W/S pick a row, A/D change the value in it, E starts, Q goes back to the menu. The encounter
- * row only shows when there's an encounter to pick (exploration has none).
+ * row only shows when there's an encounter to pick.
  */
-export function SetupScreen<S extends Loadout & { encounterId?: string }>({ setup, onChange, onStart, onExit, title = "Test combat", startLabel = "Fight" }: {
+export function SetupScreen<S extends Picks & { encounterId?: string }>({ setup, onChange, onStart, onExit, title = "Test combat", startLabel = "Fight" }: {
   setup: S;
   onChange: (s: S) => void;
   onStart: () => void;
@@ -34,11 +31,11 @@ export function SetupScreen<S extends Loadout & { encounterId?: string }>({ setu
 }) {
   // Each row: its choices, which one is picked, and how picking one changes the setup.
   type Row = { label: string; key: string; options: readonly string[]; labels?: Record<string, string>; value: string; set: (v: string) => S };
+  const orNone = <T,>(v: string): T | undefined => (v === "none" ? undefined : (v as T));
   const allRows: Row[] = [
-    { label: "Weapon", key: "weapon", options: TIER_KEYS, labels: TIER_LABELS, value: setup.weapon, set: v => ({ ...setup, weapon: v as WeaponTier }) },
-    // An eternal weapon carries its eternal effect, paid with Eternity (bare hands are never eternal).
-    { label: "Kind", key: "eternal", options: ["no", "yes"], labels: ETERNAL_LABELS, value: setup.eternal ? "yes" : "no", set: v => ({ ...setup, eternal: v === "yes" }) },
-    { label: "Armor", key: "armor", options: ARMOR_KEYS, value: setup.armor, set: v => ({ ...setup, armor: v as ArmorTier }) },
+    { label: "Weapon", key: "weapon", options: WEAPON_KEYS, labels: LABELS, value: setup.weaponItem ?? "none", set: v => ({ ...setup, weaponItem: orNone<WeaponItem>(v) }) },
+    { label: "Armor", key: "armor", options: ARMOR_KEYS, labels: LABELS, value: setup.armorItem ?? "none", set: v => ({ ...setup, armorItem: orNone<ArmorItem>(v) }) },
+    { label: "Head", key: "head", options: HEAD_KEYS, labels: LABELS, value: setup.headItem ?? "none", set: v => ({ ...setup, headItem: orNone<HeadItem>(v) }) },
     {
       label: "Encounter",
       key: "encounterId",
@@ -61,6 +58,7 @@ export function SetupScreen<S extends Loadout & { encounterId?: string }>({ setu
     else if (key === "back" || key === "pause") onExit();
   });
 
+  const look = loadoutOfItems(setup);
   return (
     <main className="setup">
       <h2 className="setup-title">{title}</h2>
@@ -76,7 +74,7 @@ export function SetupScreen<S extends Loadout & { encounterId?: string }>({ setu
         />
       ))}
       <div className="setup-figure">
-        <StickFigure view="back" pose="idle" weapon={setup.weapon} armor={setup.armor} title="Your loadout" />
+        <StickFigure view="back" pose="idle" weapon={look.weapon} armor={look.armor} weaponItem={look.weaponItem} armorItem={look.armorItem} headItem={look.headItem} title="Your loadout" />
       </div>
       <p className="hint">
         <kbd>W</kbd><kbd>S</kbd> choose · <kbd>A</kbd><kbd>D</kbd> change · <kbd>E</kbd> {startLabel.toLowerCase()} · <kbd>Q</kbd> menu

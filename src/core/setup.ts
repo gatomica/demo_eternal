@@ -26,6 +26,11 @@ export function createCombat(
 ): CombatState {
   const p: Player = {
     id: "player",
+    stance: "idle",
+    ...(player.weaponItem && player.weapon !== "baseline" ? { weaponItem: player.weaponItem } : {}),
+    ...(player.armorItem && player.armor !== "none" ? { armorItem: player.armorItem } : {}),
+    ...(player.head && player.head !== "none" ? { head: player.head } : {}),
+    ...(player.headItem && player.head && player.head !== "none" ? { headItem: player.headItem } : {}),
     name: player.name ?? "You",
     maxHP: player.maxHP,
     hp: player.maxHP,
@@ -38,8 +43,8 @@ export function createCombat(
     charges: player.charges,
     reviving: false,
     eternal: !!player.eternal && player.weapon !== "baseline",
-    maxEternity: player.maxHP,
-    eternity: Math.min(player.maxHP, player.eternity ?? player.maxHP),
+    maxEternity: player.maxEternity ?? player.maxHP,
+    eternity: Math.min(player.maxEternity ?? player.maxHP, player.eternity ?? player.maxEternity ?? player.maxHP),
   };
 
   const letters = "ABCDEFGHIJ";
@@ -70,6 +75,7 @@ export function createCombat(
       revives: kind.revives ?? 0,
       reviving: false,
       ...(setup.body ? { body: setup.body, part: setup.part } : {}),
+      ...(setup.holds ? { holds: setup.holds } : {}),
     };
   });
 

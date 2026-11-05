@@ -3,6 +3,7 @@
  * spent, each enemy remembers how its action went, and each kind's own rules have their say.
  */
 import { kindOf } from "../bestiary";
+import { stanceAfter } from "../stance";
 import { backOnFeet, fatigueGone } from "./statuses";
 import type { Turn } from "./turn";
 
@@ -44,12 +45,20 @@ export function endTurn(t: Turn) {
     } else {
       p.hp = 0;
       s.status = "lost";
-      t.emit({ kind: "defeat", who: p.id });
+      t.emit({ kind: "defeat", who: p.id, by: t.hurtBy });
     }
   } else if (!p.staggered && p.fatigue >= p.hp) {
     p.staggered = true;
     t.emit({ kind: "stagger", who: p.id });
   }
+  // Your stance for the next turn: what you did decides it, unless it did not happen (you were put down first), and a stagger or a fall
+  // leaves you in idle (to kneel, and to stand up again).
+  if (p.hp <= 0 || p.staggered || p.reviving || t.reviving) { p.stance = "idle"; p.lastAction = undefined; }
+  else if (t.act && !t.out.has(p.id) && !t.cancelled.has(p.id)) {
+    p.stance = stanceAfter(t.act, t.swing);
+    // (A Rest broken by a blow was no rest.)
+    p.lastAction = t.act.type === "rest" && t.interrupted.has(p.id) ? undefined : t.act.type;
+  } else p.lastAction = undefined;
   // Wax only lasts while there's Fatigue to hold it (a staggered fighter keeps it until it recovers).
   for (const f of fighters) if ((f.waxed || f.coated) && f.fatigue <= 0 && !f.staggered) fatigueGone(f);
   // Whom each one attacked this turn (the Jagged Chisel bites deeper into them if it attacks them again next turn).

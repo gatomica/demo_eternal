@@ -14,6 +14,8 @@ export interface TutorialState {
   done: boolean;
   /** The guide has shown you how to unwind memories (its menu opened on them, the first time you brought one). */
   unwound?: boolean;
+  /** The guide has opened Empower Self for you, the first time you had String enough for it (from then on it is just one of its options). */
+  empowered?: boolean;
 }
 
 export const NEW_TUTORIAL: TutorialState = { beaten: false, done: false };

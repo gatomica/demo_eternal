@@ -16,7 +16,7 @@
 import { BAKE_ALL_SHARE, BAKE_BUDGET, bake, bakedBytes, estimateBytes, isBaked } from "../bake";
 import { CHUNK_PAD_TOP, ladderLook, makeCanvas } from "../paint";
 import { HIDE_WALLS_ABOVE } from "../plans";
-import { BOUNDARIES, PAGES, PAGES_OF_LEVEL, type Page, ROOM_LABELS } from "../regions";
+import { PAGES, PAGES_OF_LEVEL, type Page } from "../regions";
 import { type Line, LINES, lampCenter, ROOM, ROOM_COUNT, ROOM_TILES } from "../rooms";
 
 /** How bright a wall is, at this fade (1 on your level, 0 where it is gone): full for most of the way, then twilight on the last level before it is gone, like the floors there, so the cut to darkness is not sudden. */
@@ -43,7 +43,8 @@ const groupsOf = (room: number) => {
 import { seeThrough } from "../sight";
 import { BODY_ABOVE_FEET, COLORS, GHOST_ALPHA, MAX_PIXEL_RATIO, RENDER_SCALE, RISE, SIGHT_EASE, TILES_TALL, VISION_FADE, VISION_RADIUS, lampRadius, wallFade } from "../tuning";
 import type { Light, MapRenderer, View } from "../view";
-import { WALL_TILES } from "../view";
+import { groupRows, WALL_TILES } from "../view";
+import { isDev } from "../../ui/dev";
 import { blackAt, openAboveAt, ladderTiles, rampishAt, barsAt, CLIFFS, DIAG, diagSide, FLOOR, isHoleDiag, levelOf, LEVELS, onShaftOpen, roomLimit, shaftDiagSide, slopeAt, STAIRS, tileAt, WALL, wallFacesInto, WORLD } from "../world";
 import { createStatsOverlay } from "./stats";
 
@@ -360,6 +361,7 @@ export function createGLRenderer(canvas: HTMLCanvasElement): MapRenderer | null 
   // Where actors are drawn (with an ordinary 2D context) before going up as a picture.
   const actors = makeCanvas(1, 1);
   const ag = actors.getContext("2d")!;
+  const ghostCanvas = document.createElement("canvas"), ghostCtx = ghostCanvas.getContext("2d")!;
   const fit = () => {
     const dpr = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO) * RENDER_SCALE;
     const width = Math.round(canvas.clientWidth * dpr), height = Math.round(canvas.clientHeight * dpr);
@@ -416,13 +418,10 @@ export function createGLRenderer(canvas: HTMLCanvasElement): MapRenderer | null 
   fit();
   window.addEventListener("resize", fit);
 
-  // --- The debugging view of the rooms: F4 (or ?regions=1) draws red lines where one region meets another, with their numbers. ---
-  let showRegions = new URLSearchParams(window.location.search).get("regions") === "1";
-  // F5 tints what is drawn by where its light comes from (green: your room, blue: a doorway's, magenta: let in by the room rule but dark).
+  // F5 (with the developer tools on, F4) tints what is drawn by where its light comes from (green: your room, blue: a doorway's, magenta: let in by the room rule but dark).
   let lightDebug = false;
   const onKey = (e: KeyboardEvent) => {
-    if (e.code === "F4") { e.preventDefault(); showRegions = !showRegions; }
-    else if (e.code === "F5") { e.preventDefault(); lightDebug = !lightDebug; }
+    if (e.code === "F5" && isDev()) { e.preventDefault(); lightDebug = !lightDebug; }
   };
   window.addEventListener("keydown", onKey);
 
@@ -434,7 +433,6 @@ export function createGLRenderer(canvas: HTMLCanvasElement): MapRenderer | null 
     `draw calls ${stat.calls}   pages ${stat.pages}   picture uploads ${stat.uploads}\n` +
     `baked ${(bakedBytes() / 1048576).toFixed(0)} MB   on the card ${(texBytes / 1048576).toFixed(0)} MB
 ` +
-    `F4: red lines between rooms, room numbers (${showRegions ? "on" : "off"})\n` +
     `F5: tint by where the light comes from, and tile facts (${lightDebug ? "on" : "off"})   rooms rule: ${byRooms ? "yes" : "no (flood of sight)"}`);
 
   // --- One page, one quad. ------------------------------------------------------------------------
@@ -813,31 +811,6 @@ export function createGLRenderer(canvas: HTMLCanvasElement): MapRenderer | null 
       if (o[k + 3] > 0.5) lamp = Math.min(1, Math.max(0, (o[k + 2] - Math.hypot(x - o[k], y - o[k + 1])) / VISION_FADE));
       return round * (lamp + (1 - lamp) * roomReveal[z][i]);
     };
-    /** The debugging view: red lines on level z's floor where one region meets the next, and each region's number. */
-    const seams = (z: number) => {
-      ag.globalCompositeOperation = "source-over";
-      ag.globalAlpha = 1;
-      ag.clearRect(0, 0, W, H);
-      const top = levelY(z), b = BOUNDARIES[z];
-      ag.lineWidth = Math.max(2, Math.round(T / 24));
-      // Red where two rooms meet. (Where two regions of one room do is no line: it serves no purpose.)
-      for (const room of [1]) {
-        ag.strokeStyle = "#ff2020";
-        ag.beginPath();
-        for (let i = 0; i < b.length; i += 5) {
-          if (b[i + 4] !== room) continue;
-          const x0 = ox + b[i] * T, y0 = top + b[i + 1] * T, x1 = ox + b[i + 2] * T, y1 = top + b[i + 3] * T;
-          if (x1 < 0 || x0 > W || y1 < 0 || y0 > H) continue;
-          ag.moveTo(x0, y0);
-          ag.lineTo(x1, y1);
-        }
-        ag.stroke();
-      }
-      ag.fillStyle = "#ff6060";
-      ag.font = `bold ${Math.round(T / 4)}px monospace`;
-      for (const l of ROOM_LABELS[z]) ag.fillText(String(l.room), ox + l.x * T + 4, top + l.y * T + T / 4 + 2);
-      picture(1);
-    };
     /** The debugging view of the light (F5): on each tile of level z near you, its room number, whether the room rule lets it in (+) or not (-), whether a doorway lights it (L) or not (.), and how bright it is just now (0-9). */
     const tileFacts = (z: number) => {
       ag.globalCompositeOperation = "source-over";
@@ -882,14 +855,26 @@ export function createGLRenderer(canvas: HTMLCanvasElement): MapRenderer | null 
     // then whoever is south of you. With nobody standing there, every level goes down whole.
     const base = cur;
     const split = v.player ? Math.max(0, Math.min(MH, Math.floor(v.y))) : MH;
+    // With the rows anyone stands in known, the walls above you are drawn between those rows (see `wallsAbove`), so each wall covers whoever stands behind it.
+    const banded = !!(v.player && v.actorRows);
+    /** The walls (and cliffs) of the levels above, rows `from` up to `to`. */
+    const wallsAbove = (from: number, to: number) => {
+      if (to <= from) return;
+      for (let z = base + 1; z < LEVELS; z++) {
+        const fade = wallFade(Math.abs(z - cur));
+        if (fade <= 0) continue;
+        if (anyWalls[z]) { batch(1, z, wallTone(fade)); layer(z, "walls", from, to); }
+        if (anyCliffs[z]) { batch(2, z, fade); layer(z, "cliffs", from, to); }
+      }
+    };
     for (let z = 0; z < LEVELS; z++) {
       const end = z <= base ? MH : split;
       const fade = wallFade(Math.abs(z - cur));
-      if (fade > 0 && anyWalls[z]) { batch(1, z, wallTone(fade)); layer(z, "walls", 0, end); }
+      const above = banded && z > base; // (drawn between the rows instead)
+      if (fade > 0 && anyWalls[z] && !above) { batch(1, z, wallTone(fade)); layer(z, "walls", 0, end); }
       // (Even a level with nothing in sight: its floor still covers what's under it, black.)
       if (z <= base && fade > 0) { batch(0, z, z < cur ? fade : 1); layer(z, "surface", 0, MH); }
-      if (fade > 0 && anyCliffs[z]) { batch(2, z, fade); layer(z, "cliffs", 0, end); }
-      if (showRegions && z <= base && fade > 0) seams(z);
+      if (fade > 0 && anyCliffs[z] && !above) { batch(2, z, fade); layer(z, "cliffs", 0, end); }
       if (lightDebug && z === base) tileFacts(z);
       if (z < base && inSight[z] && fade > 0) actorsOnly(z, () => true);
     }
@@ -943,7 +928,17 @@ export function createGLRenderer(canvas: HTMLCanvasElement): MapRenderer | null 
       ag.globalAlpha = 1;
       if (any) picture(1);
     };
-    if (inSight[base]) actorsOnly(base, y => !v.player || y <= v.y);
+    if (banded) {
+      // Whoever is north of you (or in your row, behind you), row by row: the walls up to the row after theirs are under them, the rest of the walls (the ones in front of them) over.
+      let from = 0;
+      for (const [r0, r1] of groupRows(v.actorRows!(base).filter(r => r <= split), base)) {
+        const to = Math.min(r1 + 1, split);
+        wallsAbove(from, to);
+        from = Math.max(from, to);
+        if (inSight[base]) actorsOnly(base, y => y <= v.y && Math.floor(y) >= r0 && Math.floor(y) <= r1);
+      }
+      wallsAbove(from, split);
+    } else if (inSight[base]) actorsOnly(base, y => !v.player || y <= v.y);
     if (!v.player) ladderOverlay();
     if (v.player) {
       ag.globalCompositeOperation = "source-over";
@@ -951,19 +946,30 @@ export function createGLRenderer(canvas: HTMLCanvasElement): MapRenderer | null 
       ag.clearRect(0, 0, W, H);
       v.player.draw(ag, fx, fy - BODY_ABOVE_FEET * T, T, true);
       picture(1);
-      for (let z = base + 1; z < LEVELS; z++) {
-        const fade = wallFade(Math.abs(z - cur));
-        if (fade <= 0) continue;
-        if (anyWalls[z]) { batch(1, z, wallTone(fade)); layer(z, "walls", split, MH); }
-        if (anyCliffs[z]) { batch(2, z, fade); layer(z, "cliffs", split, MH); }
+      if (v.actorRows) {
+        // Whoever is south of you, row by row: the walls in front of each of them (further south) are drawn over them, and the rows behind are under them.
+        let from = split;
+        for (const [r0, r1] of groupRows(v.actorRows(base).filter(r => r >= split), base)) {
+          wallsAbove(from, r1 + 1);
+          if (inSight[base]) actorsOnly(base, y => y > v.y && Math.floor(y) >= r0 && Math.floor(y) <= r1);
+          from = r1 + 1;
+        }
+        wallsAbove(from, MH);
+        ladderOverlay();
+      } else {
+        wallsAbove(split, MH);
+        ladderOverlay();
+        if (inSight[base]) actorsOnly(base, y => y > v.y);
       }
-      ladderOverlay();
-      if (inSight[base]) actorsOnly(base, y => y > v.y);
       // Your outline shows faintly through anything covering you (it vanishes into you otherwise).
       ag.globalCompositeOperation = "source-over";
       ag.clearRect(0, 0, W, H);
+      // (Drawn whole and opaque on a scratch canvas first, then laid over faintly in one go: drawn faint piece by piece, the gear would show the body through it.)
+      if (ghostCanvas.width !== W || ghostCanvas.height !== H) { ghostCanvas.width = W; ghostCanvas.height = H; }
+      ghostCtx.clearRect(0, 0, W, H);
+      v.player.draw(ghostCtx, fx, fy - BODY_ABOVE_FEET * T, T, false);
       ag.globalAlpha = GHOST_ALPHA;
-      v.player.draw(ag, fx, fy - BODY_ABOVE_FEET * T, T, false);
+      ag.drawImage(ghostCanvas, 0, 0);
       ag.globalAlpha = 1;
       picture(1);
     }

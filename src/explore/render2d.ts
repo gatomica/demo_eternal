@@ -18,7 +18,7 @@
  */
 import { CHUNK, CHUNK_PAD_TOP, makeCanvas, paintChunk } from "./paint";
 import { createStatsOverlay } from "./gl/stats";
-import { type Light, type MapRenderer, type View, WALL_TILES } from "./view";
+import { groupRows, type Light, type MapRenderer, type View, WALL_TILES } from "./view";
 import { lampX, lampY, seeThrough } from "./sight";
 import { BODY_ABOVE_FEET, COLORS, GAP_PEEK, GHOST_ALPHA, MAX_PIXEL_RATIO, RENDER_SCALE, RISE, SIGHT_EASE, TILES_TALL, VISION_FADE, VISION_RADIUS, wallFade } from "./tuning";
 import { CLIFFS, DIAG, diagSide, FLOOR, isHoleDiag, isRamp, levelOf, LEVELS, onShaftOpen, roomLimit, shaftDiagSide, slopeAt, STAIRS, tileAt, WALL, wallFacesInto, WORLD } from "./world";
@@ -34,6 +34,7 @@ type Chunk = ({ [K in Kind]: HTMLCanvasElement } & { used: number; shade: { cur:
 /** The map drawn on a plain 2D canvas, tile by tile. The fallback for the WebGL renderer (see `render.ts`). */
 export function createMapRenderer2D(canvas: HTMLCanvasElement): MapRenderer {
   const g = canvas.getContext("2d", { alpha: false })!;
+  const ghostCanvas = document.createElement("canvas"), ghostCtx = ghostCanvas.getContext("2d")!;
   const { w: MW, h: MH } = WORLD;
   let T = 0;
   // Painted chunks of each level, as they've come into view (dropped once long out of view).
@@ -546,6 +547,17 @@ export function createMapRenderer2D(canvas: HTMLCanvasElement): MapRenderer {
     sg.globalAlpha = 1;
     const base = cur;
     const split = v.player ? Math.max(0, Math.min(MH, Math.floor(v.y))) : MH;
+    // With the rows anyone stands in known, the walls above you are drawn between those rows, so each wall covers whoever stands behind it.
+    const banded = !!(v.player && v.actorRows);
+    /** The walls (and cliffs) of the levels above, rows `from` up to `to`. */
+    const wallsAbove = (from: number, to: number) => {
+      if (to <= from) return;
+      for (let z = base + 1; z < LEVELS; z++) {
+        const fade = wallFade(Math.abs(z - cur));
+        drawOps(wallOps[z], z, "walls", fade > 0 ? 1 : 0, from, to);
+        drawOps(cliffOps[z], z, "cliffs", fade, from, to);
+      }
+    };
     // The levels up to yours only change when sight does, or when someone moves on a level below
     // you: otherwise their finished picture from last frame goes down in one piece.
     let lowerLive = false;
@@ -559,11 +571,12 @@ export function createMapRenderer2D(canvas: HTMLCanvasElement): MapRenderer {
     for (let z = first; z < LEVELS; z++) {
       const end = z <= base ? MH : split;
       const fade = wallFade(Math.abs(z - cur));
+      const above = banded && z > base; // (drawn between the rows instead)
       // (Walls keep one tone however far their level is from yours; only how far they show depends on it.)
-      drawOps(wallOps[z], z, "walls", fade > 0 ? 1 : 0, 0, end);
+      if (!above) drawOps(wallOps[z], z, "walls", fade > 0 ? 1 : 0, 0, end);
       // (Even a level with nothing in sight: its floor still covers what's under it.)
       if (z <= base && fade > 0 && (drawn || inSight[z])) floors(z);
-      drawOps(cliffOps[z], z, "cliffs", fade, 0, end);
+      if (!above) drawOps(cliffOps[z], z, "cliffs", fade, 0, end);
       if (z < base && inSight[z] && fade > 0) actorsOnly(z, () => true);
       if (z === base) {
         // A still frame with nobody moving below: keep this picture for the next.
@@ -575,15 +588,32 @@ export function createMapRenderer2D(canvas: HTMLCanvasElement): MapRenderer {
         } else baseKey = "";
       }
     }
-    if (inSight[base]) actorsOnly(base, y => !v.player || y <= v.y);
+    if (banded) {
+      // Whoever is north of you (or in your row), row by row: the walls in front of them are drawn over them.
+      let from = 0;
+      for (const [r0, r1] of groupRows(v.actorRows!(base).filter(r => r <= split), base)) {
+        const to = Math.min(r1 + 1, split);
+        wallsAbove(from, to);
+        from = Math.max(from, to);
+        if (inSight[base]) actorsOnly(base, y => y <= v.y && Math.floor(y) >= r0 && Math.floor(y) <= r1);
+      }
+      wallsAbove(from, split);
+    } else if (inSight[base]) actorsOnly(base, y => !v.player || y <= v.y);
     if (v.player) {
       v.player.draw(sg, fx, fy - BODY_ABOVE_FEET * T, T, true);
-      for (let z = base + 1; z < LEVELS; z++) {
-        const fade = wallFade(Math.abs(z - cur));
-        drawOps(wallOps[z], z, "walls", fade > 0 ? 1 : 0, split, MH);
-        drawOps(cliffOps[z], z, "cliffs", fade, split, MH);
+      if (v.actorRows) {
+        // Whoever is south of you, row by row: the walls in front of each of them are drawn over them.
+        let from = split;
+        for (const [r0, r1] of groupRows(v.actorRows(base).filter(r => r >= split), base)) {
+          wallsAbove(from, r1 + 1);
+          if (inSight[base]) actorsOnly(base, y => y > v.y && Math.floor(y) >= r0 && Math.floor(y) <= r1);
+          from = r1 + 1;
+        }
+        wallsAbove(from, MH);
+      } else {
+        wallsAbove(split, MH);
+        if (inSight[base]) actorsOnly(base, y => y > v.y);
       }
-      if (inSight[base]) actorsOnly(base, y => y > v.y);
     }
     evictChunks();
 
@@ -592,8 +622,12 @@ export function createMapRenderer2D(canvas: HTMLCanvasElement): MapRenderer {
     g.drawImage(scene, 0, 0);
     // Your outline shows faintly through anything covering you (it vanishes into you otherwise).
     if (v.player) {
+      // (Drawn whole and opaque on a scratch canvas first, then laid over faintly in one go, so the gear doesn't show the body through it.)
+      if (ghostCanvas.width !== W || ghostCanvas.height !== H) { ghostCanvas.width = W; ghostCanvas.height = H; }
+      ghostCtx.clearRect(0, 0, W, H);
+      v.player.draw(ghostCtx, fx, fy - BODY_ABOVE_FEET * T, T, false);
       g.globalAlpha = GHOST_ALPHA;
-      v.player.draw(g, fx, fy - BODY_ABOVE_FEET * T, T, false);
+      g.drawImage(ghostCanvas, 0, 0);
       g.globalAlpha = 1;
     }
   };

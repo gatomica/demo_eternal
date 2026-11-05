@@ -111,7 +111,30 @@ export interface Fighter {
   staggered: boolean;
 }
 
+/**
+ * The starting classes' own weapons and armor (see `explore/items.ts`). Each is of a tier like any other gear (its weight, damage, resistance),
+ * but has a name, lore, sprite and (a weapon) effect of its own.
+ */
+export type WeaponItem = "shortsword" | "axe" | "sickle";
+export type ArmorItem = "bronze-chestplate" | "garb" | "robe";
+/** Head gear (a slot of its own): its tiers are armor's, and count for half as much. */
+export type HeadItem = "helm" | "hood" | "mask" | "wardenhood";
+
+/** What you hold between turns (see `stance.ts`), and how an attack of yours swings. */
+export type Stance = "idle" | "low" | "lead-left" | "lead-right";
+export type Swing = "overhead" | "left" | "right";
+
 export interface Player extends Fighter {
+  /** Your stance: it lasts from turn to turn, and decides how your next attack swings. */
+  stance: Stance;
+  /** The class's own weapon and armor you carry, if any (their effect, their look). */
+  weaponItem?: WeaponItem;
+  armorItem?: ArmorItem;
+  /** Your head gear's tier ("none": none) and, if it is one of the classes' own, which. */
+  head?: ArmorTier;
+  headItem?: HeadItem;
+  /** What you did last turn, if it happened (a Rest broken by a blow does not count): the Shortsword and the Axe look back at it. */
+  lastAction?: ActionType;
   /** Healing item charges, spent automatically to revive. */
   charges: number;
   /** True during the protected turn after falling with a charge left. Health stays at 0 until the
@@ -151,6 +174,8 @@ export interface Enemy extends Fighter {
   body?: string;
   /** Which part of its body it is, as seen from the player's side. */
   part?: "left" | "mid" | "right";
+  /** String it is holding: what you lost when it killed you, half of it, paid to you when it is defeated. */
+  holds?: number;
 }
 
 export interface CombatConfig {
@@ -186,6 +211,8 @@ export type CombatEvent =
       grit: boolean;
       /** A fire attack (`#fire`): where it hits, flames lick the target. */
       fire?: boolean;
+      /** Your attack: how it swings (from your stance). */
+      swing?: Swing;
     }
   | { kind: "canceled"; who: string; action: ActionType; reason: "staggered" | "fallen" | "no target" }
   | { kind: "stagger"; who: string }
@@ -196,7 +223,8 @@ export type CombatEvent =
   /** `cause` is who moved them: the enemy itself, or the player (by Maneuvering or pulling it in with an attack). */
   | { kind: "move"; who: string; from: Line; to: Line; cause: string }
   | { kind: "revive"; who: string }
-  | { kind: "defeat"; who: string }
+  /** You fell for good; `by`: whose blow it was (an enemy id), if any. */
+  | { kind: "defeat"; who: string; by?: string }
   /** A flaming flail's direct hit: `who` takes `damage` more. */
   | { kind: "burned"; who: string; damage: number }
   /** A lit ally is staggered at the end of the turn and dies: its flame streams into the hand of `by`, who is not staggered himself. */
@@ -217,7 +245,7 @@ export type CombatEvent =
    * An eternal weapon's effect, as its blow lands: `damage` more Health lost or `fatigue` more Fatigue for
    * `target`. `spent`: the attacker's Eternity it cost; `death`: what Eternity couldn't pay, become Death on it.
    */
-  | { kind: "eternal"; attacker: string; target: string; effect: "chisel" | "torch" | "hammer"; damage: number; fatigue: number; spent: number; death: number }
+  | { kind: "eternal"; attacker: string; target: string; effect: "chisel" | "torch" | "hammer" | "shortsword" | "axe" | "sickle"; damage: number; fatigue: number; spent: number; death: number }
   /** A boss enters a new phase. */
   | { kind: "phase"; who: string; phase: number };
 
@@ -297,6 +325,14 @@ export interface PlayerSetup {
   eternal?: boolean;
   /** Your Eternity as the fight starts (default: full). */
   eternity?: number;
+  /** The most Eternity you can hold (default: as much as your max health). */
+  maxEternity?: number;
+  /** The class's own weapon and armor you carry (see `WeaponItem`). */
+  weaponItem?: WeaponItem;
+  armorItem?: ArmorItem;
+  /** Your head gear (see `Player.head`). */
+  head?: ArmorTier;
+  headItem?: HeadItem;
 }
 
 export interface EnemySetup {
@@ -313,6 +349,8 @@ export interface EnemySetup {
   /** A part of a multi-target enemy: its body's id, shared by the parts, and which part it is. */
   body?: string;
   part?: "left" | "mid" | "right";
+  /** String it holds (see `Enemy.holds`). */
+  holds?: number;
 }
 
 /** A scene played before the first turn: the fight as it stood before it, and its steps. */

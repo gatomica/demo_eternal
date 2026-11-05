@@ -25,14 +25,17 @@ export const WEAPONS: Record<WeaponTier, { weight: number; cost: number; damage:
  * whoever it also attacked last turn (two attacks running on the same one). Torch: more Fatigue on a direct hit, and the target looks
  * waxed (looks only). Hammer: more Fatigue to a target that Blocks it.
  */
-export type EternalEffect = "chisel" | "torch" | "hammer";
+export type EternalEffect = "chisel" | "torch" | "hammer" | "shortsword" | "axe" | "sickle";
 export const ETERNAL_EFFECT: Record<Tier, EternalEffect> = { light: "chisel", normal: "torch", heavy: "hammer" };
 
 /** Every eternal effect is this share of the weapon's damage. */
 export const ETERNAL_SHARE = 1 / 4;
 
+/** The effects of the starting classes' weapons are this share of the weapon's damage (the others' are `ETERNAL_SHARE`). */
+export const ITEM_SHARE = 1 / 2;
+
 /** Eternity paid per point of an effect: Fatigue costs its amount, damage (or healing) twice it. */
-export const ETERNITY_PRICE: Record<EternalEffect, number> = { chisel: 2, torch: 1, hammer: 1 };
+export const ETERNITY_PRICE: Record<EternalEffect, number> = { chisel: 2, torch: 1, hammer: 1, shortsword: 1, axe: 2, sickle: 2 };
 
 /**
  * resist: Resistance, in sixteenths ("none" is the base 1/16).
@@ -45,6 +48,12 @@ export const ARMOR: Record<ArmorTier, { resist: number; weight: number; label: s
   normal: { resist: 3, weight: 3, label: "Normal" },
   heavy:  { resist: 4, weight: 4, label: "Heavy" },
 };
+
+/** Head gear counts for this share of the resistance and weight of armor of its tier (and adds to what the body armor gives). */
+export const HEAD_SHARE = 1 / 2;
+const headOf = (f: Fighter): ArmorTier => (f as Partial<Player>).head ?? "none";
+const headResist = (f: Fighter) => (headOf(f) === "none" ? 0 : ARMOR[headOf(f)].resist * HEAD_SHARE);
+const headWeight = (f: Fighter) => (headOf(f) === "none" ? 0 : ARMOR[headOf(f)].weight * HEAD_SHARE);
 
 /** Even unburdened, a dodge turns half the damage dodged into Fatigue (8 sixteenths). */
 export const DODGE_BASE = 8;
@@ -85,14 +94,14 @@ export function restRecovery(f: Fighter): { fatigue: number; heal: number } {
  * adds the baseline and its weight's bonus.
  */
 export const resistance = (f: Fighter, blockWeight: WeaponTier | null) =>
-  Math.min(1, (ARMOR[f.armor].resist + (blockWeight ? BLOCK_BASE + WEAPONS[blockWeight].block : 0)) / 16);
+  Math.min(1, (ARMOR[f.armor].resist + headResist(f) + (blockWeight ? BLOCK_BASE + WEAPONS[blockWeight].block : 0)) / 16);
 
 /**
  * The Fatigue a dodged attack of this much damage turns into: (base + armor weight + weapon
  * weight) sixteenths of it. True weight: what you carry, whatever the action. A Maneuver that
  * dodges nothing costs nothing at all.
  */
-export const dodgeWeight = (f: Fighter) => DODGE_BASE + ARMOR[f.armor].weight + WEAPONS[f.weapon].weight;
+export const dodgeWeight = (f: Fighter) => DODGE_BASE + ARMOR[f.armor].weight + headWeight(f) + WEAPONS[f.weapon].weight;
 
 export const dodgeFatigue = (f: Fighter, damage: number) => (damage * dodgeWeight(f)) / 16;
 

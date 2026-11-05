@@ -1,9 +1,10 @@
 /**
  * Scene.tsx — the battlefield: the floor and every figure, seen through the camera.
  */
+import { StringAura } from "./StringCounter";
 import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Variant } from "../core/bestiary";
-import type { ArmorTier, Side, WeaponTier } from "../core/types";
+import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
 import { type Cam, darkAt, ease, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, focusOf, NEAR, planningCamera, project, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec } from "./camera";
 import { ClangBurst, FlameHit, HaloBurst, ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
 import type { Pt } from "./geom";
@@ -31,6 +32,12 @@ export interface SceneFigure {
   pose: PoseName;
   weapon: WeaponTier;
   armor: ArmorTier;
+  /** The starting classes' own weapon and armor you carry (their look). */
+  weaponItem?: WeaponItem;
+  armorItem?: ArmorItem;
+  headItem?: HeadItem;
+  /** A level swing's trail (see StickFigure). */
+  trail?: number;
   variant?: Variant;
   /** It carries a flame of its own (a waxed): phase two's scene draws on it. */
   flame?: boolean;
@@ -71,6 +78,8 @@ export interface SceneFigure {
   onPick: () => void;
   /** Drawn right below it (its health bar, while it is the target). */
   bar?: ReactNode;
+  /** It holds String you lost: a faint string spirals round it. */
+  holdsString?: boolean;
 }
 
 /** Enemies seen from the front face left, so their drawing is mirrored (unless seen straight on). */
@@ -307,10 +316,11 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
           }}
         >
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
+            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}
           </div>
+          {f.holdsString && !f.dead && <StringAura />}
         </button>
         {f.bar && (
           <div className="figure-bar" style={{ left: box.x + box.w / 2, top: box.y + (box.h * 114) / 120 + 8 }}>

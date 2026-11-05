@@ -75,7 +75,7 @@ const GRIP_GAP = 4;
  * An arm of two bones that puts its hand on `target` (as far as it reaches), bending its elbow to the same
  * side as `hint`, where the pose authored it.
  */
-function reachArm(shoulder: Pt, target: Pt, upper: number, fore: number, hint: Pt): { elbow: Pt; hand: Pt } {
+export function reachArm(shoulder: Pt, target: Pt, upper: number, fore: number, hint: Pt): { elbow: Pt; hand: Pt } {
   const dx = target[0] - shoulder[0];
   const dy = target[1] - shoulder[1];
   const d = Math.hypot(dx, dy) || 1;

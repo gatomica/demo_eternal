@@ -25,8 +25,13 @@ let muted = (() => {
 
 export const isMuted = () => muted;
 
+/** Who else must hear of a change of the mute (the music). */
+const muteListeners: (() => void)[] = [];
+export const onMute = (fn: () => void) => { muteListeners.push(fn); };
+
 export function setMuted(v: boolean) {
   muted = v;
+  muteListeners.forEach(fn => fn());
   if (tone) tone.getDestination().mute = v;
   try {
     localStorage.setItem(MUTE_KEY, v ? "1" : "0");
@@ -35,13 +40,31 @@ export function setMuted(v: boolean) {
   }
 }
 
+let master: InstanceType<ToneModule["Gain"]> | null = null;
+
+/**
+ * Where every sound goes, the combat's and the map's: a soft echo, then a low-pass that muffles all of it (the echoes too), as if
+ * heard through stone, then the speakers.
+ */
+export function masterBus(Tone: ToneModule) {
+  if (!master) {
+    const input = new Tone.Gain(0.85);
+    const echo = new Tone.FeedbackDelay({ delayTime: 0.24, feedback: 0.34, wet: 0.3 });
+    const muffle = new Tone.Filter({ type: "lowpass", frequency: 2300, Q: 0.4 });
+    input.chain(echo, muffle, Tone.getDestination());
+    master = input;
+  }
+  return master;
+}
+
 /** Every synth, built once on first use and wired to the speakers. */
 function build(Tone: ToneModule) {
-  const out = Tone.getDestination();
-  out.volume.value = -4;
-  out.mute = muted;
-  // A little room around the metal and the breath.
-  const room = new Tone.Reverb({ decay: 1.6, wet: 0.22 }).connect(out);
+  const dest = Tone.getDestination();
+  dest.volume.value = -4;
+  dest.mute = muted;
+  const out = masterBus(Tone);
+  // A good deal of room around the metal and the breath.
+  const room = new Tone.Reverb({ decay: 2.2, wet: 0.36 }).connect(out);
 
   // Hit: a dull thump (a drum dropping in pitch) with a short slap of noise.
   const thump = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 4, envelope: { attack: 0.001, decay: 0.22, sustain: 0, release: 0.05 } }).connect(out);
@@ -355,7 +378,7 @@ export function sfxFor(ev: CombatEvent): { name: Sfx; delay: number } | null {
       return { name: "flame", delay: 0.05 };
     case "eternal":
       // An eternal weapon's effect, just after its blow: the chisel bites again, the torch's wax hisses, the hammer rings on the guard.
-      return { name: ev.effect === "chisel" ? "hit" : ev.effect === "torch" ? "flame" : "clang", delay: 0.08 };
+      return { name: ev.effect === "chisel" || ev.effect === "axe" || ev.effect === "sickle" ? "hit" : ev.effect === "torch" ? "flame" : ev.effect === "shortsword" ? "dodge" : "clang", delay: 0.08 };
     case "splash":
       return { name: "flame", delay: 0 };
     case "rest":

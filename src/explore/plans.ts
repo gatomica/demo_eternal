@@ -1049,6 +1049,7 @@ export const WAX_SPLODGES: [number, number, number, number, number, number][] = 
   [0, 0, 0, 60, 40, 0.18], // the labyrinth
   [4, 10, 25, 16, 29, 0.3], [4, 13, 12, 14, 24, 0.3], [4, 15, 8, 24, 14, 0.3], // the dug-out SW hall, the west link, the tunnel to the north chapel
   [4, 17, 28, 24, 33, 0.3], [4, 24, 29, 28, 32, 0.35], // the tunnel to the south chapel, and the chapel dug out
+  [10, 42, 6, 47, 12, 1], [10, 44, 13, 44, 14, 1], // Floor B's side room north of the east room, and its passage: all waxed over
 ];
 
 /**
@@ -1114,6 +1115,7 @@ export const WAX_WALLS: [number, number, number, number, number, number][] = [
   [1, 3, 22, 25, 27, 31], // the little room and the hole above it
   [4, 4, 23, 27, 26, 29], // the hole where it opens in the south chapel's floor
   [6, 9, 35, 6, 43, 12], [6, 9, 37, 11, 40, 24], [6, 9, 39, 15, 47, 21], // the walls round the wax-filled NE hall, east corridor and east room
+  [10, 13, 41, 5, 48, 14], // Floor B's side room north of the east room, and its passage
 ];
 
 /**

@@ -13,13 +13,14 @@
  *    waxed holds its weapon in its free hand, see `waxedGrip`.)
  * Gear attaches to joints: the weapon to the weapon hand, armor to the torso, shoulders and head.
  */
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import type { Variant } from "../core/bestiary";
-import type { ArmorTier, Side, WeaponTier } from "../core/types";
+import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
 import { lerp, limb, type Pt } from "./geom";
 import { lookOf } from "./looks";
 import { ALL_POSES, type PoseName, type Skeleton } from "./poses";
-import { fitLimbs, fitTorso } from "./rig";
+import { fitLimbs, fitTorso, reachArm, RIG } from "./rig";
+import { HIP_HALF, onBody, SHOULDER_HALF } from "./body";
 import { SideTags } from "./SideTags";
 import type { CandleArm, WardenPoseName } from "../warden/skeleton";
 
@@ -57,7 +58,45 @@ function SealingMark({ x, r, side, mid }: { x: number; r: number; side: number; 
  *  - heavy, the **Brick Hammer**: a crooked branch with a grey brick of the bedchambers lashed to it by
  *    cord, mortar still on one edge, a corner knocked off, a crack running through it.
  */
-export function Weapon({ tier }: { tier: WeaponTier }) {
+/** The starting classes' weapons, drawn like the rest: along +x from the grip. */
+function ItemWeapon({ item }: { item: WeaponItem }) {
+  const bronze = "#b9854a", bronzeDark = "#8a5f2c", iron = "#8f93a3";
+  switch (item) {
+    case "shortsword": // Bronze Shortsword: a leaf blade, a short bar for a guard, a wrapped grip and a round pommel
+      return (
+        <g>
+          <circle cx={-5.6} cy={0} r={2} fill={bronzeDark} />
+          <line x1={-4} y1={0} x2={2.2} y2={0} className="fig-grip" strokeWidth={2.6} />
+          <rect x={2.2} y={-4.3} width={2.2} height={8.6} rx={0.9} fill={bronzeDark} />
+          <path d="M4.4 -2 L15 -3.1 L26 -2 L34 0 L26 2 L15 3.1 L4.4 2 Z" fill={bronze} stroke={bronzeDark} strokeWidth={0.5} strokeLinejoin="round" />
+          <line x1={5.6} y1={0} x2={29} y2={0} stroke={bronzeDark} strokeWidth={0.7} strokeLinecap="round" />
+        </g>
+      );
+    case "axe": // Barbarian's Axe: a long wooden haft, the broad two-lobed iron head set on its side near the end, the haft showing past it
+      return (
+        <g>
+          <line x1={-6} y1={0} x2={43} y2={0} className="fig-grip" strokeWidth={3} />
+          {/* The head: its edge runs alongside the haft, its two lobes (a top and a beard) bulging out to the side. */}
+          <g transform="translate(35 1.2) rotate(90) translate(-28.5 0)">
+            <path d="M28.5 -2 L28.5 2 L32 3.4 L36.5 10.5 Q41.5 6.5 41.5 0 Q41.5 -6.5 36.5 -10.5 L32 -3.4 Z" fill={iron} stroke="#5d6070" strokeWidth={0.6} strokeLinejoin="round" />
+            <path d="M31.6 -2.8 L36 -8.4 M31.6 2.8 L36 8.4" stroke="#5d6070" strokeWidth={0.7} strokeLinecap="round" fill="none" />
+          </g>
+          <path d="M31 -1.8 v3.6 M32.3 -1.8 v3.6 M37.7 -1.8 v3.6 M39 -1.8 v3.6" className="fig-cord" />
+        </g>
+      );
+    case "sickle": // Nomadic Sickle: a short handle, and an iron blade in the shape of a crescent moon whose two tips lie on the handle's line
+      return (
+        <g>
+          <circle cx={-4.8} cy={0} r={1.7} className="fig-wood-fill" />
+          <line x1={-4} y1={0} x2={6} y2={0} className="fig-grip" strokeWidth={2.6} />
+          <path d="M6 0 A6.9 9.5 0 0 1 19.8 0 A6.9 7.6 0 0 0 6 0 Z" fill={iron} stroke="#5d6070" strokeWidth={0.6} strokeLinejoin="round" />
+        </g>
+      );
+  }
+}
+
+export function Weapon({ tier, item }: { tier: WeaponTier; item?: WeaponItem }) {
+  if (item) return <ItemWeapon item={item} />;
   switch (tier) {
     case "baseline": // bare hands
       return null;
@@ -120,11 +159,11 @@ export function Weapon({ tier }: { tier: WeaponTier }) {
  * A weapon in the hand. `flash`: you just spent Eternity on its effect: it flashes pale blue, the
  * colour of Eternity, once (a new key plays the flash again).
  */
-export function HeldWeapon({ tier, flash }: { tier: WeaponTier; flash?: string }) {
+export function HeldWeapon({ tier, flash, item }: { tier: WeaponTier; flash?: string; item?: WeaponItem }) {
   return (
     <>
-      {flash && tier !== "baseline" && <g key={flash} className="fig-eternal-flash" aria-hidden="true"><Weapon tier={tier} /></g>}
-      <Weapon tier={tier} />
+      {flash && tier !== "baseline" && <g key={flash} className="fig-eternal-flash" aria-hidden="true"><Weapon tier={tier} item={item} /></g>}
+      <Weapon tier={tier} item={item} />
     </>
   );
 }
@@ -154,26 +193,77 @@ function waxedGrip(elbow: Pt, hand: Pt, reach: number): { at: Pt; angle: number 
 }
 
 /**
- * The hammer outside its attack, held like a walking stick: straight up, its brick on top, the butt of the
- * haft on the floor, the haft passing through the hand. Where the hand is higher than the haft reaches
- * (leaning back with the wax, cowering, flinching), it is held just under the brick, the butt a little
- * off the floor.
+ * The hammer outside its attack, held like a walking stick: its brick on top, the haft passing through the hand and its butt
+ * on the floor. `angle` is the way the hammer points from the butt to the brick (-90 is straight up; a little past it leans the
+ * brick back toward the body and puts the butt out ahead, like a cane planted in front). Where the hand is higher than the haft
+ * reaches (leaning back with the wax, cowering, flinching), it is held just under the brick, the butt a little off the floor.
  */
-function walkingStick(hand: Pt): { at: Pt; angle: number } {
-  const grounded = FLOOR_Y - 1 - HAMMER_BUTT;
-  // Pointing up (-90°), a point d along the hammer sits at y = at.y - d.
-  const lowest = hand[1] + HAMMER_HEAD - 3.5; // the grip, held just under the brick
-  return { at: [hand[0], Math.min(grounded, lowest)], angle: -90 };
+function walkingStick(hand: Pt, angle = -90): { at: Pt; angle: number } {
+  const a = (angle * Math.PI) / 180, dx = Math.cos(a), dy = Math.sin(a);
+  // How far along the haft, from its butt, the hand is: down to the floor, or at most just under the brick.
+  const t = Math.min((hand[1] - (FLOOR_Y - 1)) / dy, HAMMER_HEAD - 3.5 + HAMMER_BUTT);
+  return { at: [hand[0] - dx * t + dx * HAMMER_BUTT, hand[1] - dy * t + dy * HAMMER_BUTT], angle };
 }
+
+/** The poses where an armed waxed holds its hammer out in front, hand level with its middle, rather than hanging or planted. */
+const CANE_POSES = new Set<string>(["w-idle", "w-crawl"]);
 
 const ARMOR_WIDTH: Record<ArmorTier, number> = { none: 0, light: 9, normal: 11, heavy: 14 };
 
-function Armor({ tier, s, near }: { tier: ArmorTier; s: Skeleton; near: Pt }) {
+function Armor({ tier, s, near, item, frontShown = false, turn = 0 }: { tier: ArmorTier; s: Skeleton; near: Pt; item?: ArmorItem; frontShown?: boolean; turn?: number }) {
   if (tier === "none") return null;
   const [nx, ny] = s.neck;
   const [hx, hy] = s.hip;
   const ex = nx + (hx - nx) * 0.86;
   const ey = ny + (hy - ny) * 0.86;
+  // The starting classes' own: a bronze cuirass with the muscles worked into it, padded black leather, a white robe hanging to the knees.
+  if (item) {
+    const len = Math.hypot(hx - nx, hy - ny) || 1, dx = (hx - nx) / len, dy = (hy - ny) / len, px = -dy, py = dx;
+    const at = (k: number, side: number): Pt => [nx + (hx - nx) * k + px * side, ny + (hy - ny) * k + py * side];
+    // Seen at 3/4 the front's details are not square to the camera: its middle shifts toward the way the body turns and its width narrows (`turn`: the way the
+    // chest faces across the page, -1 to 1; 0 is straight on). The back's ridge shifts the other way, less.
+    const c = (frontShown ? 1 : -0.6) * turn * 7, w = frontShown ? Math.max(0.4, 1 - Math.abs(turn) * 0.9) : 1;
+    const fr = (k: number, side: number): Pt => at(k, side * w - c);
+    if (item === "robe") {
+      // A white robe, tight about the body and (see `.armor-robe` in index.css) wound close round the arms and legs: a sash at the waist, a collar.
+      return (
+        <g>
+          <line x1={nx} y1={ny + 2} x2={ex} y2={ey} stroke="#ebe9f1" strokeWidth={ARMOR_WIDTH[tier]} strokeLinecap="round" />
+          {/* The collar's V is on the front: shown only when the hips turn the front toward the camera. */}
+          {frontShown && <path d={`M${fr(0.04, -4)[0]} ${fr(0.04, -4)[1]} L${fr(0.2, 0)[0]} ${fr(0.2, 0)[1]} L${fr(0.04, 4)[0]} ${fr(0.04, 4)[1]}`} fill="none" stroke="#b9b5c6" strokeWidth={0.9} strokeLinejoin="round" />}
+          <line x1={at(0.78, -5)[0]} y1={at(0.78, -5)[1]} x2={at(0.78, 5)[0]} y2={at(0.78, 5)[1]} stroke="#8e8aa0" strokeWidth={2} strokeLinecap="round" />
+          <circle cx={near[0]} cy={near[1]} r={2} fill="#ebe9f1" stroke="#b9b5c6" strokeWidth={0.6} />
+        </g>
+      );
+    }
+    if (item === "garb") {
+      // A black cloak rather than tight leather: a cape over the shoulders and a long, loose fall of cloth down the back to below the hips, its hem ragged.
+      const hem = (side: number, down: number): Pt => [hx + dx * down + px * side, hy + dy * down + py * side];
+      const sl = at(0.02, -8), sr = at(0.02, 8);
+      const h1 = hem(-13, 22), h2 = hem(-6, 26), h3 = hem(1, 22), h4 = hem(7, 27), h5 = hem(13, 22);
+      return (
+        <g strokeLinejoin="round">
+          <path d={`M${sl[0]} ${sl[1]} L${sr[0]} ${sr[1]} L${h5[0]} ${h5[1]} L${h4[0]} ${h4[1]} L${h3[0]} ${h3[1]} L${h2[0]} ${h2[1]} L${h1[0]} ${h1[1]} Z`} fill="#17171c" />
+          {/* The folds fall down the back; from the front there is only the clasp at the throat. */}
+          {frontShown ? <circle cx={fr(0.06, 0)[0]} cy={fr(0.06, 0)[1]} r={1.4} fill="#8e8aa0" /> : <path d={`M${at(0.12, -2)[0]} ${at(0.12, -2)[1]} L${hem(-4, 21)[0]} ${hem(-4, 21)[1]} M${at(0.12, 3)[0]} ${at(0.12, 3)[1]} L${hem(5, 22)[0]} ${hem(5, 22)[1]}`} fill="none" stroke="#2a2a33" strokeWidth={0.8} strokeLinecap="round" />}
+          <ellipse cx={near[0]} cy={near[1]} rx={3.4} ry={2.4} fill="#1f1f26" />
+        </g>
+      );
+    }
+    // The Bronze Chestplate
+    return (
+      <g>
+        <line x1={nx} y1={ny + 2} x2={ex} y2={ey} stroke="#b4803f" strokeWidth={ARMOR_WIDTH[tier]} strokeLinecap="round" />
+        {/* The muscles are worked into the front; the back is plain, with only the spine's ridge. */}
+        <g stroke="#7d5424" strokeWidth={0.9} strokeLinecap="round" fill="none">
+          <line x1={fr(0.12, 0)[0]} y1={fr(0.12, 0)[1]} x2={fr(0.82, 0)[0]} y2={fr(0.82, 0)[1]} />
+          {frontShown && <path d={`M${fr(0.28, -5.4)[0]} ${fr(0.28, -5.4)[1]} Q${fr(0.4, 0)[0]} ${fr(0.4, 0)[1]} ${fr(0.28, 5.4)[0]} ${fr(0.28, 5.4)[1]}`} />}
+          {frontShown && [0.52, 0.66].map(k => <line key={k} x1={fr(k, -4.2)[0]} y1={fr(k, -4.2)[1]} x2={fr(k, 4.2)[0]} y2={fr(k, 4.2)[1]} />)}
+        </g>
+        <circle cx={near[0]} cy={near[1]} r={3.6} fill="#b4803f" stroke="#7d5424" strokeWidth={0.7} />
+      </g>
+    );
+  }
   return (
     <g>
       <line x1={nx} y1={ny + 2} x2={ex} y2={ey} className="fig-armor" strokeWidth={ARMOR_WIDTH[tier]} />
@@ -241,6 +331,125 @@ function PatrolHood({ x, y, front }: { x: number; y: number; front: boolean }) {
   );
 }
 
+/** A little steady-but-uneven number from 0 to 1 for an integer (so the wrappings are the same every time, and not regular). */
+const jitter = (n: number) => { const v = Math.sin(n * 12.9898) * 43758.5453; return v - Math.floor(v); };
+
+/**
+ * A limb (its points from the shoulder or hip down to the hand or foot) and what the starting classes' armor puts on it: the Soldier's white cloth with
+ * brown leather over the last of the forearm and shin (gloves and boots); the Nomad's pale gray cloth, wound round with soft, uneven wrappings, and over the
+ * thigh the puffy gray trousers gathered at the knee. (Hands and feet stay round.)
+ */
+function LimbPoly({ pts, className, item, leg, tag }: { pts: Pt[]; className: string; item?: ArmorItem; leg?: boolean; tag: string }) {
+  const poly = limb(...pts);
+  if (item === "bronze-chestplate") {
+    const a = pts[pts.length - 2], b = pts[pts.length - 1];
+    const gid = `leather-${tag}-${Math.round(a[0])}-${Math.round(a[1])}-${Math.round(b[0])}-${Math.round(b[1])}`;
+    return (
+      <g>
+        <defs>
+          <linearGradient id={gid} gradientUnits="userSpaceOnUse" x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]}>
+            <stop offset="0" stopColor="#efece4" /><stop offset="0.52" stopColor="#efece4" />
+            <stop offset="0.52" stopColor="#7a5232" /><stop offset="1" stopColor="#7a5232" />
+          </linearGradient>
+        </defs>
+        <polyline points={poly} className={className} style={{ stroke: `url(#${gid})` }} />
+      </g>
+    );
+  }
+  if (item !== "robe") return <polyline points={poly} className={className} />;
+  const marks: ReactNode[] = [];
+  let thigh: ReactNode = null;
+  pts.slice(1).forEach((q, i) => {
+    const p = pts[i];
+    const dx = q[0] - p[0], dy = q[1] - p[1], len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+    if (leg && i === 0) {
+      // Puffy trousers from the hip to the knee: a loose bag of gray cloth, gathered at the knee.
+      const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2, ang = (Math.atan2(dy, dx) * 180) / Math.PI;
+      thigh = (
+        <g>
+          <ellipse cx={mx} cy={my} rx={len / 2 + 1.2} ry={5.8} transform={`rotate(${ang} ${mx} ${my})`} fill="#cfcdd6" stroke="#a8a5b5" strokeWidth={0.6} />
+          <path d={`M${p[0] + ux * 3 - uy * 2.4} ${p[1] + uy * 3 + ux * 2.4} Q${mx + ux * 1} ${my + uy * 1 + 1.2} ${q[0] - ux * 3 - uy * 2.2} ${q[1] - uy * 3 + ux * 2.2}`} fill="none" stroke="#b4b1c0" strokeWidth={0.7} strokeLinecap="round" />
+          <path d={`M${p[0] + ux * 4 + uy * 2.6} ${p[1] + uy * 4 - ux * 2.6} Q${mx} ${my - 1.4} ${q[0] - ux * 3 + uy * 2.4} ${q[1] - uy * 3 - ux * 2.4}`} fill="none" stroke="#b4b1c0" strokeWidth={0.7} strokeLinecap="round" />
+          <line x1={q[0] - uy * 3.8} y1={q[1] + ux * 3.8} x2={q[0] + uy * 3.8} y2={q[1] - ux * 3.8} stroke="#9c99ab" strokeWidth={1.1} strokeLinecap="round" />
+        </g>
+      );
+      return;
+    }
+    // Wrappings round the arm and the shin: short soft gray strokes across it, each a little slanted and bowed, none quite alike.
+    const n = Math.max(2, Math.floor(len / 4.2));
+    for (let k = 0; k < n; k++) {
+      const t = (k + 0.5 + (jitter(k + i * 7 + Math.round(p[0])) - 0.5) * 0.5) / n;
+      const cx = p[0] + dx * t, cy = p[1] + dy * t;
+      const slant = (jitter(k * 3 + i * 11 + Math.round(q[1])) - 0.5) * 0.9, bow = (jitter(k * 5 + i) - 0.5) * 1.8;
+      const c = Math.cos(slant), sn = Math.sin(slant);
+      const vx = -uy * c - ux * sn, vy = ux * c - uy * sn;
+      marks.push(<path key={`${i}-${k}`} d={`M${cx - vx * 2.9} ${cy - vy * 2.9} Q${cx + ux * bow} ${cy + uy * bow} ${cx + vx * 2.9} ${cy + vy * 2.9}`} fill="none" stroke="#8d899c" strokeOpacity={0.34} strokeWidth={0.55} strokeLinecap="round" />);
+    }
+  });
+  return (
+    <g>
+      <polyline points={poly} className={className} />
+      {marks}
+      {thigh}
+    </g>
+  );
+}
+
+/** Head gear: a bronze helm with its red crest, a black hood, a clay mask. Drawn on the head at (x, y), the figure facing right. */
+export function HeadGear({ item, x, y, front }: { item: HeadItem; x: number; y: number; front?: boolean }) {
+  if (item === "helm") {
+    return (
+      <g strokeLinejoin="round">
+        <path d={`M${x - 7} ${y - 5} Q${x} ${y - 19} ${x + 7} ${y - 5} Z`} fill="#a63a2e" stroke="#7a261d" strokeWidth={0.6} />
+        <path d={`M${x - 8.8} ${y + 1.5} A8.8 8.8 0 0 1 ${x + 8.8} ${y + 1.5} L${x + 8.8} ${y + 4} L${x - 8.8} ${y + 4} Z`} fill="#b4803f" stroke="#7d5424" strokeWidth={0.8} />
+        {/* The hanging cheek guard, on the side of the head that shows: seen from behind it is the near side toward the way the figure faces (the right); turned 3/4 to the camera it is the figure's own right (the page's left). */}
+        <path d={front ? `M${x - 4.6} ${y + 3} L${x - 9} ${y + 3} L${x - 7.4} ${y + 10} L${x - 4.2} ${y + 8} Z` : `M${x + 4.6} ${y + 3} L${x + 9} ${y + 3} L${x + 7.4} ${y + 10} L${x + 4.2} ${y + 8} Z`} fill="#a9763a" stroke="#7d5424" strokeWidth={0.7} />
+        <line x1={x - 8.8} y1={y + 1.8} x2={x + 8.8} y2={y + 1.8} stroke="#7d5424" strokeWidth={0.7} />
+      </g>
+    );
+  }
+  if (item === "wardenhood") return <PatrolHood x={x} y={y} front={!!front} />;
+  if (item === "hood") {
+    // Like the wardens' hood (a round hood, its point hanging behind), black, with no outline, a gray streak from the tip. Seen from the front it has an
+    // opening: just a gap, the face beneath showing through it and, past the head, the hood's pitch-black inner side (`HoodInside`, drawn under the head).
+    const A = [x - 5.6, y + 6.9], B = [x + 8.5, y + 2.6];
+    const d = front
+      ? `M${A[0]} ${A[1]} A8.9 8.9 0 1 1 ${B[0]} ${B[1]} Q${x + 4.5} ${y - 9} ${A[0]} ${A[1]} Z`
+      : `M${x - 8.9} ${y} A8.9 8.9 0 1 1 ${x + 8.9} ${y} A8.9 8.9 0 1 1 ${x - 8.9} ${y} Z`;
+    return (
+      <g strokeLinejoin="round" strokeLinecap="round">
+        {!front && <path d={`M${x - 2.4} ${y - 6.6} L${x - 10.4} ${y - 10.2} L${x - 7.8} ${y + 0.8} Z`} fill="#17171c" />}
+        <path d={d} fill="#17171c" />
+        <path d={`M${x - 10.4} ${y - 10.2} Q${x - 4} ${y - 8.5} ${x + 1.5} ${y - 0.5}`} fill="none" stroke="#5a5a64" strokeWidth={0.9} />
+      </g>
+    );
+  }
+  // The Desert Mask: cloth wrapped round the whole head, in turns, a knotted end hanging behind. Seen from the front, a real opening is cut in it for the
+  // eyes (the face beneath shows through; nothing is drawn in it).
+  const ring = `M${x - 8.9} ${y} A8.9 8.9 0 1 1 ${x + 8.9} ${y} A8.9 8.9 0 1 1 ${x - 8.9} ${y} Z`;
+  const cx = x + 3.7;
+  const hole = front ? ` M${cx - 4.6} ${y} A4.6 2.5 0 1 0 ${cx + 4.6} ${y} A4.6 2.5 0 1 0 ${cx - 4.6} ${y} Z` : "";
+  return (
+    <g strokeLinejoin="round" strokeLinecap="round">
+      <path d={`M${x - 7} ${y - 3} L${x - 14} ${y + 2} L${x - 8} ${y + 4} Z`} fill="#d9ceb1" stroke="#b3a687" strokeWidth={0.5} />
+      <path d={ring + hole} fillRule="evenodd" fill="#e3d9be" stroke="#b3a687" strokeWidth={0.6} />
+      <path d={`M${x - 8.4} ${y - 3.6} Q${x} ${y - 7} ${x + 8.4} ${y - 2}`} fill="none" stroke="#b9ad8c" strokeWidth={0.7} />
+      <path d={`M${x - 8.4} ${y + 4.6} Q${x} ${y + 2.8} ${x + 8.4} ${y + 5.6}`} fill="none" stroke="#b9ad8c" strokeWidth={0.7} />
+      <path d={`M${x - 6} ${y + 7.4} Q${x} ${y + 5.8} ${x + 6} ${y + 8.2}`} fill="none" stroke="#b9ad8c" strokeWidth={0.7} />
+    </g>
+  );
+}
+
+/** The hood's inside, pitch black, drawn under the head: it shows through the hood's opening round the face. */
+function HoodInside({ x, y }: { x: number; y: number }) {
+  return (
+    <g>
+      <path d={`M${x - 2.4} ${y - 6.6} L${x - 10.4} ${y - 10.2} L${x - 7.8} ${y + 0.8} Z`} fill="#050507" />
+      <circle cx={x} cy={y} r={8.9} fill="#050507" />
+    </g>
+  );
+}
+
 function Helmet({ s }: { s: Skeleton }) {
   const [x, y] = s.head;
   return <path d={`M${x - 8.5} ${y + 2} A8.5 8.5 0 0 1 ${x + 8.5} ${y + 2} L${x + 8.5} ${y + 5} L${x - 8.5} ${y + 5} Z`} className="fig-armor-fill" />;
@@ -257,18 +466,23 @@ function StrikeTrail({ s, tier }: { s: Skeleton; tier: WeaponTier }) {
   const reach = WEAPON_REACH[tier];
   const rad = (s.weapon.angle * Math.PI) / 180;
   const tip: Pt = [s.weapon.at[0] + Math.cos(rad) * reach, s.weapon.at[1] + Math.sin(rad) * reach];
-  const pivot = s.neck;
-  const r = Math.hypot(tip[0] - pivot[0], tip[1] - pivot[1]);
-  const end = Math.atan2(tip[1] - pivot[1], tip[0] - pivot[0]);
-  const start = end - (140 * Math.PI) / 180; // the swing covers 140 degrees
-  const at = (radius: number, angle: number): Pt => [pivot[0] + Math.cos(angle) * radius, pivot[1] + Math.sin(angle) * radius];
+  // A level swing (`flat`) sweeps a flat crescent round the body at the weapon's own height; the overhead swing, a tall one round the neck.
+  const flat = s.flat ?? 1;
+  const pivot: Pt = s.flat ? [s.neck[0], tip[1]] : s.neck;
+  const r = Math.hypot(tip[0] - pivot[0], (tip[1] - pivot[1]) / flat);
+  const end = s.flat ? (tip[0] >= pivot[0] ? 0 : Math.PI) : Math.atan2(tip[1] - pivot[1], tip[0] - pivot[0]);
+  const sweep = s.sweep ?? 140;
+  const start = end - (sweep * Math.PI) / 180; // the swing covers 140 degrees, unless the pose says otherwise
+  const sweepFlag = sweep < 0 ? 0 : 1;
+  const big = Math.abs(sweep) > 180 ? 1 : 0; // (an arc of more than half a circle)
+  const at = (radius: number, angle: number): Pt => [pivot[0] + Math.cos(angle) * radius, pivot[1] + Math.sin(angle) * radius * flat];
   const from = at(r, start);
   const innerEnd = at(r * 0.8, end);
   const d = [
     `M${from[0]} ${from[1]}`,
-    `A${r} ${r} 0 0 1 ${tip[0]} ${tip[1]}`,      // outer edge, following the tip
+    `A${r} ${r * flat} 0 ${big} ${sweepFlag} ${tip[0]} ${tip[1]}`,      // outer edge, following the tip
     `L${innerEnd[0]} ${innerEnd[1]}`,
-    `A${r * 0.9} ${r * 0.9} 0 0 0 ${from[0]} ${from[1]}`, // inner edge, tapering back to a point
+    `A${r * 0.9} ${r * 0.9 * flat} 0 ${big} ${1 - sweepFlag} ${from[0]} ${from[1]}`, // inner edge, tapering back to a point
     "Z",
   ].join(" ");
   return <path d={d} className="fig-trail" />;
@@ -298,6 +512,12 @@ interface StickFigureProps {
   waxCaked?: boolean;
   /** You just spent Eternity on your weapon's effect: it flashes pale blue once (a new key flashes again). */
   eternalFlash?: string;
+  /** The starting classes' own weapon, armor and head gear (the look, instead of the tier's). */
+  weaponItem?: WeaponItem;
+  armorItem?: ArmorItem;
+  headItem?: HeadItem;
+  /** A level swing's trail, shown on this pose: how many degrees it sweeps (positive: clockwise on the page, ending at the weapon's tip). */
+  trail?: number;
   /** A patrol warden: the Penitent Warden's pointed hood over its head (its face in shadow; no beak, no cloak). */
   hooded?: boolean;
   /** Sealed whole in wax: every limb, the body and the head. */
@@ -391,12 +611,14 @@ function Prop({ prop }: { prop: NonNullable<Skeleton["prop"]> }) {
 
 /** Colour the right arm and leg while posing (dev server only): see `debug` in StickFigure below. Off for now. */
 const DEBUG_LIMB_COLORS = import.meta.env.DEV && false;
+/** The player's right arm and right leg drawn red, to see which is which while tuning the poses (set to false to turn it off). */
+const RED_RIGHT = false;
 
 /** How much a T-pose's sideways arms are foreshortened in a 3/4 view (they run across the view). */
 const ACROSS_34 = 0.72;
 
 /** A figure, redrawn only when something about its look changes (the scene redraws every frame). */
-export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, eternalFlash, hooded, encased, straight = false, foe, hand = "right", sides = false }: StickFigureProps) {
+export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor, weaponItem, armorItem, headItem, trail, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, eternalFlash, hooded, encased, straight = false, foe, hand = "right", sides = false }: StickFigureProps) {
   const raw = ALL_POSES[pose];
   const front = view === "front";
   // A look that draws itself (the Warden), in its own poses.
@@ -440,8 +662,16 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
   const yaw = raw.torso34 ?? (raw.armsOut ? (front ? "front" : "back") : undefined);
   const yawFront = yaw === "front";
   const modelled = !!yaw && !straight;
-  const nearShoulder: Pt = straight ? [nx - 6 * side, ny + 2] : modelled ? [nx + (yawFront ? -5 : 5), ny + 3] : crossing ? [nx + 2, ny + 7] : [nx + (turned ? 3 : -3), ny + 4];
-  const farShoulder: Pt = straight ? [nx + 6 * side, ny + 2] : modelled ? [nx + (yawFront ? 5 : -5), ny + 3] : crossing ? [nx - 2, ny - 1] : [nx + (turned ? -3 : 3), ny + 2];
+  // The player's own poses (`yaw`): the shoulders and the hips placed from how each is turned, the right side the near one (see body.ts).
+  const yawed = !!raw.yaw && !front && !straight && !waxed;
+  // The player standing facing the camera (the inventory, the class screen): the shoulders and hips turned that way too, level, the right ones on the page's left.
+  const faceCam = !!raw.faceCamera && front && !straight && !waxed && foe === false;
+  // The player's own poses: the near shoulder (hip) is the right one when the right side is the nearer, else the left one (a body turned the other way round).
+  const rightLower = (deg: number) => Math.cos((deg * Math.PI) / 180) + Math.sin((deg * Math.PI) / 180) > 1e-6;
+  const nearS = yawed && !rightLower(raw.yaw!.shoulders) ? -1 : 1;
+  const nearH = yawed && !rightLower(raw.yaw!.hips) ? -1 : 1;
+  const nearShoulder0: Pt = faceCam ? [nx - 4.6, ny + 2] : yawed ? [nx + onBody(0, nearS * SHOULDER_HALF, raw.yaw!.shoulders)[0], ny + 3 + onBody(0, nearS * SHOULDER_HALF, raw.yaw!.shoulders)[1]] : straight ? [nx - 6 * side, ny + 2] : modelled ? [nx + (yawFront ? -5 : 5), ny + 3] : crossing ? [nx + 2, ny + 7] : [nx + (turned ? 3 : -3), ny + 4];
+  const farShoulder0: Pt = faceCam ? [nx + 4, ny + 1.2] : yawed ? [nx - onBody(0, nearS * SHOULDER_HALF, raw.yaw!.shoulders)[0], ny + 3 - onBody(0, nearS * SHOULDER_HALF, raw.yaw!.shoulders)[1]] : straight ? [nx + 6 * side, ny + 2] : modelled ? [nx + (yawFront ? 5 : -5), ny + 3] : crossing ? [nx - 2, ny - 1] : [nx + (turned ? -3 : 3), ny + 2];
   // The hips are set apart the same way, so the legs read as a left and a right: the near hip
   // carries the leading leg, the far hip the one behind. (The waxed kneel, legs bound as one.)
   // Straight on the hips are level. (A crossing strike has its own twist.)
@@ -449,15 +679,19 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
   // player. Each hip is on its own side of the body, the same page side as the shoulder above it (the right one
   // toward +x, like the weapon arm), and nearer or farther like that shoulder: from the front the right side is
   // the far one, from behind the near one.
-  const nearHip: Pt = waxed ? base.hip : modelled ? [base.hip[0] + (yawFront ? -2 : 2), base.hip[1]] : straight ? [base.hip[0] - 3.5 * side, base.hip[1]] : [base.hip[0] + (turned ? 2 : -2), base.hip[1] + 1];
-  const farHip: Pt = waxed ? base.hip : modelled ? [base.hip[0] + (yawFront ? 2 : -2), base.hip[1]] : straight ? [base.hip[0] + 3.5 * side, base.hip[1]] : [base.hip[0] + (turned ? -2 : 2), base.hip[1] - 1];
+  const nearHip0: Pt = faceCam ? [base.hip[0] - 2.4, base.hip[1] + 0.3] : yawed ? [base.hip[0] + onBody(0, nearH * HIP_HALF, raw.yaw!.hips)[0], base.hip[1] + onBody(0, nearH * HIP_HALF, raw.yaw!.hips)[1]] : waxed ? base.hip : modelled ? [base.hip[0] + (yawFront ? -2 : 2), base.hip[1]] : straight ? [base.hip[0] - 3.5 * side, base.hip[1]] : [base.hip[0] + (turned ? 2 : -2), base.hip[1] + 1];
+  const farHip0: Pt = faceCam ? [base.hip[0] + 2.2, base.hip[1] - 0.3] : yawed ? [base.hip[0] - onBody(0, nearH * HIP_HALF, raw.yaw!.hips)[0], base.hip[1] - onBody(0, nearH * HIP_HALF, raw.yaw!.hips)[1]] : waxed ? base.hip : modelled ? [base.hip[0] + (yawFront ? 2 : -2), base.hip[1]] : straight ? [base.hip[0] + 3.5 * side, base.hip[1]] : [base.hip[0] + (turned ? -2 : 2), base.hip[1] - 1];
+  const nearShoulder = nearShoulder0, farShoulder = farShoulder0, nearHip = nearHip0, farHip = farHip0;
 
   // Which side is which. The right shoulder is the near one when crossing, in the model seen from behind, and
   // for the waxed seen from the front; otherwise (the default 3/4 views, straight on) it's the far one. The
   // hips are twisted the other way in the crossing strike (the right hip is the far one then); in the model
   // each hip is as near or far as the shoulder on its side.
-  const rightIsNear = straight ? false : modelled ? !yawFront : crossing ? true : front && waxed;
-  const rightHipNear = waxed ? false : modelled ? rightIsNear : crossing ? !rightIsNear : rightIsNear;
+  // (For the player: the right shoulder is the near one while the shoulders face the camera's side of the floor, and the far one once they have turned so far left that the right
+  // swings round to the far side, as in a stance with the right leg leading.)
+  const rad = (d: number) => (d * Math.PI) / 180;
+  const rightIsNear = faceCam ? true : yawed ? rightLower(raw.yaw!.shoulders) : straight ? false : modelled ? !yawFront : crossing ? true : front && waxed;
+  const rightHipNear = waxed ? false : faceCam ? true : yawed ? rightLower(raw.yaw!.hips) : modelled ? rightIsNear : crossing ? !rightIsNear : rightIsNear;
   const shoulderOf = (side: Side) => ((side === "right") === rightIsNear ? nearShoulder : farShoulder);
   const hipOf = (side: Side) => ((side === "right") === rightHipNear ? nearHip : farHip);
   // The weapon is held in the `hand` hand (the right, by default): that arm and its shoulder, and the leading
@@ -472,67 +706,54 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
   // The weapon arm can also cross in front of the body from the far shoulder (`weaponOver`): then it is drawn over
   // the torso, and the other arm keeps to its own side.
   const weaponShoulderNear = (hand === "right") === rightIsNear;
-  const weaponBehind = straight || (!weaponShoulderNear && !raw.weaponOver);
-  const freeBehind = straight || weaponShoulderNear;
+  const weaponBehind = straight || (raw.weaponLayer ? raw.weaponLayer === "behind" : !weaponShoulderNear && !raw.weaponOver);
+  const freeBehind = straight || (raw.freeLayer ? raw.freeLayer === "behind" : weaponShoulderNear);
   // Then the limbs from them, and how far the figure drops so its feet stay where the pose put them.
   const fit = fitLimbs(base, { weaponShoulder, freeShoulder, leadHip, rearHip, across: straight ? 1 : ACROSS_34, weaponLength: WEAPON_REACH[weapon] });
-  const s = fit.skeleton;
+  // A hammer-carrying waxed, outside its attacks, holds it out ahead like a cane: its hand raised and forward.
+  const stick = weapon === "heavy" && !WAXED_ATTACK_POSES.has(pose) && pose !== "w-fallen";
+  const cane = stick && CANE_POSES.has(pose);
+  const s = cane
+    ? { ...fit.skeleton, freeArm: reachArm(freeShoulder, [freeShoulder[0] + 15, freeShoulder[1] + 18], RIG.upperArm, RIG.forearm, fit.skeleton.freeArm.elbow) }
+    : fit.skeleton;
   // Debugging: the right arm and the right leg are coloured (set DEBUG_LIMB_COLORS). Blue: the far one. Red: the near
   // arm, or the leading leg. Purple: a leg that is both far and leading. (Not for the waxed.)
   const debug = (far: boolean, lead: boolean) => (!DEBUG_LIMB_COLORS || waxed ? "" : far && lead ? " dbg-both" : lead ? " dbg-lead" : far ? " dbg-far" : "");
   const rightArmDebug = debug(!rightIsNear, rightIsNear);
   const rightLeadDebug = leadSide === "right";
+  // (A temporary aid for tuning the player: the right arm and the right leg are drawn red. `RED_RIGHT` in this file turns it off.)
+  const player = !foe && !waxed && !variant;
+  const redArm = RED_RIGHT && player && hand === "right" ? " dbg-red" : "";
   // The weapon arm's upper arm (shoulder to elbow) can be drawn behind everything while its forearm stays in front
   // (`upperArmBehind`, for an arm crossing the body): the upper arm in the far tone, drawn first.
   const upperBehind = !!raw.upperArmBehind && !weaponBehind;
-  const weaponDebug = hand === "right" ? rightArmDebug : "";
+  // A weapon held across the chest (`foreBehind`): the upper arm is in front of the torso, the forearm and the blade behind it.
+  const foreBehind = !!raw.foreBehind && yawed && !weaponBehind;
+  const weaponDebug = (hand === "right" ? rightArmDebug : "") + redArm;
   const weaponUpperArm = upperBehind && (
-    <polyline points={limb(weaponShoulder, s.weaponArm.elbow)} className={`fig-limb fig-far${weaponDebug}`} />
+    <LimbPoly pts={[weaponShoulder, s.weaponArm.elbow]} className={`fig-limb fig-far${weaponDebug}`} item={armorItem} tag="wu" />
   );
   const weaponArm = (
-    <polyline points={upperBehind ? limb(s.weaponArm.elbow, s.weaponArm.hand) : limb(weaponShoulder, s.weaponArm.elbow, s.weaponArm.hand)} className={`fig-limb ${weaponBehind && !straight ? "fig-far" : ""}${weaponDebug}`} />
+    <LimbPoly pts={upperBehind ? [s.weaponArm.elbow, s.weaponArm.hand] : [weaponShoulder, s.weaponArm.elbow, s.weaponArm.hand]} className={`fig-limb ${weaponBehind && !straight ? "fig-far" : ""}${weaponDebug}`} item={armorItem} tag="w" />
   );
   const freeArm = (
-    <polyline points={limb(freeShoulder, s.freeArm.elbow, s.freeArm.hand)} className={`fig-limb ${freeBehind && !straight ? "fig-far" : ""}${hand === "left" ? rightArmDebug : ""}`} />
+    <LimbPoly pts={[freeShoulder, s.freeArm.elbow, s.freeArm.hand]} className={`fig-limb ${freeBehind && !straight ? "fig-far" : ""}${hand === "left" ? rightArmDebug : ""}`} item={armorItem} tag="f" />
   );
   const weaponEl = waxed ? null : (
     <g transform={`translate(${s.weapon.at[0]} ${s.weapon.at[1]}) rotate(${s.weapon.angle})`}>
-      <HeldWeapon tier={weapon} flash={eternalFlash} />
+      <HeldWeapon tier={weapon} flash={eternalFlash} item={weaponItem} />
     </g>
   );
   // An armed waxed: the weapon in its free hand, along the forearm, resting on the floor where it would go through it.
   // (Toppled, the hammer lies on the floor by its hand instead.)
-  const stick = weapon === "heavy" && !WAXED_ATTACK_POSES.has(pose) && pose !== "w-fallen";
-  const grip = stick ? walkingStick(s.freeArm.hand) : waxedGrip(s.freeArm.elbow, s.freeArm.hand, WEAPON_REACH[weapon]);
+  const grip = stick ? walkingStick(s.freeArm.hand, cane ? -108 : -90) : waxedGrip(s.freeArm.elbow, s.freeArm.hand, WEAPON_REACH[weapon]);
   const freeWeaponEl = waxed && weapon !== "baseline" && (
     <g transform={`translate(${grip.at[0]} ${grip.at[1]}) rotate(${grip.angle})`}>
-      <HeldWeapon tier={weapon} flash={eternalFlash} />
+      <HeldWeapon tier={weapon} flash={eternalFlash} item={weaponItem} />
     </g>
   );
 
-  return (
-    <svg viewBox="0 0 100 120" className={`figure figure-${view}`} role="img" aria-label={title}>
-      {title && <title>{title}</title>}
-      <ellipse cx={50} cy={115} rx={26} ry={3} className="fig-shadow" />
-      {/* Enemies face left: mirror the whole drawing. */}
-      <g transform={front && !straight ? "translate(100 0) scale(-1 1)" : undefined}>
-       <g transform={fit.drop ? `translate(0 ${fit.drop})` : undefined}>
-        {(pose === "strike" || pose === "sw-chop") && weapon !== "baseline" && <StrikeTrail s={s} tier={weapon} />}
-        {weaponUpperArm}
-        {weaponBehind && weaponEl}
-        {weaponBehind && weaponArm}
-        {freeBehind && freeWeaponEl}
-        {freeBehind && freeArm}
-        <polyline points={leadIsNear ? limb(rearHip, s.rearLeg.knee, s.rearLeg.foot) : limb(leadHip, s.leadLeg.knee, s.leadLeg.foot)} className={`fig-limb ${straight ? "" : "fig-far"}${rightHipNear ? "" : debug(true, rightLeadDebug)}`} />
-        {waxed && <WaxBinding s={s} />}
-        <polyline points={limb(farShoulder, nearShoulder)} className="fig-limb" />
-        {frail ? <Ribcage s={s} nearSide={straight ? 0 : Math.sign(nearShoulder[0] - nx)} behind={yaw ? !yawFront : !front || !!raw.ribsBehind} /> : <polyline points={s.waist ? limb(s.neck, s.waist, s.hip) : limb(s.neck, s.hip)} className="fig-limb" />}
-        {!waxed && <polyline points={limb(farHip, nearHip)} className="fig-limb" />}
-        <Armor tier={armor} s={s} near={nearShoulder} />
-        <circle cx={hx} cy={hy} r={7.5} className="fig-head" />
-        {armor === "heavy" && !hooded && <Helmet s={s} />}
-        {hooded && <PatrolHood x={hx} y={hy} front={front} />}
-        {front && !waxed && !hooded && (
+  const eyes = front && !waxed && !hooded ? (
           // Only enemies show a face, turned toward the player (or the camera, straight on). The player is
           // always seen from behind.
           <g className="fig-eyes">
@@ -548,14 +769,43 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
               </>
             )}
           </g>
-        )}
+        ) : null;
+  return (
+    <svg viewBox="0 0 100 120" className={`figure figure-${view}${armorItem ? ` armor-${armorItem}` : ""}`} role="img" aria-label={title}>
+      {title && <title>{title}</title>}
+      <ellipse cx={50} cy={115} rx={26} ry={3} className="fig-shadow" />
+      {/* Enemies face left: mirror the whole drawing. */}
+      <g transform={front && !straight ? "translate(100 0) scale(-1 1)" : undefined}>
+       <g transform={fit.drop ? `translate(0 ${fit.drop})` : undefined}>
+        {(trail !== undefined || pose === "strike" || pose === "sw-chop" || pose === "swing-right" || pose === "swing-left") && weapon !== "baseline" && <StrikeTrail s={trail !== undefined ? { ...s, sweep: trail, flat: 0.28 } : s} tier={weapon} />}
+        {weaponUpperArm}
+        {weaponBehind && weaponEl}
+        {weaponBehind && weaponArm}
+        {foreBehind && weaponEl}
+        {foreBehind && <LimbPoly pts={[s.weaponArm.elbow, s.weaponArm.hand]} className={`fig-limb ${weaponDebug}`} item={armorItem} tag="wf" />}
+        {freeBehind && freeWeaponEl}
+        {freeBehind && freeArm}
+        <LimbPoly pts={leadIsNear ? [rearHip, s.rearLeg.knee, s.rearLeg.foot] : [leadHip, s.leadLeg.knee, s.leadLeg.foot]} className={`fig-limb ${straight ? "" : "fig-far"}${rightHipNear ? "" : debug(true, rightLeadDebug)}${RED_RIGHT && player && !rightHipNear ? " dbg-red" : ""}`} item={armorItem} leg tag="l1" />
+        {waxed && <WaxBinding s={s} />}
+        <polyline points={limb(farShoulder, nearShoulder)} className="fig-limb" />
+        {frail ? <Ribcage s={s} nearSide={straight ? 0 : Math.sign(nearShoulder[0] - nx)} behind={yaw ? !yawFront : !front || !!raw.ribsBehind} /> : <polyline points={s.waist ? limb(s.neck, s.waist, s.hip) : limb(s.neck, s.hip)} className="fig-limb" />}
+        {!waxed && <polyline points={limb(farHip, nearHip)} className="fig-limb" />}
+        <Armor tier={armor} s={s} near={nearShoulder} item={armorItem} turn={faceCam ? 0.5 : yawed ? onBody(1, 0, raw.yaw!.hips)[0] / Math.SQRT1_2 * 0.7 : 0} frontShown={faceCam || (yawed ? Math.sin(rad(raw.yaw!.hips)) > Math.cos(rad(raw.yaw!.hips)) : !!front && !yawed)} />
+        {headItem === "hood" && front && <HoodInside x={hx} y={hy} />}
+        <circle cx={hx} cy={hy} r={7.5} className="fig-head" />
+        {armor === "heavy" && !hooded && !armorItem && !headItem && <Helmet s={s} />}
+        {headItem && headItem !== "helm" && headItem !== "wardenhood" && eyes}
+        {headItem && <HeadGear item={headItem} x={hx} y={hy} front={front} />}
+        {hooded && <PatrolHood x={hx} y={hy} front={front} />}
+        {!headItem && eyes}
         {/* The waxed's shins are under the binding, behind the body: only the thigh shows in front. */}
-        <polyline points={waxed ? limb(s.hip, s.leadLeg.knee) : leadIsNear ? limb(leadHip, s.leadLeg.knee, s.leadLeg.foot) : limb(rearHip, s.rearLeg.knee, s.rearLeg.foot)} className={`fig-limb${rightHipNear ? debug(false, rightLeadDebug) : ""}`} />
+        {waxed ? <polyline points={limb(s.hip, s.leadLeg.knee)} className={`fig-limb${rightHipNear ? debug(false, rightLeadDebug) : ""}`} /> : <LimbPoly pts={leadIsNear ? [leadHip, s.leadLeg.knee, s.leadLeg.foot] : [rearHip, s.rearLeg.knee, s.rearLeg.foot]} className={`fig-limb${rightHipNear ? debug(false, rightLeadDebug) : ""}${RED_RIGHT && player && rightHipNear ? " dbg-red" : ""}`} item={armorItem} leg tag="l2" />}
         {waxed && <WaxHead s={s} />}
         {!freeBehind && freeWeaponEl}
         {!freeBehind && freeArm}
-        {!weaponBehind && weaponEl}
-        {!weaponBehind && weaponArm}
+        {!weaponBehind && !foreBehind && weaponEl}
+        {!weaponBehind && !foreBehind && weaponArm}
+        {foreBehind && <LimbPoly pts={[weaponShoulder, s.weaponArm.elbow]} className={`fig-limb ${weaponDebug}`} item={armorItem} tag="wu2" />}
         {waxCaked && <WaxCaked s={s} near={nearShoulder} />}
         {encased && <WaxShell s={s} near={nearShoulder} far={farShoulder} />}
         {/* (What it holds, a flame or a lump of wax, over the wax coat, not under it.) */}

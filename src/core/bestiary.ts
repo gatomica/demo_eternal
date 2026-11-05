@@ -10,7 +10,7 @@
  */
 import { conditionOf } from "./conditions";
 import type { ActionDef, Pattern } from "./patterns";
-import { PATROL_WARDEN, SLEEPWALKER, SLEEPWALKER_HAMMER } from "./kinds/sleepwalker";
+import { PATROL_WARDEN, SLEEPWALKER, SLEEPWALKER_BARE, SLEEPWALKER_HAMMER } from "./kinds/sleepwalker";
 import { WARDEN } from "./kinds/warden";
 import { GUIDE_KIND } from "./kinds/guide";
 import { WAXED, WAXED_CHISEL, WAXED_HAMMER } from "./kinds/waxed";
@@ -63,6 +63,8 @@ export interface EnemyKind {
    * other enemy's weapon carries its effect (free for it), though it drops the ordinary weapon.
    */
   ownWeapon?: boolean;
+  /** It drops nothing when it falls (the Warden, for now). */
+  noDrops?: boolean;
   /** Drawn wearing the Penitent Warden's pointed hood (a patrol warden), on the map too. */
   hood?: boolean;
   /** Drawn with a special look (see render/looks.ts). */
@@ -161,6 +163,7 @@ export interface EnemyKind {
 export const ENEMY_KINDS = {
   sleepwalker: SLEEPWALKER,
   patrolWarden: PATROL_WARDEN,
+  sleepwalkerBare: SLEEPWALKER_BARE,
   sleepwalkerHammer: SLEEPWALKER_HAMMER,
   waxed: WAXED,
   waxedChisel: WAXED_CHISEL,

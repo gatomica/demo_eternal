@@ -258,6 +258,7 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
 
   return (
     <CombatScreen
+      music={subject === "warden"}
       initial={initial}
       override={override}
       panel={panel}

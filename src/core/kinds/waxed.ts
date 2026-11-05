@@ -29,7 +29,7 @@ const waxedPattern = (name: string, claw: string) => parsePattern(name, `
 
 export const WAXED: EnemyKind = {
   name: "Waxed",
-  maxHP: 12,
+  maxHP: 5,
   weapon: "baseline",
   armor: "none",
   variant: "waxed",

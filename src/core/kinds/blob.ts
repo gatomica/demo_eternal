@@ -17,7 +17,7 @@ import { parsePattern } from "../patterns";
 import { WAXED } from "./waxed";
 
 /** The whole body's Health: as much as the player's (20). */
-const BLOB_HP = 20;
+const BLOB_HP = 15;
 
 /** Its actions, with its clawing attack: the Waxed's Scratch, or a blow of the weapon it wields. */
 const actions = (claw = "Scratch:      attack, baseline, damage 2, cost 2   // as the Waxed's") => `

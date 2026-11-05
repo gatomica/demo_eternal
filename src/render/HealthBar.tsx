@@ -3,6 +3,7 @@
  */
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import type { Fighter, Player } from "../core/types";
+import { StringCounter, type StringPop } from "./StringCounter";
 
 /* ============================================================
  * Health bar
@@ -131,20 +132,24 @@ function roman(n: number): string {
 /**
  * Your bars in their fixed place at the top left (the same in a fight and in the inventory): the
  * health bar, the Eternity bar under it, and your revives left as a red Roman numeral beside it
- * (nothing once they're gone).
+ * (nothing once they're gone). Your String counter sits at the top right, on the same row.
  */
-export function PlayerBars({ player, preview, recover }: { player: Player; preview?: number; recover?: Recovery }) {
+export function PlayerBars({ player, preview, recover, string, stringPops, eternalString }: { player: Player; preview?: number; recover?: Recovery; string?: number; stringPops?: StringPop[]; eternalString?: number }) {
   return (
-    // (A fixed slot, so nothing else on screen can push it around.)
-    <div className="bar-slot bar-slot-player">
-      {player.charges > 0 && (
-        <span className="revive-count" aria-label={`${player.charges} revives left`}>{roman(player.charges)}</span>
-      )}
-      <div className="bar-stack">
-        <HealthBar fighter={player} preview={preview} recover={recover} />
-        <EternityBar player={player} />
+    <>
+      {/* (A fixed slot, so nothing else on screen can push it around.) */}
+      <div className="bar-slot bar-slot-player">
+        {player.charges > 0 && (
+          <span className="revive-count" aria-label={`${player.charges} revives left`}>{roman(player.charges)}</span>
+        )}
+        <div className="bar-stack">
+          <HealthBar fighter={player} preview={preview} recover={recover} />
+          <EternityBar player={player} />
+        </div>
       </div>
-    </div>
+      {/* Your String, at the top right on the same row, wherever your bars are. */}
+      {string !== undefined && <StringCounter amount={string} pops={stringPops} eternal={eternalString} />}
+    </>
   );
 }
 
@@ -153,12 +158,12 @@ export function PlayerBars({ player, preview, recover }: { player: Player; previ
  * ============================================================ */
 
 /**
- * Your Eternity: a thin, pale blue bar right under your health bar, as long as it (it holds as much
- * as your max health). Eternal weapons' effects drain it; it only fills again when you reawaken.
+ * Your Eternity: a thin, pale blue bar right under your health bar, as long as the health bar of that
+ * many points (it holds as much as your max Eternity, raised separately from your health). Eternal weapons' effects drain it; it only fills again when you reawaken.
  * Like the health bar, a change cuts at once with a flash, and a trail of the old value slides after.
  */
 export function EternityBar({ player }: { player: Player }) {
-  const { eternity, maxEternity, maxHP } = player;
+  const { eternity, maxEternity } = player;
   const [trail, setTrail] = useState(eternity);
   const [flash, setFlash] = useState(0);
   const last = useRef(eternity);
@@ -173,7 +178,7 @@ export function EternityBar({ player }: { player: Player }) {
       className="bar-eternity"
       role="img"
       aria-label={`Eternity ${Math.round(eternity)} of ${maxEternity}`}
-      style={{ width: `calc(var(--bar-track) * ${Math.min(maxHP, BAR_FULL_HP) / BAR_FULL_HP})` }}
+      style={{ width: `calc(var(--bar-track) * ${Math.min(maxEternity, BAR_FULL_HP) / BAR_FULL_HP})` }}
     >
       <i className="bar-eternity-trail" style={{ width: pct(trail) }} />
       <i className="bar-eternity-now" style={{ width: pct(eternity) }} />

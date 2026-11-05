@@ -1,8 +1,8 @@
 /**
  * figures.ts — the map's figures: you, the enemies and the hooded keepers.
  */
-import type { KindId } from "../core/bestiary";
-import type { ArmorTier, WeaponTier } from "../core/types";
+import { ENEMY_KINDS, type KindId } from "../core/bestiary";
+import type { ArmorItem, ArmorTier, HeadItem, WeaponItem, WeaponTier } from "../core/types";
 import { COLORS } from "./tuning";
 import type { Dir } from "./world";
 
@@ -20,14 +20,20 @@ export interface Look {
   /** What it carries in its hand and wears, as in a fight (none if left out). */
   weapon?: WeaponTier;
   armor?: ArmorTier;
+  /** The starting classes' own weapon and armor you carry (their look, instead of the tier's). */
+  weaponItem?: WeaponItem;
+  armorItem?: ArmorItem;
+  headItem?: HeadItem;
   /** The Penitent Warden's pointed hood (a patrol warden): its point hangs behind, the face in shadow. */
   hood?: boolean;
+  /** Howling, how far into it (0 to 1): standing tall, head back, arms and weapon thrown up, rings of sound. */
+  howl?: number;
 }
 
 const PLAYER_LOOK: Look = { ink: COLORS.ink, eye: COLORS.eye };
 
 /** You on the map, wearing what you have equipped. */
-export const playerLook = (gear: { weapon: WeaponTier; armor: ArmorTier }): Look => ({ ...PLAYER_LOOK, ...gear });
+export const playerLook = (gear: { weapon: WeaponTier; armor: ArmorTier; weaponItem?: WeaponItem; armorItem?: ArmorItem; headItem?: HeadItem }): Look => ({ ...PLAYER_LOOK, ...gear });
 
 /** Gear colors, the same as in a fight (index.css: --metal, --grip, --armor). */
 const METAL = "#b9bccb", GRIP = "#8a6b4a", ARMOR_INK = "#6f7489";
@@ -57,7 +63,13 @@ export function drawWalker(
   const leg = line;
   const step = frame === "stepL" ? -1 : frame === "stepR" ? 1 : 0;
   const bob = step ? -0.025 : 0;
-  const foot = 0.36, hip = 0.08 + bob, neck = -0.2 + bob, shoulder = neck + 0.05, headY = -0.36 + bob, r = 0.15;
+  // The sleepwalkers are hunched: the neck sunk and the head low.
+  const howling = look.howl !== undefined;
+  const slump = look.reach ? (howling ? -0.25 : 1) : 0;
+  const foot = 0.36, hip = 0.08 + bob, neck = -0.2 + bob + 0.06 * slump, shoulder = neck + 0.05, headY = -0.36 + bob + 0.11 * slump, r = 0.15;
+  /** How far forward the head is carried (set when seen from the side). */
+  let headX = 0;
+  const HX = (u: number) => X(u + headX);
 
   if (shadow) {
     g.fillStyle = COLORS.shadow;
@@ -66,42 +78,59 @@ export function drawWalker(
     g.beginPath(); g.ellipse(X(0), Y(foot + 0.01 + shadowDrop), 0.2 * T * s, 0.07 * T * s, 0, 0, Math.PI * 2); g.fill();
   }
 
-  g.strokeStyle = look.ink;
+  /** What the armor is made of: a class's own armor has its own colour. */
+  const armorInk = look.armorItem === "bronze-chestplate" ? "#b4803f" : look.armorItem === "garb" ? "#1d1d24" : look.armorItem === "robe" ? "#ebe9f1" : ARMOR_INK;
+  // A class's own armor covers the arms and legs too: they are drawn in its colour.
+  const limbInk = look.armorItem === "bronze-chestplate" ? "#efece4" : look.armorItem === "robe" ? "#d6d4de" : look.armorItem ? armorInk : look.ink;
+  g.strokeStyle = limbInk;
   g.lineWidth = Math.max(2, 0.075 * T);
   g.lineCap = "round";
   g.lineJoin = "round";
 
-  if (look.wax) { drawKneeler(g, X, Y, line, T, facing, step, foot, look); return; }
-
-  /** A stroke in a color of its own, then back to the figure's ink. */
+  /** A stroke in a color of its own, then back to the figure's limbs. */
   const stroke = (color: string, w: number, x1: number, y1: number, x2: number, y2: number) => {
     g.strokeStyle = color; g.lineWidth = Math.max(1.5, w * T); line(x1, y1, x2, y2);
-    g.strokeStyle = look.ink; g.lineWidth = Math.max(2, 0.075 * T);
+    g.strokeStyle = limbInk; g.lineWidth = Math.max(2, 0.075 * T);
   };
-  /** Armor: a plate over the torso, as in a fight. */
+  /** Armor: a plate over the torso, as in a fight (a robe hangs down to the knees). */
   const plate = () => {
     const armor = look.armor ?? "none";
-    if (armor !== "none") stroke(ARMOR_INK, PLATE_WIDTH[armor], 0, neck + 0.03, 0, neck + (hip - neck) * 0.86);
+    if (armor !== "none") stroke(armorInk, look.armorItem === "garb" ? 0.17 : PLATE_WIDTH[armor], 0, neck + 0.03, 0, look.armorItem === "robe" || look.armorItem === "garb" ? hip + 0.16 : neck + (hip - neck) * 0.86);
   };
   /** Normal and heavy armor add pauldrons, at these shoulders (both from the front, one from the side). */
   const pads = (at: number[]) => {
     if (look.armor !== "normal" && look.armor !== "heavy") return;
-    g.fillStyle = ARMOR_INK;
+    g.fillStyle = armorInk;
     for (const u of at) { g.beginPath(); g.arc(X(u), Y(shoulder + 0.01), (look.armor === "heavy" ? 0.055 : 0.042) * T, 0, Math.PI * 2); g.fill(); }
   };
-  /** The weapon, held at the hand (u, v) and hanging down, its tip leaning `lean` tiles out per tile down. */
-  const weapon = (u: number, v: number, lean: number) => {
+  /**
+   * The weapon, held at the hand (u, v), its tip leaning `lean` tiles out per tile down (a big lean: held level, pointing ahead),
+   * `dir` -1 pointing up the screen instead of down, and drawn `k` times its length (less, pointing toward or away from you).
+   */
+  const weapon = (u: number, v: number, lean: number, k = 1, dir = 1) => {
     const tier = look.weapon ?? "baseline";
     if (tier === "baseline") return;
-    const n = Math.hypot(lean, 1), du = lean / n, dv = 1 / n;
-    const at = (d: number, across = 0): [number, number] => [u + du * d - dv * across, v + dv * d + du * across];
+    const n = Math.hypot(lean, 1), du = lean / n, dv = dir / n;
+    const at = (d: number, across = 0): [number, number] => [u + du * d * k - dv * across, v + dv * d * k + du * across];
     const seg = (color: string, w: number, a: [number, number], b: [number, number]) => stroke(color, w, a[0], a[1], b[0], b[1]);
     const fill = (color: string, pts: [number, number][]) => {
       g.fillStyle = color; g.beginPath();
       pts.forEach(([pu, pv], i) => (i ? g.lineTo(X(pu), Y(pv)) : g.moveTo(X(pu), Y(pv))));
       g.closePath(); g.fill();
     };
-    if (tier === "light") { // the Jagged Chisel: a broad short sword snapped off and ground square
+    if (look.weaponItem === "shortsword") { // the Bronze Shortsword: a bronze leaf blade, a short guard
+      seg(GRIP, 0.035, at(-0.04), at(0.03));
+      seg("#8a5f2c", 0.03, at(0.03, -0.06), at(0.03, 0.06));
+      fill("#b9854a", [at(0.04, -0.03), at(0.15, -0.045), at(0.26, -0.03), at(0.34, 0), at(0.26, 0.03), at(0.15, 0.045), at(0.04, 0.03)]);
+    } else if (look.weaponItem === "axe") { // the Barbarian's Axe: a long haft, a broad iron head
+      seg(GRIP, 0.04, at(-0.06), at(0.46));
+      // (The head on the haft's side near its end: its edge alongside the haft, two lobes.)
+      fill("#8f93a3", [at(0.34, 0.02), at(0.27, 0.04), at(0.23, 0.11), at(0.3, 0.14), at(0.38, 0.14), at(0.44, 0.11), at(0.41, 0.04), at(0.37, 0.02)]);
+    } else if (look.weaponItem === "sickle") { // the Nomadic Sickle: a short handle, a hooked iron blade
+      seg(GRIP, 0.032, at(-0.04), at(0.06));
+      // (A crescent moon: its two tips on the handle's line, the arch bulging out to the side.)
+      fill("#8f93a3", [at(0.06, 0), at(0.065, -0.06), at(0.09, -0.115), at(0.13, -0.14), at(0.17, -0.115), at(0.195, -0.06), at(0.2, 0), at(0.185, -0.055), at(0.165, -0.1), at(0.13, -0.122), at(0.095, -0.1), at(0.075, -0.055)]);
+    } else if (tier === "light") { // the Jagged Chisel: a broad short sword snapped off and ground square
       seg(GRIP, 0.035, at(-0.04), at(0.02));
       seg(METAL, 0.03, at(0.02, -0.04), at(0.02, 0.04));
       fill(METAL, [at(0.03, -0.028), at(0.135, -0.028), at(0.145, -0.018), at(0.145, 0.028), at(0.03, 0.028)]);
@@ -117,6 +146,8 @@ export function drawWalker(
     }
   };
 
+  if (look.wax) { drawKneeler(g, X, Y, line, T, facing, step, foot, look, weapon); return; }
+
   if (facing === "up" || facing === "down") {
     // Legs: the stepping foot lifts; the arm on the other side swings.
     const lift = (side: number) => (step === side ? -0.08 : 0);
@@ -125,10 +156,16 @@ export function drawWalker(
     line(0, neck, 0, hip);
     plate();
     if (look.reach) {
-      // Arms held out ahead: toward you when facing down, away when facing up.
-      const out = facing === "down" ? 0.17 : -0.12;
-      line(-0.03, shoulder, -0.07, shoulder + out);
-      line(0.03, shoulder, 0.07, shoulder + out);
+      // Arms hanging down, loose. The weapon is in the right hand (on the left of the screen facing you, the right when
+      // facing away), held level: pointing toward you or away, so seen short.
+      const handY = howling ? shoulder - 0.2 : hip + 0.1, reachX = howling ? 0.17 : 0.1;
+      const side = facing === "down" ? -1 : 1;
+      // (Howling: both arms flung up, the weapon raised in the right hand.)
+      const hold = () => (howling ? weapon(side * reachX, handY, side * 0.2, 1, -1) : weapon(side * 0.1, handY, side * 0.15, 0.5, facing === "down" ? 1 : -1));
+      if (facing === "up") hold();
+      line(-0.03, shoulder, -reachX, handY);
+      line(0.03, shoulder, reachX, handY);
+      if (facing === "down") hold();
     } else {
       const swing = (side: number) => (step === -side ? (facing === "down" ? 0.05 : -0.05) : step === side ? (facing === "down" ? -0.03 : 0.03) : 0);
       // The weapon is in your right hand: on the left of the screen when you face it, the
@@ -146,11 +183,22 @@ export function drawWalker(
     const reach = step ? 0.12 : 0.045;
     leg(0, hip, m * reach, foot);
     leg(0, hip, -m * reach, foot + (step ? -0.02 : 0));
-    line(0, neck, 0, hip);
+    // Hunched: the neck and head carried well forward of the hips.
+    const lean = look.reach ? m * 0.09 : 0;
+    if (look.reach) headX = howling ? -m * 0.04 : m * 0.11;
+    line(lean, neck, 0, hip);
     plate();
     if (look.reach) {
-      line(0, shoulder, m * 0.24, shoulder + 0.02);
-      line(0, shoulder + 0.02, m * 0.21, shoulder + 0.06);
+      // Arms hanging down from the sunk shoulders, the weapon held level ahead. The right hand is the far one facing
+      // right (the weapon goes behind), the near one facing left.
+      const handY = howling ? shoulder - 0.2 : hip + 0.1;
+      const far = lean + m * (howling ? 0.08 : 0.01), near = lean + m * (howling ? 0.14 : 0.07);
+      // (Howling: both arms flung up and forward, the weapon raised.)
+      const hold = (u: number) => (howling ? weapon(u, handY, m * 0.3, 1, -1) : weapon(u, handY - (u === far ? 0.01 : 0), m * 1000));
+      if (facing === "right") hold(far);
+      line(lean, shoulder, near, handY);
+      line(lean, shoulder, far, handY - (howling ? 0 : 0.01));
+      if (facing === "left") hold(near);
     } else {
       const arm = step ? 0.1 : 0.045;
       // The weapon hangs from the front hand, tip a little ahead. Facing right, your right hand
@@ -163,35 +211,82 @@ export function drawWalker(
     pads([0]);
   }
 
+  // A howl rolls out from the head in rings.
+  if (howling) {
+    g.save();
+    g.lineWidth = Math.max(1.5, 0.03 * T);
+    for (let k = 0; k < 3; k++) {
+      const ph = (look.howl! * 2.4 + k / 3) % 1;
+      g.strokeStyle = `rgba(232, 224, 204, ${0.55 * (1 - ph)})`;
+      g.beginPath(); g.arc(HX(0), Y(headY), (0.2 + 0.5 * ph) * T, 0, Math.PI * 2); g.stroke();
+    }
+    g.restore();
+  }
   g.fillStyle = look.ink;
-  g.beginPath(); g.arc(X(0), Y(headY), r * T, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.arc(HX(0), Y(headY), r * T, 0, Math.PI * 2); g.fill();
   // Heavy armor comes with a helmet over the top of the head, stopping above the eyes.
-  if (look.armor === "heavy") {
+  if (look.armor === "heavy" && !look.armorItem && !look.headItem) {
     g.fillStyle = ARMOR_INK;
-    g.beginPath(); g.arc(X(0), Y(headY - 0.015), r * 1.07 * T, Math.PI, Math.PI * 2); g.fill();
-    g.fillRect(X(-r * 1.14), Y(headY - 0.04), r * 2.28 * T, 0.03 * T);
+    g.beginPath(); g.arc(HX(0), Y(headY - 0.015), r * 1.07 * T, Math.PI, Math.PI * 2); g.fill();
+    g.fillRect(HX(-r * 1.14), Y(headY - 0.04), r * 2.28 * T, 0.03 * T);
+  }
+
+  // A class's own head gear: a bronze helm with its red crest, a black hood, a clay mask on the side of the face.
+  if (look.headItem) {
+    const fx = facing === "left" ? -1 : facing === "right" ? 1 : 0;
+    if (look.headItem === "helm") {
+      g.fillStyle = "#a63a2e";
+      g.beginPath(); g.moveTo(HX(-r * 0.8), Y(headY - r * 0.5)); g.quadraticCurveTo(HX(0), Y(headY - r * 2.1), HX(r * 0.8), Y(headY - r * 0.5)); g.closePath(); g.fill();
+      g.fillStyle = "#b4803f";
+      g.beginPath(); g.arc(HX(0), Y(headY + 0.01), r * 1.12 * T, Math.PI, Math.PI * 2); g.fill();
+      g.fillRect(HX(-r * 1.12), Y(headY - 0.02), r * 2.24 * T, 0.045 * T);
+    } else if (look.headItem === "hood") {
+      g.fillStyle = "#17171c";
+      g.beginPath(); g.arc(HX(0), Y(headY), r * 1.22 * T, 0, Math.PI * 2); g.fill();
+      if (fx) { g.beginPath(); g.moveTo(HX(-fx * 0.04), Y(headY - 0.1)); g.lineTo(HX(-fx * 0.24), Y(headY - 0.15)); g.lineTo(HX(-fx * 0.13), Y(headY + 0.03)); g.fill(); }
+      // The opening: just a gap, the face beneath showing through the hood's pitch-black inside (the eyes are drawn after, over the face).
+      if (facing !== "up") {
+        g.fillStyle = "#050507";
+        g.beginPath(); g.arc(HX(0), Y(headY), r * 1.1 * T, 0, Math.PI * 2); g.fill();
+        g.fillStyle = look.ink;
+        g.beginPath(); g.arc(HX(fx * 0.03), Y(headY + 0.01), r * 0.95 * T, 0, Math.PI * 2); g.fill();
+      }
+    } else if (look.headItem === "mask") {
+      // Cloth wrapped about the whole head, only a sliver open for the eyes.
+      g.fillStyle = "#e3d9be";
+      g.beginPath(); g.arc(HX(0), Y(headY), r * 1.17 * T, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = "#b9ad8c"; g.lineWidth = Math.max(1, 0.016 * T);
+      for (const k of [-0.5, 0.05, 0.6]) { g.beginPath(); g.moveTo(HX(-r), Y(headY + k * r - 0.01)); g.quadraticCurveTo(HX(0), Y(headY + k * r - 0.04), HX(r), Y(headY + k * r + 0.01)); g.stroke(); }
+      // A real opening for the eyes: the face shows through it.
+      if (facing !== "up") {
+        g.fillStyle = look.ink;
+        g.beginPath();
+        g.ellipse(HX(fx * r * 0.5), Y(headY - 0.005), r * (fx ? 0.45 : 0.75) * T, r * 0.26 * T, 0, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
   }
 
   // A patrol warden's hood: a little larger than the head, its point hanging behind it (the way it
   // isn't facing), and the dark of its opening where the face is.
-  if (look.hood) {
+  if (look.hood || look.headItem === "wardenhood") {
     const back = facing === "left" ? 1 : facing === "right" ? -1 : 0;
     g.fillStyle = "#6c6871";
     g.beginPath();
-    if (back) { g.moveTo(X(back * 0.05), Y(headY - 0.13)); g.lineTo(X(back * 0.24), Y(headY - 0.2)); g.lineTo(X(back * 0.15), Y(headY + 0.02)); }
-    else { g.moveTo(X(-0.07), Y(headY - 0.12)); g.lineTo(X(0), Y(headY - (facing === "up" ? 0.3 : 0.27))); g.lineTo(X(0.07), Y(headY - 0.12)); }
+    if (back) { g.moveTo(HX(back * 0.05), Y(headY - 0.13)); g.lineTo(HX(back * 0.24), Y(headY - 0.2)); g.lineTo(HX(back * 0.15), Y(headY + 0.02)); }
+    else { g.moveTo(HX(-0.07), Y(headY - 0.12)); g.lineTo(HX(0), Y(headY - (facing === "up" ? 0.3 : 0.27))); g.lineTo(HX(0.07), Y(headY - 0.12)); }
     g.fill();
-    g.beginPath(); g.arc(X(0), Y(headY), r * 1.18 * T, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(HX(0), Y(headY), r * 1.18 * T, 0, Math.PI * 2); g.fill();
     if (facing !== "up") {
       g.fillStyle = "#0c0a0f";
-      g.beginPath(); g.ellipse(X(-back * 0.06), Y(headY + 0.02), (back ? 0.06 : 0.09) * T, 0.1 * T, 0, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.ellipse(HX(-back * 0.06), Y(headY + 0.02), (back ? 0.06 : 0.09) * T, (howling ? 0.15 : 0.1) * T, 0, 0, Math.PI * 2); g.fill();
     }
     return;
   }
   // Eyes give away which way the head faces; from behind there are none.
-  if (!look.eye) return;
+  if (!look.eye || look.headItem === "helm") return;
   g.fillStyle = look.eye;
-  const eye = (u: number, v: number) => { g.beginPath(); g.arc(X(u), Y(v), Math.max(1, 0.022 * T), 0, Math.PI * 2); g.fill(); };
+  const eye = (u: number, v: number) => { g.beginPath(); g.arc(HX(u), Y(v), Math.max(1, 0.022 * T), 0, Math.PI * 2); g.fill(); };
   if (facing === "down") { eye(-0.05, headY + 0.01); eye(0.05, headY + 0.01); }
   if (facing === "left") eye(-0.08, headY);
   if (facing === "right") eye(0.08, headY);
@@ -205,9 +300,12 @@ function drawKneeler(
   g: CanvasRenderingContext2D, X: (u: number) => number, Y: (v: number) => number,
   line: (x1: number, y1: number, x2: number, y2: number) => void,
   T: number, facing: Dir, step: number, foot: number, look: Look,
+  weapon: (u: number, v: number, lean: number, k?: number, dir?: number) => void,
 ) {
   const wax = look.wax!;
   const hip = 0.2, neck = 0.02;
+  /** A hammer-carrier holds it out like a walking stick. */
+  const cane = look.weapon === "heavy";
   const waxLine = (x1: number, y1: number, x2: number, y2: number, w = 0.12) => {
     g.strokeStyle = wax; g.lineWidth = Math.max(3, w * T); line(x1, y1, x2, y2);
     g.strokeStyle = look.ink; g.lineWidth = Math.max(2, 0.075 * T);
@@ -227,8 +325,16 @@ function drawKneeler(
     // Torso leaning forward, arms planted ahead, one reaching further each step.
     const nx = m * (0.12 + lean), ny = neck + 0.04;
     line(0, hip, nx, ny);
-    line(nx, ny + 0.03, m * (0.22 + (step === 1 ? 0.05 : 0)), foot);
-    line(nx, ny + 0.03, m * (0.17 + (step === -1 ? 0.05 : 0)), foot);
+    // The weapon is in the right hand (the far one facing right). A hammer is held like a walking stick: the hand raised
+    // level with its middle and well forward, the hammer reaching on ahead to the ground. Other weapons rest on the ground ahead of a planted hand.
+    const handA: [number, number] = [m * (0.22 + (step === 1 ? 0.05 : 0)), foot], handB: [number, number] = [m * (0.17 + (step === -1 ? 0.05 : 0)), foot];
+    const wHand = facing === "right" ? handB : handA;
+    if (cane) { wHand[0] = m * 0.3; wHand[1] = foot - 0.2; }
+    const holdIt = () => (cane ? weapon(wHand[0], wHand[1], m * 3, 1.5) : weapon(wHand[0], wHand[1] - 0.04, m * 2.5));
+    if (facing === "right") holdIt();
+    line(nx, ny + 0.03, handA[0], handA[1]);
+    line(nx, ny + 0.03, handB[0], handB[1]);
+    if (facing === "left") holdIt();
     head(m * (0.2 + lean), ny - 0.1);
   } else {
     // From the front or behind: knees apart on the ground, shins bound behind them.
@@ -238,8 +344,16 @@ function drawKneeler(
     line(0.02, hip, 0.07, foot);
     line(0, neck, 0, hip);
     const lift = (side: number) => (step === side ? -0.05 : 0);
-    line(-0.02, neck + 0.05, -0.15, foot + lift(-1));
-    line(0.02, neck + 0.05, 0.15, foot + lift(1));
+    // The weapon is in the right hand: the left of the screen facing you, the right facing away.
+    const wside = toward > 0 ? -1 : 1;
+    // (A hammer's hand is raised and a little out; the arm reaches up to it.)
+    const handL: [number, number] = [-0.15, foot + lift(-1)], handR: [number, number] = [0.15, foot + lift(1)];
+    if (cane) { const h = wside < 0 ? handL : handR; h[0] = wside * 0.2; h[1] = foot - 0.2; }
+    const hold = () => (cane ? weapon(wside * 0.2, foot - 0.2, wside * 0.2, 0.5, toward) : weapon(wside * 0.15, foot - 0.04 + lift(wside), wside * 1.2));
+    if (toward < 0) hold();
+    line(-0.02, neck + 0.05, handL[0], handL[1]);
+    line(0.02, neck + 0.05, handR[0], handR[1]);
+    if (toward > 0) hold();
     head(0, neck - 0.13);
   }
 }
@@ -392,11 +506,20 @@ export function drawBlobTop(g: CanvasRenderingContext2D, x: number, y: number, T
   // The heap: a circle, with its rim a little darker.
   g.fillStyle = wax; g.strokeStyle = rim; g.lineWidth = Math.max(2, 0.07 * T);
   g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill(); g.stroke();
-  // The three heads, rising out of it.
-  for (const [u, v] of [[0, -0.34], [-0.5, 0.26], [0.5, 0.26]]) {
+  // The three heads, half circles whose curve faces where it is going. Each stirs on its own; while it chases you they slide out
+  // to the heap's edge on your side, spread a little apart, one after another.
+  const chase = Math.max(0, Math.min(1, (reach - 0.15) / 0.85));
+  [[0, -0.34], [-0.5, 0.26], [0.5, 0.26]].forEach(([u, v], i) => {
+    const e = chase * (0.82 + 0.18 * Math.sin(t / 300 + i * 2.1));
+    const spread = ang + (i - 1) * 0.55 + Math.sin(t / 520 + i * 1.7) * 0.12;
+    const rx = u + Math.sin(t / 700 + i * 2.3) * 0.05, ry = v + Math.cos(t / 830 + i * 1.9) * 0.04;
+    const hx = cx + (rx * (1 - e) + Math.cos(spread) * 0.8 * e) * R, hy = cy + (ry * (1 - e) + Math.sin(spread) * 0.8 * e) * R;
+    const hr = 0.27 * R;
     g.fillStyle = wax; g.strokeStyle = rim; g.lineWidth = Math.max(1.5, 0.05 * T);
-    g.beginPath(); g.arc(cx + u * R, cy + v * R, 0.27 * R, 0, Math.PI * 2); g.fill(); g.stroke();
-  }
+    // Filled as a half disc, but only the curve is outlined (no line along the flat side).
+    g.beginPath(); g.arc(hx, hy, hr, ang - Math.PI / 2, ang + Math.PI / 2); g.closePath(); g.fill();
+    g.beginPath(); g.arc(hx, hy, hr, ang - Math.PI / 2, ang + Math.PI / 2); g.stroke();
+  });
 }
 
 /** A beaten Wax Blob, seen from above: the heap slumped flat, a ring of dark wax (the middle part stands for the whole). */
@@ -410,8 +533,9 @@ export function drawDeadBlob(g: CanvasRenderingContext2D, x: number, y: number, 
   g.beginPath(); g.arc(cx, cy, 0.92 * T, 0, Math.PI * 2); g.fill();
   g.fillStyle = wax;
   g.beginPath(); g.arc(cx, cy, 0.8 * T, 0, Math.PI * 2); g.fill();
+  // The three heads, slumped: the same half circles as the living heap's, flat and dark, no line along the flat side.
   g.fillStyle = "rgba(60,48,16,0.5)";
-  for (const [u, v] of [[0, -0.3], [-0.45, 0.22], [0.45, 0.22]]) { g.beginPath(); g.arc(cx + u * T, cy + v * T, 0.17 * T, 0, Math.PI * 2); g.fill(); }
+  for (const [u, v] of [[0, -0.3], [-0.45, 0.22], [0.45, 0.22]]) { g.beginPath(); g.arc(cx + u * T, cy + v * T, 0.2 * T, Math.PI, 0); g.closePath(); g.fill(); }
 }
 
 /** The Warden, beaten: his cloak lying in a low pyramid over a thick pool of wax. */
@@ -443,6 +567,7 @@ export function drawGuideRemains(g: CanvasRenderingContext2D, x: number, y: numb
 export const MAP_REMAINS: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number) => void> = {
   sleepwalker: drawRemains,
   patrolWarden: (g, x, y, T) => drawRemains(g, x, y, T, true),
+  sleepwalkerBare: drawRemains,
   sleepwalkerHammer: drawRemains,
   waxed: drawDeadWaxed,
   waxedChisel: drawDeadWaxed,
@@ -483,6 +608,56 @@ export function drawPickup(g: CanvasRenderingContext2D, x: number, y: number, T:
   for (const k of [-0.5, -0.1, 0.3]) { g.beginPath(); g.ellipse(X(cx), Y(cy + k * r), r * T, r * 0.55 * T, 0, 0, Math.PI * 2); g.stroke(); }
   for (const k of [-0.4, 0.4]) { g.beginPath(); g.ellipse(X(cx + k * r), Y(cy), r * 0.5 * T, r * T, 0, 0, Math.PI * 2); g.stroke(); }
   g.restore();
+}
+
+/**
+ * A faint string winding round a figure standing at (x, y) (the point `drawWalker` takes), `k` times its size: the String it holds
+ * (what you lost when it killed you). Two strands of a helix, slowly turning.
+ */
+export function drawStringAura(g: CanvasRenderingContext2D, x: number, y: number, T: number, k: number, t: number) {
+  g.save();
+  g.lineCap = "round";
+  g.lineWidth = Math.max(1, 0.022 * T);
+  g.strokeStyle = "rgba(244, 241, 230, 0.45)";
+  g.shadowColor = "rgba(255, 250, 235, 0.6)";
+  g.shadowBlur = 4;
+  for (let strand = 0; strand < 2; strand++) {
+    g.beginPath();
+    for (let i = 0; i <= 40; i++) {
+      const u = i / 40, a = u * Math.PI * 5 + t / 700 + strand * Math.PI;
+      const px = x + Math.sin(a) * 0.34 * T * k, py = y + (0.36 - u * 0.82 * k) * T + Math.cos(a) * 0.05 * T * k;
+      if (i) g.lineTo(px, py); else g.moveTo(px, py);
+    }
+    g.stroke();
+  }
+  g.restore();
+}
+
+/** A pile of String on the floor, left by your death: a bigger ball of yarn than the gear's, warm white, glowing and pulsing, its ends curling on the ground. */
+export function drawStringPile(g: CanvasRenderingContext2D, x: number, y: number, T: number, t: number, eternal = false) {
+  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
+  const foot = 0.33, r = 0.1, cy = foot - r;
+  const pulse = 0.5 + 0.5 * Math.sin(t / 600);
+  const reach = (0.55 + 0.1 * pulse) * T;
+  const halo = g.createRadialGradient(X(0), Y(cy), 0, X(0), Y(cy), reach);
+  halo.addColorStop(0, eternal ? `rgb(190 228 255 / ${0.5 + 0.3 * pulse})` : `rgb(255 250 235 / ${0.45 + 0.25 * pulse})`);
+  halo.addColorStop(1, eternal ? "rgb(190 228 255 / 0)" : "rgb(255 250 235 / 0)");
+  g.fillStyle = halo;
+  g.beginPath(); g.arc(X(0), Y(cy), reach, 0, Math.PI * 2); g.fill();
+  g.fillStyle = COLORS.shadow;
+  g.beginPath(); g.ellipse(X(0), Y(foot), r * 1.5 * T, r * 0.5 * T, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = eternal ? "#eef8ff" : "#f6f2e4";
+  g.beginPath(); g.arc(X(0), Y(cy), r * T, 0, Math.PI * 2); g.fill();
+  g.save();
+  g.beginPath(); g.arc(X(0), Y(cy), r * T, 0, Math.PI * 2); g.clip();
+  g.strokeStyle = eternal ? "#a9c9df" : "#cdc5ab"; g.lineWidth = Math.max(1, 0.01 * T);
+  for (const k of [-0.55, -0.15, 0.25, 0.6]) { g.beginPath(); g.ellipse(X(0), Y(cy + k * r), r * T, r * 0.55 * T, 0, 0, Math.PI * 2); g.stroke(); }
+  for (const k of [-0.45, 0.45]) { g.beginPath(); g.ellipse(X(k * r), Y(cy), r * 0.5 * T, r * T, 0, 0, Math.PI * 2); g.stroke(); }
+  g.restore();
+  // The loose ends, curling on the floor.
+  g.strokeStyle = eternal ? "#d6ecfb" : "#ece7d4"; g.lineWidth = Math.max(1, 0.014 * T); g.lineCap = "round";
+  g.beginPath(); g.moveTo(X(0.07), Y(foot - 0.03)); g.bezierCurveTo(X(0.2), Y(foot + 0.01), X(0.26), Y(foot - 0.04), X(0.32), Y(foot + 0.01)); g.stroke();
+  g.beginPath(); g.moveTo(X(-0.06), Y(foot - 0.02)); g.bezierCurveTo(X(-0.16), Y(foot + 0.02), X(-0.2), Y(foot - 0.03), X(-0.27), Y(foot)); g.stroke();
 }
 
 const GUIDE_NAVY = "#1d2a4f";
@@ -556,16 +731,18 @@ function drawGuideMap(g: CanvasRenderingContext2D, x: number, y: number, T: numb
   drawGuideBody(g, x, y, T, 1, performance.now());
 }
 
+/** A look with the weapon the kind carries in a fight (the same weapons as the player's). */
+const armed = (kind: KindId, look: Look): Look => ({ ...look, weapon: ENEMY_KINDS[kind].weapon });
+
 /** How each kind of enemy is drawn on the map. */
-export const MAP_FIGURES: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame) => void> = {
-  sleepwalker: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, SLEEPWALKER_LOOK),
-  // (The eternal ones look the same on the map for now.)
-  patrolWarden: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, PATROL_LOOK),
-  sleepwalkerHammer: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, SLEEPWALKER_LOOK),
-  waxed: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, WAXED_LOOK),
-  // (The armed ones look the same on the map for now.)
-  waxedChisel: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, WAXED_LOOK),
-  waxedHammer: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, WAXED_LOOK),
+export const MAP_FIGURES: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame, howl?: number) => void> = {
+  sleepwalker: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("sleepwalker", SLEEPWALKER_LOOK)),
+  patrolWarden: (g, x, y, T, facing, frame, howl) => drawWalker(g, x, y, T, facing, frame, true, 0, { ...armed("patrolWarden", PATROL_LOOK), howl }),
+  sleepwalkerBare: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("sleepwalkerBare", SLEEPWALKER_LOOK)),
+  sleepwalkerHammer: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("sleepwalkerHammer", SLEEPWALKER_LOOK)),
+  waxed: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("waxed", WAXED_LOOK)),
+  waxedChisel: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("waxedChisel", WAXED_LOOK)),
+  waxedHammer: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("waxedHammer", WAXED_LOOK)),
   blobLeft: () => {},
   blobMid: (g, x, y, T) => drawBlobTop(g, x, y, T, 0, 1, 0.2, performance.now()),
   blobRight: () => {},

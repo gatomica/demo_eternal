@@ -41,6 +41,8 @@ export const ACCEL = 16;
 
 /** How far you travel per walk-cycle frame, in tiles (a full cycle is four of these). */
 export const STRIDE = 0.42;
+/** Your own stride is a little longer, so your walk cycle is slower than the enemies'. */
+export const PLAYER_STRIDE = 0.54;
 
 /** Your footprint for bumping into walls: half its width and half its depth, in tiles. */
 export const HALF_W = 0.28;

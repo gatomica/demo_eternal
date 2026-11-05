@@ -4,7 +4,8 @@
  * rests.ts, movement.ts, endTurn.ts) reads and changes it in turn.
  */
 import { bodyOf } from "../body";
-import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Player, PlayerAction, Step, WeaponTier } from "../types";
+import { swingFor } from "../stance";
+import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Player, PlayerAction, Step, Swing, WeaponTier } from "../types";
 
 /** The action the player is locked into this turn, if any. */
 export function forcedAction(state: CombatState): "rest" | "revive" | null {
@@ -61,6 +62,10 @@ export interface Turn {
   fellReviving: Set<string>;
   /** Your forced Rest waits until the very end of the turn (your flame is being taken). */
   recoverLast: boolean;
+  /** Who last did you damage this turn (an enemy id): whose blow it was, should you fall. */
+  hurtBy?: string;
+  /** How your attack this turn swings (from the stance you start it in). */
+  swing?: Swing;
 
   /** Steps recorded so far, and the events of the one under way. */
   steps: Step[];
@@ -106,9 +111,13 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
     hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(),
     cancelled: new Set(), attacked: new Map(), interrupted: new Set(), fellReviving: new Set(),
     recoverLast: false,
+    swing: act?.type === "attack" ? swingFor(p.stance, alive.find(e => e.id === act.target)) : undefined,
     steps: [],
     events: [],
-    emit: ev => t.events.push(ev),
+    emit: ev => {
+      if ((ev.kind === "attack" || ev.kind === "eternal" || ev.kind === "splash") && ev.target === p.id && ev.damage > 0) t.hurtBy = ev.attacker;
+      t.events.push(ev);
+    },
     endStep: () => {
       if (t.events.length) t.steps.push({ events: t.events, after: snapshotOf(p, alive) });
       t.events = [];

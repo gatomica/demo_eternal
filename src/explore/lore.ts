@@ -13,7 +13,7 @@ export const LORE: Partial<Record<WeaponTier, string>> = {
 
 /** What each eternal weapon does besides its blow, and what it costs you, in plain words. */
 export const EFFECT: Partial<Record<WeaponTier, string>> = {
-  light: "Attack the same one two turns running, and a direct hit bites a quarter of its damage deeper. Costs twice that in Eternity.",
-  normal: "A direct hit tires them by a quarter of its damage more, and leaves them coated in wax. Costs that much Eternity.",
-  heavy: "A blow they Block tires them by a quarter of its damage more. Costs that much Eternity.",
+  light: "Empowers consecutive attacks against the same target.",
+  normal: "Empowers direct hits, tiring them further and leaving them coated in wax.",
+  heavy: "Empowers blows they Block, tiring them further.",
 };

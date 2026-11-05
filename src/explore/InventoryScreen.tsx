@@ -27,12 +27,15 @@ export interface InvFocus {
   place: Place;
 }
 
-const SLOT_LABEL: Record<Slot, string> = { weapon: "Weapon", armor: "Armor" };
+const SLOT_LABEL: Record<Slot, string> = { weapon: "Weapon", armor: "Armor", head: "Head" };
 
-export function InventoryScreen({ inv, player, ground, start, onUse, onClose }: {
+export function InventoryScreen({ inv, player, string, eternalString, ground, start, onUse, onClose }: {
   inv: Bag;
   /** You as your bars show you: full health between fights, your revives and your Eternity. */
   player: Player;
+  /** Your String, and your eternal String. */
+  string?: number;
+  eternalString?: number;
   /** What lies within reach on the ground, for each slot (the nearest). */
   ground: Partial<Record<Slot, GearSpec>>;
   /** Where the cursor starts (on the ground place, when you opened it to pick something up). */
@@ -71,9 +74,9 @@ export function InventoryScreen({ inv, player, ground, start, onUse, onClose }: 
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
       {/* You, large, at the side: the bottom strip comes up to your knees (as in a visual novel). */}
       <div className="inv-figure">
-        <StickFigure view="front" foe={false} pose="idle" weapon={look.weapon} armor={look.armor} title="You" />
+        <StickFigure view="front" foe={false} pose="stand" weapon={look.weapon} armor={look.armor} weaponItem={look.weaponItem} armorItem={look.armorItem} headItem={look.headItem} title="You" />
       </div>
-      <PlayerBars player={player} />
+      <PlayerBars player={player} string={string} eternalString={eternalString} />
       <div className="inv-stage">
         <div className="inv-column">
           {SLOTS.map((slot, r) => {
@@ -96,7 +99,7 @@ export function InventoryScreen({ inv, player, ground, start, onUse, onClose }: 
                       aria-label={`${SLOT_LABEL[slot]}, ${p === "ground" ? "on the ground" : p}: ${piece ? gearName(piece) : "empty"}${worn ? " (wielded)" : ""}`}
                     >
                       <span className="inv-place-icon">
-                        {piece ? <GearSprite slot={slot} tier={piece.tier} tilted /> : <GearIcon slot={slot} />}
+                        {piece ? <GearSprite slot={slot} tier={piece.tier} item={piece.item} tilted /> : <GearIcon slot={slot} />}
                       </span>
                       {focused && piece && (
                         <span className="inv-place-text">
