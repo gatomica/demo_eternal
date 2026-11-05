@@ -7,6 +7,7 @@
  * never as fast as you walk. Touching one starts its fight.
  */
 import { ENEMY_KINDS, type KindId } from "../core/bestiary";
+import { dropsOf } from "./gear";
 import { waxBlob } from "../core/encounters";
 import type { EnemySetup } from "../core/types";
 import type { Walker } from "./movement";
@@ -54,15 +55,19 @@ export function withCorpses(corpses: Record<string, Corpse>, defeated: string[])
 }
 
 /**
- * What resting by a keeper does to the enemies (and coming back after a loss, which counts the
- * same): the sleepwalkers get up again and their remains go; the waxed and the Warden stay dead.
- * Everything lying on the ground (what enemies dropped, what you left there) goes too.
+ * What reawakening does to the map, the same whether you rested by a keeper or fell and woke there: the
+ * sleepwalkers get up again and their remains go; the waxed and the Warden stay dead. Everything lying on
+ * the ground (what enemies dropped, what you left there) goes, and the remains that stay get what they
+ * dropped back, lying on them again, every time (even if you still carry the one you took).
  */
 export function wakeEnemies(j: { corpses: Record<string, Corpse>; defeated: string[] }) {
   const corpses = Object.fromEntries(Object.entries(j.corpses).filter(([, c]) => !ENEMY_KINDS[c.kind].respawns));
+  const ground: GroundItem[] = Object.entries(corpses).flatMap(([key, c]) =>
+    dropsOf([{ kind: c.kind }]).map((gear, i) => ({ id: `drop-${key}-${i}-back`, at: { x: c.x, y: c.y, z: c.alt }, gear: { ...gear, origin: key }, from: key })),
+  );
   return {
     corpses,
-    ground: [] as GroundItem[],
+    ground,
     defeated: j.defeated.filter(id => {
       const def = MAP_FOES.find(f => f.id === id);
       return !def || !livingDef(def, corpses);
@@ -95,6 +100,8 @@ export const MAP_FOES: MapFoe[] = [
   { id: "wax-2", kind: "waxed", home: { x: 33.5, y: 17.5, z: 0 }, fight: [{ kind: "waxed" }, { kind: "waxed" }] },
   { id: "wax-3", kind: "waxed", home: { x: 26.5, y: 25.5, z: 0 }, fight: [{ kind: "waxed" }] },
   { id: "wax-4", kind: "waxed", home: { x: 21.5, y: 21.5, z: 0 }, fight: [{ kind: "waxed" }] },
+  // In the little east room: a waxed with a Jagged Chisel (it drops an ordinary one; its remains give it back while you don't have it).
+  { id: "wax-east", kind: "waxedChisel", home: { x: 38, y: 17.5, z: 0 }, fight: [{ kind: "waxedChisel" }] },
   // In the shaft room: a Wax Blob (three targets, one body), too fat for the corridors, so it keeps to the room.
   { id: "hurdle", kind: "blobMid", home: { x: 27.5, y: 19.5, z: 0 }, girth: 1, fightWithin: 3.5, fight: waxBlob("hurdle") },
 ];
@@ -111,11 +118,17 @@ interface FoeTuning {
 
 export const FOE_TUNING: Record<KindId, FoeTuning> = {
   waxed: { notice: 3.2, chase: 0.85, walk: 0.6, wander: 0 },
+  waxedChisel: { notice: 3.2, chase: 0.85, walk: 0.6, wander: 0 },
+  waxedHammer: { notice: 3.2, chase: 0.85, walk: 0.6, wander: 0 },
   // The blob drags itself along, a little faster than the waxed.
   blobLeft: { notice: 4.0, chase: 1.0, walk: 0.6, wander: 0 },
   blobMid: { notice: 4.0, chase: 1.0, walk: 0.6, wander: 0 },
   blobRight: { notice: 4.0, chase: 1.0, walk: 0.6, wander: 0 },
+  blobLeftHammer: { notice: 4.0, chase: 1.0, walk: 0.6, wander: 0 },
+  blobRightHammer: { notice: 4.0, chase: 1.0, walk: 0.6, wander: 0 },
   sleepwalker: { notice: 4.5, chase: 2.0, walk: 0.8, wander: 1.8 },
+  patrolWarden: { notice: 4.5, chase: 2.0, walk: 0.8, wander: 1.8 },
+  sleepwalkerHammer: { notice: 4.5, chase: 2.0, walk: 0.8, wander: 1.8 },
   // He waits in the middle of his arena, and only comes for you once you're well inside it.
   warden: { notice: 3.5, chase: 1.1, walk: 0.7, wander: 0 },
   // (Not yet on the map: the guide is to become the tutorial's opponent.)

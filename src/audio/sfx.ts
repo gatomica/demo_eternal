@@ -353,6 +353,9 @@ export function sfxFor(ev: CombatEvent): { name: Sfx; delay: number } | null {
       return { name: ev.result === "blocked" ? "clang" : ev.result === "dodged" ? "dodge" : ev.fire ? "flame" : "hit", delay: 0 };
     case "burned":
       return { name: "flame", delay: 0.05 };
+    case "eternal":
+      // An eternal weapon's effect, just after its blow: the chisel bites again, the torch's wax hisses, the hammer rings on the guard.
+      return { name: ev.effect === "chisel" ? "hit" : ev.effect === "torch" ? "flame" : "clang", delay: 0.08 };
     case "splash":
       return { name: "flame", delay: 0 };
     case "rest":

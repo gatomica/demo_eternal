@@ -79,6 +79,8 @@ export const WARDEN: EnemyKind = {
   name: "Penitent Warden",
   maxHP: 30,
   weapon: "normal",
+  // (His flail: not one of the demo's weapons, so no eternal effect.)
+  ownWeapon: true,
   armor: "normal",
   revives: 1,
   flags: { sealed: false, phase2: false, flaming: false, phase2Pending: false },

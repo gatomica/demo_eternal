@@ -7,8 +7,8 @@
  * Rest, a move.
  */
 import { kindOf } from "../bestiary";
-import { attackCost, attackDamage, dodgeFatigue, resistance, sixteenths, WEAPONS } from "../rules";
-import type { Enemy, Fighter, Rng, WeaponTier } from "../types";
+import { attackCost, attackDamage, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, resistance, sixteenths, spendEternity, WEAPONS } from "../rules";
+import type { Enemy, Fighter, Player, Rng, WeaponTier } from "../types";
 import { bodyOf } from "../body";
 import { waxOn } from "./statuses";
 import type { Turn } from "./turn";
@@ -119,6 +119,8 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   if (attacker === p) t.pulls.set(target.id, p.id);
   else if (!ranged) t.pulls.set(attacker.id, attacker.id);
   const dmg = damageOf(attacker, weight);
+  // Whom it attacked with its weapon this turn, however the blow goes (for the Jagged Chisel, next turn; not a Hurl Wax).
+  if (isWeaponBlow(attacker, weight)) t.attacked.set(attacker.id, target.id);
 
   if (t.isReviving(target)) {
     // The blow passes through someone reviving.
@@ -144,6 +146,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   const sentBack = blocking && ranged ? 0 : resisted;
   const self = attacker !== p ? (attacker as Enemy) : undefined;
   t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, grit, fire: !!self?.intent.tags?.includes("fire") });
+  eternalEffect(t, attacker, target, blocking ? "blocked" : "hit", ranged, weight, dmg);
   // A direct hit may do more, by the attacker's own rules (the Warden's flail waxes, or burns).
   const onHit = self && kindOf(self).onDirectHit;
   if (!blocking && self && onHit) {
@@ -157,4 +160,43 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
       wax: () => waxOn(t, target, through),
     });
   }
+}
+
+/**
+ * A blow of the fighter's weapon itself: not bare hands, and not an action with a weight or damage of
+ * its own (an armed waxed's Hurl Wax, thrown with its other hand).
+ */
+function isWeaponBlow(attacker: Fighter, weight: WeaponTier) {
+  if (weight !== attacker.weapon || weight === "baseline") return false;
+  const own = (attacker as Partial<Enemy>).intent;
+  return !own || (own.damage === undefined && own.weight === undefined);
+}
+
+/**
+ * An eternal weapon's effect, as its blow lands (only a blow of the weapon itself, see `isWeaponBlow`).
+ * Each is a quarter of the blow's damage: the Jagged Chisel
+ * bites that much deeper on a direct hit into whoever it also attacked last turn (hit or not); the Waxed Torch's direct hit tires
+ * that much more and leaves the target looking waxed; the Brick Hammer tires a target that Blocks
+ * it by that much. You pay for it with Eternity (twice over for damage), and what Eternity can't
+ * pay becomes Death on you. Enemies' effects are free.
+ */
+function eternalEffect(t: Turn, attacker: Fighter, target: Fighter, result: "hit" | "blocked", ranged: boolean, weight: WeaponTier, dmg: number) {
+  if (!attacker.eternal || !isWeaponBlow(attacker, weight) || t.s.config.dummy) return;
+  const effect = ETERNAL_EFFECT[weight as keyof typeof ETERNAL_EFFECT];
+  const amount = dmg * ETERNAL_SHARE;
+  let damage = 0, fatigue = 0;
+  if (effect === "chisel" && result === "hit" && attacker.lastTarget === target.id) {
+    damage = amount;
+    hurt(t, target);
+    loseHealth(t, target, amount);
+  } else if (effect === "torch" && result === "hit") {
+    fatigue = amount;
+    t.tire(target, amount);
+    target.coated = true;
+  } else if (effect === "hammer" && result === "blocked" && !ranged) {
+    fatigue = amount;
+    t.tire(target, amount);
+  } else return;
+  const paid = attacker === t.p ? spendEternity(attacker as Player, amount * ETERNITY_PRICE[effect]) : { spent: 0, death: 0 };
+  t.emit({ kind: "eternal", attacker: attacker.id, target: target.id, effect, damage, fatigue, ...paid });
 }

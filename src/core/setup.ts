@@ -37,6 +37,9 @@ export function createCombat(
     waxed: false,
     charges: player.charges,
     reviving: false,
+    eternal: !!player.eternal && player.weapon !== "baseline",
+    maxEternity: player.maxHP,
+    eternity: Math.min(player.maxHP, player.eternity ?? player.maxHP),
   };
 
   const letters = "ABCDEFGHIJ";
@@ -54,6 +57,8 @@ export function createCombat(
       death: 0,
       weapon: kind.weapon,
       armor: kind.armor,
+      // (An enemy's weapon always carries its effect, but the Warden's own flail.)
+      eternal: kind.weapon !== "baseline" && !kind.ownWeapon,
       staggered: false,
       line: setup.line ?? "back",
       alive: true,

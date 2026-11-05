@@ -19,6 +19,9 @@ export interface Encounter {
 /** A Wax Blob: three parts that share one body (health and place). `id` tells bodies apart in a fight. */
 export const waxBlob = (id = "blob", extra: Partial<EnemySetup> = {}) => bodySetups("waxBlob", id, extra);
 
+/** A super Wax Blob: its two side parts wield eternal Brick Hammers. */
+export const superBlob = (id = "super", extra: Partial<EnemySetup> = {}) => bodySetups("superBlob", id, extra);
+
 export const ENCOUNTERS: Encounter[] = [
   { id: "one", label: "One sleepwalker", enemies: [{ kind: "sleepwalker" }] },
   { id: "two", label: "Two sleepwalkers", enemies: [{ kind: "sleepwalker" }, { kind: "sleepwalker" }] },
@@ -27,7 +30,16 @@ export const ENCOUNTERS: Encounter[] = [
     label: "Three sleepwalkers",
     enemies: [{ kind: "sleepwalker" }, { kind: "sleepwalker" }, { kind: "sleepwalker" }],
   },
+  { id: "patrol", label: "Patrol warden (torch)", enemies: [{ kind: "patrolWarden" }] },
+  { id: "hammer", label: "Hammer sleepwalker", enemies: [{ kind: "sleepwalkerHammer" }] },
+  {
+    id: "eternals",
+    label: "Sleepwalker, patrol warden and hammer",
+    enemies: [{ kind: "sleepwalker", line: "front" }, { kind: "patrolWarden" }, { kind: "sleepwalkerHammer" }],
+  },
   { id: "waxed", label: "One waxed", enemies: [{ kind: "waxed" }] },
+  { id: "waxed-chisel", label: "Chisel waxed", enemies: [{ kind: "waxedChisel" }] },
+  { id: "waxed-hammer", label: "Hammer waxed", enemies: [{ kind: "waxedHammer" }] },
   // (Placeholder behavior: the guide's own pattern is not designed yet.)
   { id: "guide", label: "The guide", enemies: [{ kind: "guide" }] },
   // The tutorial: four scripted turns against the guide, on the back line (see combat/lesson.ts).
@@ -36,6 +48,7 @@ export const ENCOUNTERS: Encounter[] = [
     enemies: [{ kind: "guide", line: "back", script: ["Hum", "Hum", "Halo Blast", "Halo Blast"] }],
   },
   { id: "blob", label: "Wax blob (three targets)", enemies: waxBlob() },
+  { id: "super-blob", label: "Super wax blob (hammers)", enemies: superBlob() },
   { id: "waxed-pair", label: "Two waxed", enemies: [{ kind: "waxed" }, { kind: "waxed" }] },
   {
     id: "mixed",

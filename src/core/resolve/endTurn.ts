@@ -51,7 +51,9 @@ export function endTurn(t: Turn) {
     t.emit({ kind: "stagger", who: p.id });
   }
   // Wax only lasts while there's Fatigue to hold it (a staggered fighter keeps it until it recovers).
-  for (const f of fighters) if (f.waxed && f.fatigue <= 0 && !f.staggered) fatigueGone(f);
+  for (const f of fighters) if ((f.waxed || f.coated) && f.fatigue <= 0 && !f.staggered) fatigueGone(f);
+  // Whom each one attacked this turn (the Jagged Chisel bites deeper into them if it attacks them again next turn).
+  for (const f of fighters) f.lastTarget = t.attacked.get(f.id);
   // Back on its feet, the wax sealing it breaks away.
   for (const f of fighters) if (f.encased && !f.staggered) f.encased = false;
   t.pinStaggered();

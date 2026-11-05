@@ -6,6 +6,27 @@
 import type { EnemyKind } from "../bestiary";
 import { parsePattern } from "../patterns";
 
+/**
+ * The Waxed's pattern, with its clawing attack: its own Scratch, or, for a waxed carrying a weapon,
+ * a blow of that weapon (in its free hand: Hurl Wax still tears the wax off with the other).
+ */
+const waxedPattern = (name: string, claw: string) => parsePattern(name, `
+    actions:
+      ${claw}
+      Hurl Wax:     attack, light, ranged
+      Brace:        block, baseline
+      Drag Forward: maneuver, advance, *Far   // crawls in only when far away
+      Slither Back: maneuver, retreat, *Close // backs off only when close
+      Clutch Flame: rest
+      Flame Immolation: attack, heavy, ranged, *Lit, #fire, #shockwave   // a lit waxed bursts: it dies, and its fire hits everyone
+    stances:
+      All > Hands Raised      > ${claw.split(":")[0].trim()}
+      All > Wax on Hand       > Hurl Wax
+      All > Cowering Sideways > Brace
+      All > Crawling          > Drag Forward, Slither Back
+      All > Cradle Flame      > Flame Immolation, Clutch Flame
+  `);
+
 export const WAXED: EnemyKind = {
   name: "Waxed",
   maxHP: 12,
@@ -24,22 +45,8 @@ export const WAXED: EnemyKind = {
     r.self.fatigue = 0;
     r.event({ kind: "fall", who: r.self.id });
   },
-  pattern: parsePattern("Waxed", `
-    actions:
-      Scratch:      attack, baseline, damage 2, cost 2   // a punch, but it hurts and tires as much as a light blow
-      Hurl Wax:     attack, light, ranged
-      Brace:        block, baseline
-      Drag Forward: maneuver, advance, *Far   // crawls in only when far away
-      Slither Back: maneuver, retreat, *Close // backs off only when close
-      Clutch Flame: rest
-      Flame Immolation: attack, heavy, ranged, *Lit, #fire, #shockwave   // a lit waxed bursts: it dies, and its fire hits everyone
-    stances:
-      All > Hands Raised      > Scratch
-      All > Wax on Hand       > Hurl Wax
-      All > Cowering Sideways > Brace
-      All > Crawling          > Drag Forward, Slither Back
-      All > Cradle Flame      > Flame Immolation, Clutch Flame
-  `),
+  // Scratch: a punch, but it hurts and tires as much as a light blow.
+  pattern: waxedPattern("Waxed", "Scratch:      attack, baseline, damage 2, cost 2"),
   modelPoses: { front: "w-t", back: "w-t-b" },
   stancePoses: {
     "Hands Raised": "w-hands",
@@ -69,3 +76,20 @@ export const WAXED: EnemyKind = {
   // Folded right down, hugging itself.
   deathPose: "w-dead",
 };
+
+/**
+ * A waxed carrying a weapon in its free hand: the same kneeling wretch, but its clawing
+ * attack is a blow of the weapon (its weight's numbers and speed, and its effect, free for it),
+ * and beaten, it drops the ordinary weapon. Hurl Wax is thrown with its other hand, as ever, and
+ * carries no effect; its Brace is still bare. (No Waxed Torch: that is the wardens' own.)
+ */
+const armedWaxed = (name: string, weapon: "light" | "heavy", strike: string): EnemyKind => ({
+  ...WAXED,
+  name,
+  weapon,
+  pattern: waxedPattern(name, `${strike}: attack   // a blow of its weapon, in its free hand`),
+  actionPoses: (({ Scratch, ...rest }) => ({ ...rest, [strike]: Scratch }))(WAXED.actionPoses!),
+});
+
+export const WAXED_CHISEL = armedWaxed("Chisel Waxed", "light", "Chisel Stab");
+export const WAXED_HAMMER = armedWaxed("Hammer Waxed", "heavy", "Hammer Blow");

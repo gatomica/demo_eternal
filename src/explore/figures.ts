@@ -20,6 +20,8 @@ export interface Look {
   /** What it carries in its hand and wears, as in a fight (none if left out). */
   weapon?: WeaponTier;
   armor?: ArmorTier;
+  /** The Penitent Warden's pointed hood (a patrol warden): its point hangs behind, the face in shadow. */
+  hood?: boolean;
 }
 
 const PLAYER_LOOK: Look = { ink: COLORS.ink, eye: COLORS.eye };
@@ -29,11 +31,16 @@ export const playerLook = (gear: { weapon: WeaponTier; armor: ArmorTier }): Look
 
 /** Gear colors, the same as in a fight (index.css: --metal, --grip, --armor). */
 const METAL = "#b9bccb", GRIP = "#8a6b4a", ARMOR_INK = "#6f7489";
+/** The demo's weapons, as the fight draws them (index.css): the torch's wax, the bedchamber brick, mortar, cord. */
+const WAX_INK = "#b9a14e", BRICK = "#85838d", MORTAR = "#c9c6bd", CORD = "#b39d73";
 
 /** How wide the plate over the torso is, in tiles (wider is heavier). */
 const PLATE_WIDTH: Record<ArmorTier, number> = { none: 0, light: 0.11, normal: 0.13, heavy: 0.15 };
 
 export const SLEEPWALKER_LOOK: Look = { ink: "#aaa5b8", eye: null, reach: true };
+
+/** A patrol warden: a sleepwalker in the Penitent Warden's pointed hood. */
+export const PATROL_LOOK: Look = { ...SLEEPWALKER_LOOK, hood: true };
 
 export const WAXED_LOOK: Look = { ink: "#9d98aa", eye: null, wax: "#b9a14e" };
 
@@ -94,17 +101,19 @@ export function drawWalker(
       pts.forEach(([pu, pv], i) => (i ? g.lineTo(X(pu), Y(pv)) : g.moveTo(X(pu), Y(pv))));
       g.closePath(); g.fill();
     };
-    if (tier === "light") { // dagger
-      seg(GRIP, 0.035, at(-0.03), at(0.02));
-      seg(METAL, 0.025, at(0.02, -0.035), at(0.02, 0.035));
-      fill(METAL, [at(0.02, -0.02), at(0.15), at(0.02, 0.02)]);
-    } else if (tier === "normal") { // sword
-      seg(GRIP, 0.035, at(-0.04), at(0.03));
-      seg(METAL, 0.03, at(0.03, -0.055), at(0.03, 0.055));
-      fill(METAL, [at(0.03, -0.022), at(0.29, -0.016), at(0.33), at(0.29, 0.016), at(0.03, 0.022)]);
-    } else { // maul, its head near the floor
-      seg(GRIP, 0.04, at(-0.06), at(0.3));
-      fill(METAL, [at(0.27, -0.08), at(0.38, -0.08), at(0.38, 0.08), at(0.27, 0.08)]);
+    if (tier === "light") { // the Jagged Chisel: a broad short sword snapped off and ground square
+      seg(GRIP, 0.035, at(-0.04), at(0.02));
+      seg(METAL, 0.03, at(0.02, -0.04), at(0.02, 0.04));
+      fill(METAL, [at(0.03, -0.028), at(0.135, -0.028), at(0.145, -0.018), at(0.145, 0.028), at(0.03, 0.028)]);
+    } else if (tier === "normal") { // the Waxed Torch: a shaft, its head a bulb of sealing wax
+      seg(GRIP, 0.032, at(-0.04), at(0.26));
+      seg(WAX_INK, 0.014, at(0.15, 0.014), at(0.26, 0.016));
+      fill(WAX_INK, [at(0.25, -0.04), at(0.31, -0.05), at(0.345, 0), at(0.31, 0.05), at(0.25, 0.04)]);
+    } else { // the Brick Hammer: a crooked haft, a brick lashed to its end near the floor
+      seg(GRIP, 0.04, at(-0.06), at(0.29));
+      fill(BRICK, [at(0.27, -0.075), at(0.37, -0.075), at(0.385, -0.05), at(0.385, 0.075), at(0.27, 0.075)]);
+      seg(MORTAR, 0.012, at(0.38, -0.04), at(0.38, 0.07));
+      seg(CORD, 0.012, at(0.28, -0.07), at(0.32, 0.07));
     }
   };
 
@@ -163,6 +172,22 @@ export function drawWalker(
     g.fillRect(X(-r * 1.14), Y(headY - 0.04), r * 2.28 * T, 0.03 * T);
   }
 
+  // A patrol warden's hood: a little larger than the head, its point hanging behind it (the way it
+  // isn't facing), and the dark of its opening where the face is.
+  if (look.hood) {
+    const back = facing === "left" ? 1 : facing === "right" ? -1 : 0;
+    g.fillStyle = "#6c6871";
+    g.beginPath();
+    if (back) { g.moveTo(X(back * 0.05), Y(headY - 0.13)); g.lineTo(X(back * 0.24), Y(headY - 0.2)); g.lineTo(X(back * 0.15), Y(headY + 0.02)); }
+    else { g.moveTo(X(-0.07), Y(headY - 0.12)); g.lineTo(X(0), Y(headY - (facing === "up" ? 0.3 : 0.27))); g.lineTo(X(0.07), Y(headY - 0.12)); }
+    g.fill();
+    g.beginPath(); g.arc(X(0), Y(headY), r * 1.18 * T, 0, Math.PI * 2); g.fill();
+    if (facing !== "up") {
+      g.fillStyle = "#0c0a0f";
+      g.beginPath(); g.ellipse(X(-back * 0.06), Y(headY + 0.02), (back ? 0.06 : 0.09) * T, 0.1 * T, 0, 0, Math.PI * 2); g.fill();
+    }
+    return;
+  }
   // Eyes give away which way the head faces; from behind there are none.
   if (!look.eye) return;
   g.fillStyle = look.eye;
@@ -287,7 +312,7 @@ const BLOOD = "#5a0b10", BLOOD_CUT = "#8a1219";
  * stumps (two with torn red ends), a split ribcage, its head half sunk into the ground, a small
  * pool of blood.
  */
-export function drawRemains(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
+export function drawRemains(g: CanvasRenderingContext2D, x: number, y: number, T: number, hooded = false) {
   const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
   const foot = 0.36;
   g.lineCap = "round"; g.lineJoin = "round";
@@ -306,6 +331,12 @@ export function drawRemains(g: CanvasRenderingContext2D, x: number, y: number, T
   // The head, sunk half into the ground.
   g.fillStyle = SLEEPWALKER_LOOK.ink;
   g.beginPath(); g.arc(X(0.3), Y(foot - 0.08), 0.1 * T, Math.PI, 0); g.fill();
+  // A patrol warden's: its pointed hood still on it, the point flopped along the ground.
+  if (hooded) {
+    g.fillStyle = "#6c6871";
+    g.beginPath(); g.arc(X(0.3), Y(foot - 0.08), 0.12 * T, Math.PI, 0); g.fill();
+    g.beginPath(); g.moveTo(X(0.22), Y(foot - 0.13)); g.lineTo(X(0.06), Y(foot - 0.075)); g.lineTo(X(0.2), Y(foot - 0.08)); g.closePath(); g.fill();
+  }
   pool(g, X(0.3), Y(foot - 0.08), T, 0.12, 0.025, BLOOD);
 }
 
@@ -411,88 +442,47 @@ export function drawGuideRemains(g: CanvasRenderingContext2D, x: number, y: numb
 /** What lies where each kind of enemy fell. */
 export const MAP_REMAINS: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number) => void> = {
   sleepwalker: drawRemains,
+  patrolWarden: (g, x, y, T) => drawRemains(g, x, y, T, true),
+  sleepwalkerHammer: drawRemains,
   waxed: drawDeadWaxed,
+  waxedChisel: drawDeadWaxed,
+  waxedHammer: drawDeadWaxed,
   blobLeft: () => {},
   blobMid: drawDeadBlob,
   blobRight: () => {},
+  blobLeftHammer: () => {},
+  blobRightHammer: () => {},
   warden: drawCloakRemains,
   guide: drawGuideRemains,
 };
 
 /**
- * A broken sword lying on the floor: a hilt and a stub of blade, the snapped tip a little way
- * off, and a small glint that comes and goes so it catches the eye.
+ * Gear lying on the map floor: whatever it is, a small ball of yarn like the guide's orb, glowing
+ * faintly. Eternal gear glows light blue instead, a light of its own that pulses slowly.
  */
-export function drawBrokenSword(g: CanvasRenderingContext2D, x: number, y: number, T: number, t: number) {
+export function drawPickup(g: CanvasRenderingContext2D, x: number, y: number, T: number, t: number, eternal = false) {
   const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
-  const foot = 0.32;
-  g.lineCap = "round"; g.lineJoin = "round";
+  const foot = 0.32, r = 0.055, cx = 0, cy = foot - r;
+  const pulse = eternal ? 0.5 + 0.5 * Math.sin(t / 520) : 0.5 + 0.5 * Math.sin(t / 900);
+  // Its light: warm and faint, or (eternal) light blue, wider and stronger, pulsing.
+  const reach = (eternal ? 0.62 + 0.12 * pulse : 0.3) * T;
+  const halo = g.createRadialGradient(X(cx), Y(cy), 0, X(cx), Y(cy), reach);
+  halo.addColorStop(0, eternal ? `rgb(190 228 255 / ${0.5 + 0.3 * pulse})` : `rgb(255 250 235 / ${0.22 + 0.08 * pulse})`);
+  halo.addColorStop(1, eternal ? "rgb(190 228 255 / 0)" : "rgb(255 250 235 / 0)");
+  g.fillStyle = halo;
+  g.beginPath(); g.arc(X(cx), Y(cy), reach, 0, Math.PI * 2); g.fill();
+  // Its shadow, then the ball.
   g.fillStyle = COLORS.shadow;
-  g.beginPath(); g.ellipse(X(0), Y(foot), 0.3 * T, 0.06 * T, 0, 0, Math.PI * 2); g.fill();
-  // The hilt and the stub of the blade, slanting across the floor.
-  const line = (x1: number, y1: number, x2: number, y2: number, color: string, w: number) => {
-    g.strokeStyle = color; g.lineWidth = Math.max(2, w * T);
-    g.beginPath(); g.moveTo(X(x1), Y(y1)); g.lineTo(X(x2), Y(y2)); g.stroke();
-  };
-  line(-0.22, foot - 0.02, -0.28, foot - 0.07, "#6d5a3c", 0.07);
-  line(-0.2, foot - 0.04, 0.08, foot - 0.1, "#b9b6c6", 0.06);
-  line(-0.12, foot - 0.12, -0.08, foot + 0.02, "#8d7a54", 0.05);
-  // The snapped tip.
-  g.fillStyle = "#b9b6c6";
-  g.beginPath(); g.moveTo(X(0.17), Y(foot - 0.12)); g.lineTo(X(0.34), Y(foot - 0.06)); g.lineTo(X(0.18), Y(foot - 0.04)); g.closePath(); g.fill();
-  // A glint.
-  const glint = 0.5 + 0.5 * Math.sin(t / 380);
-  g.strokeStyle = `rgb(255 244 210 / ${0.15 + 0.6 * glint})`; g.lineWidth = Math.max(1, 0.02 * T);
-  const gx = X(0.0), gy = Y(foot - 0.13), r = (0.03 + 0.05 * glint) * T;
-  g.beginPath(); g.moveTo(gx - r, gy); g.lineTo(gx + r, gy); g.moveTo(gx, gy - r); g.lineTo(gx, gy + r); g.stroke();
-}
-
-/** A whole sword lying on the floor, a glint on its blade. */
-function drawSword(g: CanvasRenderingContext2D, x: number, y: number, T: number, t: number) {
-  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
-  const foot = 0.32;
-  g.lineCap = "round"; g.lineJoin = "round";
-  g.fillStyle = COLORS.shadow;
-  g.beginPath(); g.ellipse(X(0), Y(foot), 0.34 * T, 0.06 * T, 0, 0, Math.PI * 2); g.fill();
-  const line = (x1: number, y1: number, x2: number, y2: number, color: string, w: number) => {
-    g.strokeStyle = color; g.lineWidth = Math.max(2, w * T);
-    g.beginPath(); g.moveTo(X(x1), Y(y1)); g.lineTo(X(x2), Y(y2)); g.stroke();
-  };
-  line(-0.26, foot - 0.02, -0.32, foot - 0.06, "#6d5a3c", 0.07);
-  line(-0.2, foot - 0.03, 0.34, foot - 0.12, "#cfcde0", 0.06);
-  line(-0.2, foot - 0.12, -0.16, foot + 0.04, "#8d7a54", 0.05);
-  glint(g, X(0.1), Y(foot - 0.16), T, t);
-}
-
-/** A breastplate lying on the floor, a glint on its shoulder. */
-function drawArmorPiece(g: CanvasRenderingContext2D, x: number, y: number, T: number, t: number) {
-  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
-  const foot = 0.32;
-  g.fillStyle = COLORS.shadow;
-  g.beginPath(); g.ellipse(X(0), Y(foot), 0.3 * T, 0.06 * T, 0, 0, Math.PI * 2); g.fill();
-  g.fillStyle = "#8f8da1";
-  g.beginPath();
-  g.moveTo(X(-0.22), Y(foot - 0.22)); g.lineTo(X(0.22), Y(foot - 0.22));
-  g.lineTo(X(0.16), Y(foot - 0.02)); g.lineTo(X(-0.16), Y(foot - 0.02)); g.closePath(); g.fill();
-  g.strokeStyle = "#5c5a6c"; g.lineWidth = Math.max(1, 0.03 * T); g.stroke();
-  g.fillStyle = "#6a6879";
-  g.beginPath(); g.ellipse(X(0), Y(foot - 0.22), 0.08 * T, 0.04 * T, 0, 0, Math.PI * 2); g.fill();
-  glint(g, X(-0.12), Y(foot - 0.18), T, t);
-}
-
-/** A small star of light that comes and goes, so a thing on the floor catches the eye. */
-function glint(g: CanvasRenderingContext2D, gx: number, gy: number, T: number, t: number) {
-  const pulse = 0.5 + 0.5 * Math.sin(t / 380);
-  g.strokeStyle = `rgb(255 244 210 / ${0.15 + 0.6 * pulse})`; g.lineWidth = Math.max(1, 0.02 * T);
-  const r = (0.03 + 0.05 * pulse) * T;
-  g.beginPath(); g.moveTo(gx - r, gy); g.lineTo(gx + r, gy); g.moveTo(gx, gy - r); g.lineTo(gx, gy + r); g.stroke();
-}
-
-/** Gear lying on the map floor, by its look. */
-export function drawPickup(g: CanvasRenderingContext2D, x: number, y: number, T: number, t: number, look: "broken-sword" | "sword" | "armor") {
-  if (look === "broken-sword") drawBrokenSword(g, x, y, T, t);
-  else if (look === "sword") drawSword(g, x, y, T, t);
-  else drawArmorPiece(g, x, y, T, t);
+  g.beginPath(); g.ellipse(X(cx), Y(foot), r * 1.3 * T, r * 0.45 * T, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = eternal ? "#eef8ff" : "#f2efe4";
+  g.beginPath(); g.arc(X(cx), Y(cy), r * T, 0, Math.PI * 2); g.fill();
+  // The yarn wound round it, every which way.
+  g.save();
+  g.beginPath(); g.arc(X(cx), Y(cy), r * T, 0, Math.PI * 2); g.clip();
+  g.strokeStyle = eternal ? "#a9c9df" : "#c9c2aa"; g.lineWidth = Math.max(1, 0.008 * T);
+  for (const k of [-0.5, -0.1, 0.3]) { g.beginPath(); g.ellipse(X(cx), Y(cy + k * r), r * T, r * 0.55 * T, 0, 0, Math.PI * 2); g.stroke(); }
+  for (const k of [-0.4, 0.4]) { g.beginPath(); g.ellipse(X(cx + k * r), Y(cy), r * 0.5 * T, r * T, 0, 0, Math.PI * 2); g.stroke(); }
+  g.restore();
 }
 
 const GUIDE_NAVY = "#1d2a4f";
@@ -569,10 +559,18 @@ function drawGuideMap(g: CanvasRenderingContext2D, x: number, y: number, T: numb
 /** How each kind of enemy is drawn on the map. */
 export const MAP_FIGURES: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame) => void> = {
   sleepwalker: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, SLEEPWALKER_LOOK),
+  // (The eternal ones look the same on the map for now.)
+  patrolWarden: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, PATROL_LOOK),
+  sleepwalkerHammer: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, SLEEPWALKER_LOOK),
   waxed: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, WAXED_LOOK),
+  // (The armed ones look the same on the map for now.)
+  waxedChisel: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, WAXED_LOOK),
+  waxedHammer: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, WAXED_LOOK),
   blobLeft: () => {},
   blobMid: (g, x, y, T) => drawBlobTop(g, x, y, T, 0, 1, 0.2, performance.now()),
   blobRight: () => {},
+  blobLeftHammer: () => {},
+  blobRightHammer: () => {},
   warden: (g, x, y, T, facing) => drawWardenMap(g, x, y, T, facing),
   guide: (g, x, y, T) => drawGuideMap(g, x, y, T),
 };

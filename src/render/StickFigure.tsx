@@ -9,7 +9,8 @@
  * Both use the same poses, drawn facing right. What changes is depth:
  *  - The player's weapon arm is the far arm, so it and the weapon are drawn behind the body.
  *  - An enemy carries its weapon in its right hand too: the far arm, drawn behind the body, and the
- *    figure is mirrored. (The waxed carry nothing: their arms keep their own depth.)
+ *    figure is mirrored. (The waxed carry nothing in that hand: their arms keep their own depth. An armed
+ *    waxed holds its weapon in its free hand, see `waxedGrip`.)
  * Gear attaches to joints: the weapon to the weapon hand, armor to the torso, shoulders and head.
  */
 import { memo } from "react";
@@ -26,35 +27,143 @@ import type { CandleArm, WardenPoseName } from "../warden/skeleton";
  * Gear
  * ============================================================ */
 
-/** Weapons are drawn along +x from the grip at (0, 0). */
+/**
+ * The sealing king's mark, pressed into the torch's wax: a closed eye, its lid a shallow curve across
+ * the torch, and what the mark is really about, three straight parallel lashes hanging from it toward
+ * the torch's tip, stopping short of it, the middle one longer than the other two. The lid's middle is
+ * at (x, 0), `r` half its width; the side lashes end at `side`, the middle one at `mid` (along the torch, +x).
+ */
+function SealingMark({ x, r, side, mid }: { x: number; r: number; side: number; mid: number }) {
+  const lid = `M${x} ${-r} Q${x + r * 0.9} 0 ${x} ${r}`;
+  // Where each lash leaves the lid (on the curve), and where it ends.
+  const lashes = [-0.62, 0, 0.62].map(u => `M${x + r * 0.45 * (1 - u * u) + r * 0.05} ${u * r} H${u === 0 ? mid : side}`).join(" ");
+  return (
+    <g>
+      <path d={lid} className="fig-stamp-line" />
+      <path d={lashes} className="fig-stamp-lash" />
+    </g>
+  );
+}
+
+/**
+ * Weapons are drawn along +x from the grip at (0, 0), +y across the blade. Each is the demo's one
+ * weapon of its weight:
+ *  - light, the **Jagged Chisel**: an imperial short sword snapped in half and ground into a chisel.
+ *    A ball pommel and a ridged grip, the bulky oval guard seen edge-on, a broad blade with its fuller,
+ *    ending square, a ground bevel across its end; small nicks and chips along its edges, and wax
+ *    from carving smeared on the blade in streaks, like paint.
+ *  - normal, the **Waxed Torch**: a wooden torch whose head (rags, charred) is sealed in a bulb of wax,
+ *    stamped with the sealing king's mark; the wax has run down the shaft in runnels.
+ *  - heavy, the **Brick Hammer**: a crooked branch with a grey brick of the bedchambers lashed to it by
+ *    cord, mortar still on one edge, a corner knocked off, a crack running through it.
+ */
 export function Weapon({ tier }: { tier: WeaponTier }) {
   switch (tier) {
     case "baseline": // bare hands
       return null;
-    case "light": // dagger
+    case "light": // the Jagged Chisel
       return (
         <g>
-          <line x1={-3} y1={0} x2={2} y2={0} className="fig-grip" />
-          <line x1={2} y1={-3} x2={2} y2={3} className="fig-metal" strokeWidth={2} />
-          <path d="M2 -1.6 L15 0 L2 1.6 Z" className="fig-blade" />
+          <circle cx={-5.4} cy={0} r={2.1} className="fig-wood-fill" />
+          <line x1={-4} y1={0} x2={1.4} y2={0} className="fig-grip" strokeWidth={2.6} />
+          {/* Finger ridges on the grip. */}
+          <path d="M-2.6 -1.2 v2.4 M-0.8 -1.2 v2.4" className="fig-wood-line" />
+          {/* The oval guard, edge-on. */}
+          <ellipse cx={2.2} cy={0} rx={1.3} ry={3.3} className="fig-metal-fill" />
+          {/* The broad blade, ground square at the break like a chisel: small nicks along its edges, a chipped corner. */}
+          <path d="M3.4 -2.3 L6.3 -2.3 L6.65 -1.85 L7 -2.3 L10 -2.3 L10.25 -2 L10.5 -2.3 L14 -2.3 L14.7 -1.6 L14.7 0.4 L14.35 0.7 L14.7 1 L14.7 2.3 L12.5 2.3 L12.2 1.95 L11.9 2.3 L8.7 2.3 L8.4 2 L8.1 2.3 L3.4 2.3 Z" className="fig-blade" />
+          <line x1={4.4} y1={0} x2={11.4} y2={0} className="fig-fuller" />
+          {/* The bevel ground across its end. */}
+          <line x1={13.3} y1={-2.1} x2={13.3} y2={2.1} className="fig-bevel" />
+          {/* Wax smeared on the blade from carving it, in streaks like paint. */}
+          <path d="M4.8 -1.3 Q7.6 -0.85 10.6 -1.45 M5.9 1.15 Q8.9 1.6 12.3 1.05" className="fig-wax-paint" />
         </g>
       );
-    case "normal": // sword
+    case "normal": // the Waxed Torch
       return (
         <g>
-          <line x1={-5} y1={0} x2={3} y2={0} className="fig-grip" />
-          <line x1={3} y1={-4.5} x2={3} y2={4.5} className="fig-metal" strokeWidth={2.5} />
-          <path d="M3 -1.9 L30 -1.2 L34 0 L30 1.2 L3 1.9 Z" className="fig-blade" />
+          <path d="M-5 -1.2 L24 -1.6 L24 1.6 L-5 1.2 Z" className="fig-wood-fill" />
+          {/* Cord bound under the head. */}
+          <path d="M20.4 -1.9 v3.8 M21.8 -1.9 v3.8" className="fig-cord" />
+          {/* The charred rags of the head, showing under the wax. */}
+          <rect x={23} y={-3.1} width={6} height={6.2} rx={1} className="fig-char" />
+          {/* The wax that sealed it, run down the shaft. */}
+          <path d="M25 -1.2 Q23.4 -0.4 22.2 -1 Q21 -1.5 19.4 -0.9" className="fig-wax-runnel" />
+          <circle cx={19.2} cy={-0.8} r={0.75} className="fig-wax-fill" />
+          <path d="M25 0.9 Q22.8 1.5 21 0.9 Q18.6 0.2 16.2 0.8" className="fig-wax-runnel" />
+          <circle cx={15.9} cy={0.85} r={0.85} className="fig-wax-fill" />
+          <path d="M25.4 -3.7 Q31 -5.6 34.6 -2.4 Q36.2 0 34.6 2.4 Q31 5.6 25.4 3.7 Q24 0 25.4 -3.7 Z" className="fig-wax-seal" />
+          {/* The seal pressed into it: the sealing king's mark. */}
+          <circle cx={30.6} cy={0} r={2.7} className="fig-wax-stamp" />
+          <SealingMark x={28.6} r={1.9} side={32.6} mid={34} />
         </g>
       );
-    case "heavy": // maul
+    case "heavy": // the Brick Hammer
       return (
         <g>
-          <line x1={-6} y1={0} x2={34} y2={0} className="fig-grip" strokeWidth={3} />
-          <rect x={30} y={-7} width={11} height={14} rx={1.5} className="fig-metal-fill" />
+          {/* A crooked branch for a haft, a knot on it. */}
+          <polyline points="-6,0.4 6,-0.5 18,0.6 31,0" className="fig-grip" strokeWidth={3} fill="none" />
+          <circle cx={11} cy={-1.3} r={0.9} className="fig-wood-fill" />
+          {/* The brick, a corner knocked off, mortar still caked on its far edge. */}
+          <path d="M29.5 -7 L38.6 -7 L41 -4.6 L41 7 L29.5 7 Z" className="fig-brick" />
+          <path d="M40.2 -4.2 L41 -4.6 L41 7 L40 7 Z" className="fig-mortar" />
+          {/* The crack that runs through it. */}
+          <path d="M38.6 -7 L37.4 -4.6 L38.6 -2.4 L36.9 0.4 L37.8 3.2 L37 5.2" className="fig-crack" />
+          {/* The cord that lashes it on: wound round the haft, then over the near face of the brick. */}
+          <path d="M27.4 -1.7 L31.1 -5.2 M27.4 1.7 L31.1 5.2 M31.1 -6.3 V6.3 M27.4 -1.9 v3.8 M28.6 -1.9 v3.8" className="fig-cord" />
         </g>
       );
   }
+}
+
+/**
+ * A weapon in the hand. `flash`: you just spent Eternity on its effect: it flashes pale blue, the
+ * colour of Eternity, once (a new key plays the flash again).
+ */
+export function HeldWeapon({ tier, flash }: { tier: WeaponTier; flash?: string }) {
+  return (
+    <>
+      {flash && tier !== "baseline" && <g key={flash} className="fig-eternal-flash" aria-hidden="true"><Weapon tier={tier} /></g>}
+      <Weapon tier={tier} />
+    </>
+  );
+}
+
+/** The floor, in a pose's coordinates (feet stand on it). */
+const FLOOR_Y = 114;
+
+/** The armed waxed's attack: its hands raised to strike (Hands Raised), and the blow itself. */
+const WAXED_ATTACK_POSES = new Set<string>(["w-hands", "w-scratch"]);
+
+/** The Brick Hammer along its axis (see `Weapon`): the butt of its haft behind the grip, and where its brick begins. */
+const HAMMER_BUTT = 6, HAMMER_HEAD = 29.5;
+
+/**
+ * How an armed waxed holds its weapon in its free hand (the other one tears off the wax it hurls): on
+ * along the forearm, raised when its hands go up, thrust forward as it rakes. Where that would run it
+ * into the floor (the arm hanging, the hand planted to crawl, toppled), it tilts up just enough to rest its
+ * tip on the floor, still pointing the way the forearm does, forward or back. Returns where the grip is
+ * and the angle in degrees.
+ */
+function waxedGrip(elbow: Pt, hand: Pt, reach: number): { at: Pt; angle: number } {
+  const along = Math.atan2(hand[1] - elbow[1], hand[0] - elbow[0]);
+  const deg = (a: number) => (a * 180) / Math.PI;
+  if (hand[1] + Math.sin(along) * reach <= FLOOR_Y - 1) return { at: hand, angle: deg(along) };
+  const lift = Math.asin(Math.max(-1, (FLOOR_Y - 1 - hand[1]) / reach));
+  return { at: hand, angle: deg(Math.cos(along) >= 0 ? lift : Math.PI - lift) };
+}
+
+/**
+ * The hammer outside its attack, held like a walking stick: straight up, its brick on top, the butt of the
+ * haft on the floor, the haft passing through the hand. Where the hand is higher than the haft reaches
+ * (leaning back with the wax, cowering, flinching), it is held just under the brick, the butt a little
+ * off the floor.
+ */
+function walkingStick(hand: Pt): { at: Pt; angle: number } {
+  const grounded = FLOOR_Y - 1 - HAMMER_BUTT;
+  // Pointing up (-90°), a point d along the hammer sits at y = at.y - d.
+  const lowest = hand[1] + HAMMER_HEAD - 3.5; // the grip, held just under the brick
+  return { at: [hand[0], Math.min(grounded, lowest)], angle: -90 };
 }
 
 const ARMOR_WIDTH: Record<ArmorTier, number> = { none: 0, light: 9, normal: 11, heavy: 14 };
@@ -117,6 +226,21 @@ function Ribcage({ s, nearSide, behind }: { s: Skeleton; nearSide: number; behin
   );
 }
 
+/**
+ * A patrol warden's hood: the Penitent Warden's (its round, its point hanging behind, one flat colour),
+ * sized to an ordinary head, with only the shadow of the opening where the face is, from the front. No
+ * beak and no wax beard: the wardens of the patrols wear no mask.
+ */
+function PatrolHood({ x, y, front }: { x: number; y: number; front: boolean }) {
+  return (
+    <g>
+      <path d={`M${x - 2.4} ${y - 6.6} L${x - 10.4} ${y - 10.2} L${x - 7.8} ${y + 0.8} Z`} className="fig-hood" />
+      <circle cx={x} cy={y} r={8.9} className="fig-hood" />
+      {front && <ellipse cx={x + 3} cy={y + 1.3} rx={4.3} ry={5.6} className="fig-hood-dark" />}
+    </g>
+  );
+}
+
 function Helmet({ s }: { s: Skeleton }) {
   const [x, y] = s.head;
   return <path d={`M${x - 8.5} ${y + 2} A8.5 8.5 0 0 1 ${x + 8.5} ${y + 2} L${x + 8.5} ${y + 5} L${x - 8.5} ${y + 5} Z`} className="fig-armor-fill" />;
@@ -172,6 +296,10 @@ interface StickFigureProps {
   flailFire?: boolean;
   /** Wax caked on it (Waxed, still standing). */
   waxCaked?: boolean;
+  /** You just spent Eternity on your weapon's effect: it flashes pale blue once (a new key flashes again). */
+  eternalFlash?: string;
+  /** A patrol warden: the Penitent Warden's pointed hood over its head (its face in shadow; no beak, no cloak). */
+  hooded?: boolean;
   /** Sealed whole in wax: every limb, the body and the head. */
   encased?: boolean;
   /**
@@ -268,7 +396,7 @@ const DEBUG_LIMB_COLORS = import.meta.env.DEV && false;
 const ACROSS_34 = 0.72;
 
 /** A figure, redrawn only when something about its look changes (the scene redraws every frame). */
-export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, encased, straight = false, foe, hand = "right", sides = false }: StickFigureProps) {
+export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, eternalFlash, hooded, encased, straight = false, foe, hand = "right", sides = false }: StickFigureProps) {
   const raw = ALL_POSES[pose];
   const front = view === "front";
   // A look that draws itself (the Warden), in its own poses.
@@ -369,7 +497,16 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
   );
   const weaponEl = waxed ? null : (
     <g transform={`translate(${s.weapon.at[0]} ${s.weapon.at[1]}) rotate(${s.weapon.angle})`}>
-      <Weapon tier={weapon} />
+      <HeldWeapon tier={weapon} flash={eternalFlash} />
+    </g>
+  );
+  // An armed waxed: the weapon in its free hand, along the forearm, resting on the floor where it would go through it.
+  // (Toppled, the hammer lies on the floor by its hand instead.)
+  const stick = weapon === "heavy" && !WAXED_ATTACK_POSES.has(pose) && pose !== "w-fallen";
+  const grip = stick ? walkingStick(s.freeArm.hand) : waxedGrip(s.freeArm.elbow, s.freeArm.hand, WEAPON_REACH[weapon]);
+  const freeWeaponEl = waxed && weapon !== "baseline" && (
+    <g transform={`translate(${grip.at[0]} ${grip.at[1]}) rotate(${grip.angle})`}>
+      <HeldWeapon tier={weapon} flash={eternalFlash} />
     </g>
   );
 
@@ -384,6 +521,7 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
         {weaponUpperArm}
         {weaponBehind && weaponEl}
         {weaponBehind && weaponArm}
+        {freeBehind && freeWeaponEl}
         {freeBehind && freeArm}
         <polyline points={leadIsNear ? limb(rearHip, s.rearLeg.knee, s.rearLeg.foot) : limb(leadHip, s.leadLeg.knee, s.leadLeg.foot)} className={`fig-limb ${straight ? "" : "fig-far"}${rightHipNear ? "" : debug(true, rightLeadDebug)}`} />
         {waxed && <WaxBinding s={s} />}
@@ -392,8 +530,9 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
         {!waxed && <polyline points={limb(farHip, nearHip)} className="fig-limb" />}
         <Armor tier={armor} s={s} near={nearShoulder} />
         <circle cx={hx} cy={hy} r={7.5} className="fig-head" />
-        {armor === "heavy" && <Helmet s={s} />}
-        {front && !waxed && (
+        {armor === "heavy" && !hooded && <Helmet s={s} />}
+        {hooded && <PatrolHood x={hx} y={hy} front={front} />}
+        {front && !waxed && !hooded && (
           // Only enemies show a face, turned toward the player (or the camera, straight on). The player is
           // always seen from behind.
           <g className="fig-eyes">
@@ -413,6 +552,7 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
         {/* The waxed's shins are under the binding, behind the body: only the thigh shows in front. */}
         <polyline points={waxed ? limb(s.hip, s.leadLeg.knee) : leadIsNear ? limb(leadHip, s.leadLeg.knee, s.leadLeg.foot) : limb(rearHip, s.rearLeg.knee, s.rearLeg.foot)} className={`fig-limb${rightHipNear ? debug(false, rightLeadDebug) : ""}`} />
         {waxed && <WaxHead s={s} />}
+        {!freeBehind && freeWeaponEl}
         {!freeBehind && freeArm}
         {!weaponBehind && weaponEl}
         {!weaponBehind && weaponArm}

@@ -3,6 +3,9 @@
  * armor they carry (all of it, every time), and falling takes it all away again, except the
  * eternal gear. Two slots, weapon and armor; the rest waits in the bag. Eternal gear piles up;
  * ordinary gear is one weapon and one armor at a time.
+ *
+ * Eternal gear comes as a "Memory of ...": the guide must read its dreams (at a safe spot) before it
+ * can be set in its slot's eternal place, which is also only done at a safe spot (`setEternal`).
  */
 import { ENEMY_KINDS } from "../core/bestiary";
 import { ARMOR, WEAPONS } from "../core/rules";
@@ -12,7 +15,18 @@ import type { Loadout } from "../combat/fight";
 export type Slot = "weapon" | "armor";
 
 /** What a piece of gear is. */
-export type GearSpec = { eternal?: boolean; /** What it is called, if not by its tier. */ name?: string } & (
+export type GearSpec = {
+  eternal?: boolean;
+  /** Eternal gear only: the guide has read its dreams (its lore and effect are known, and it can be set). */
+  read?: boolean;
+  /** What it is called, if not by its tier. */
+  name?: string;
+  /**
+   * The remains it dropped from (a key of the journey's corpses). Remains that stay for good (enemies that don't
+   * get up again) get it back when you reawaken, if you no longer have it.
+   */
+  origin?: string;
+} & (
   | { slot: "weapon"; tier: WeaponTier }
   | { slot: "armor"; tier: ArmorTier }
 );
@@ -43,20 +57,39 @@ export const EMPTY_INVENTORY: Inventory = { bag: [], weapon: null, armor: null, 
 
 export const SLOTS: Slot[] = ["weapon", "armor"];
 
-/** "Normal weapon", "Heavy armor"... */
-export const gearName = (g: GearSpec) => g.name ?? `${(g.slot === "weapon" ? WEAPONS[g.tier] : ARMOR[g.tier]).label} ${g.slot}`;
+/** "Waxed Torch", "Heavy armor"...; an eternal piece whose dreams are unread: "Memory of Brick Hammer". */
+export function gearName(g: GearSpec): string {
+  const base = g.name ?? (g.slot === "weapon" ? WEAPONS[g.tier].name : `${ARMOR[g.tier].label} armor`);
+  return g.eternal && !g.read ? `Memory of ${base}` : base;
+}
+
+/** "Lightweight" or "Heavyweight", for gear of those weights (nothing for normal ones, or none). */
+export function weightLabel(g: GearSpec): string | null {
+  return g.tier === "light" ? "Lightweight" : g.tier === "heavy" ? "Heavyweight" : null;
+}
+
+/** The piece you wear in a slot, if it is where you wield from (an eternal piece only counts once set in its place). */
+function wornIn(inv: Inventory, slot: Slot): Gear | undefined {
+  const worn = inv.bag.find(g => g.id === inv[slot]);
+  if (!worn || !worn.eternal) return worn;
+  return pieceAt(inv, slot, "eternal")?.id === worn.id ? worn : undefined;
+}
 
 /** What you wear, as a fight wants it: bare hands and no armor in an empty slot. */
 export function loadoutOf(inv: Inventory): Loadout {
-  const worn = (slot: Slot) => inv.bag.find(g => g.id === inv[slot]);
-  const weapon = worn("weapon"), armor = worn("armor");
+  const weapon = wornIn(inv, "weapon"), armor = wornIn(inv, "armor");
   return {
     weapon: weapon?.slot === "weapon" ? weapon.tier : "baseline",
     armor: armor?.slot === "armor" ? armor.tier : "none",
+    eternal: weapon?.slot === "weapon" && !!weapon.eternal && !!weapon.read,
   };
 }
 
-/** The gear these enemies carry, all of it (bare hands and no armor aren't gear). */
+/**
+ * The gear these enemies carry, all of it (bare hands and no armor aren't gear). Always ordinary gear:
+ * an enemy fighting with a weapon's eternal effect still drops the ordinary weapon (eternal gear is only
+ * found, as memories).
+ */
 export function dropsOf(enemies: EnemySetup[]): GearSpec[] {
   return enemies.flatMap(setup => {
     const kind = ENEMY_KINDS[setup.kind];
@@ -70,8 +103,9 @@ export function dropsOf(enemies: EnemySetup[]): GearSpec[] {
 /**
  * Picks up gear. You can carry any amount of eternal gear, but only one piece of ordinary
  * weapon and one of ordinary armor: a new one takes the place of the old (and is worn if the old
- * one was). What an enemy drops goes on at once if its slot is empty; what you pick up off the
- * floor you equip yourself (`wear` false). `replaced` is what you had to let go of.
+ * one was: it is in the place you wield from). Otherwise it goes on at once only with `wear` and its slot
+ * empty. Eternal gear never goes on by itself: it comes as a memory, to be read and set at a safe spot.
+ * `replaced` is what you had to let go of.
  */
 export function receive(inv: Inventory, found: GearSpec[], wear = true): { inventory: Inventory; replaced: Gear[] } {
   const next = { ...inv, bag: [...inv.bag] };
@@ -87,20 +121,11 @@ export function receive(inv: Inventory, found: GearSpec[], wear = true): { inven
       }
     }
     next.bag.push(gear);
-    if ((wear || takesPlace) && next[gear.slot] === null) {
-      next[gear.slot] = gear.id;
-      // (Wielded eternal gear is the one in the eternal place.)
-      if (gear.eternal) next.shelf = { ...next.shelf, [gear.slot]: gear.id };
-    }
+    if ((wear || takesPlace) && !gear.eternal && next[gear.slot] === null) next[gear.slot] = gear.id;
   }
   return { inventory: next, replaced };
 }
 
-/** What to tell the player after picking gear up: "Dropped: ..." and what it replaced. */
-export function gotNote(verb: string, got: GearSpec[], replaced: GearSpec[]): string {
-  const names = (list: GearSpec[]) => list.map(gearName).join(", ").toLowerCase();
-  return `${verb}: ${names(got)}.${replaced.length ? ` You let go of the ${names(replaced)}.` : ""}`.replace(/^./, c => c.toUpperCase());
-}
 
 /** Falling: everything is lost but the eternal gear (and you wear it again if you wore it). */
 export function lose(inv: Inventory): Inventory {
@@ -109,16 +134,15 @@ export function lose(inv: Inventory): Inventory {
   return { ...inv, bag, weapon: keeps(inv.weapon), armor: keeps(inv.armor) };
 }
 
-/** What lies in a slot's eternal or normal place, or null if it is empty. */
+/** What lies in a slot's eternal or normal place, or null if it is empty (the eternal place: the read piece set there at a safe spot). */
 export function pieceAt(inv: Inventory, slot: Slot, side: Side): Gear | null {
   if (side === "normal") return inv.bag.find(g => g.slot === slot && !g.eternal) ?? null;
-  const eternal = inv.bag.filter(g => g.slot === slot && g.eternal);
-  return eternal.find(g => g.id === inv.shelf?.[slot]) ?? eternal.find(g => g.id === inv[slot]) ?? eternal[0] ?? null;
+  return inv.bag.find(g => g.slot === slot && g.eternal && g.read && g.id === inv.shelf?.[slot]) ?? null;
 }
 
 /** Which place of a slot you wield from: the place of the piece you wear, or else an empty one (nothing worn). */
 export function equippedSide(inv: Inventory, slot: Slot): Side | null {
-  const worn = inv.bag.find(g => g.id === inv[slot]);
+  const worn = wornIn(inv, slot);
   if (worn) return worn.eternal ? "eternal" : "normal";
   const empty = (side: Side) => !pieceAt(inv, slot, side);
   const chosen = inv.bare?.[slot];
@@ -136,10 +160,24 @@ export function equipSide(inv: Inventory, slot: Slot, side: Side): Inventory {
 /** Wields nothing in this slot (bare hands, no armor), counting this place as the one you wield from. */
 export const unequip = (inv: Inventory, slot: Slot, side: Side): Inventory => ({ ...inv, [slot]: null, bare: { ...inv.bare, [slot]: side } });
 
-/** Wields a piece you own for this slot: an eternal one takes the eternal place, an ordinary one the normal place. */
-export const choosePiece = (inv: Inventory, slot: Slot, piece: Gear): Inventory =>
-  equipSide(piece.eternal ? { ...inv, shelf: { ...inv.shelf, [slot]: piece.id } } : inv, slot, piece.eternal ? "eternal" : "normal");
+/** Your memories whose dreams the guide has not read yet. */
+export const unreadMemories = (inv: Inventory): Gear[] => inv.bag.filter(g => g.eternal && !g.read);
 
-/** Everything you own for a place of a slot: the eternal places list the eternal gear, the normal ones the ordinary gear. */
-export const piecesFor = (inv: Inventory, slot: Slot, side: Side): Gear[] =>
-  inv.bag.filter(g => g.slot === slot && !!g.eternal === (side === "eternal"));
+/** All your eternal gear for a slot, read or not: what the guide's Unwind Memories shows. */
+export const memoriesFor = (inv: Inventory, slot: Slot): Gear[] => inv.bag.filter(g => g.slot === slot && g.eternal);
+
+/** Whether you have found any memory at all (Unwind Memories is there from then on). */
+export const hasMemories = (inv: Inventory): boolean => inv.bag.some(g => g.eternal);
+
+/** The guide reads a memory's dreams: its lore and effect are known, and it can be set. */
+export const readDreams = (inv: Inventory, id: string): Inventory => ({ ...inv, bag: inv.bag.map(g => (g.id === id ? { ...g, read: true } : g)) });
+
+/**
+ * Sets a read eternal piece in its slot's eternal place (only at a safe spot, with the guide). If you
+ * were wielding from the eternal place, you wield the new piece.
+ */
+export function setEternal(inv: Inventory, slot: Slot, id: string): Inventory {
+  const wieldingEternal = equippedSide(inv, slot) === "eternal";
+  const next = { ...inv, shelf: { ...inv.shelf, [slot]: id } };
+  return wieldingEternal ? { ...next, [slot]: id } : next;
+}

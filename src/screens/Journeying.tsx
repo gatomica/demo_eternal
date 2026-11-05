@@ -12,7 +12,7 @@ import { ENCOUNTERS } from "../core/encounters";
 import type { CombatState, EnemySetup, Opening } from "../core/types";
 import { Exploration, type Journey } from "../explore/Exploration";
 import { type MapFoe, wakeEnemies, withCorpses } from "../explore/foes";
-import { dropsOf, EMPTY_INVENTORY, gotNote, loadoutOf, lose } from "../explore/gear";
+import { dropsOf, EMPTY_INVENTORY, loadoutOf, lose } from "../explore/gear";
 import type { GroundItem } from "../explore/pickups";
 import { clearSave, loadJourney, saveJourney } from "../explore/save";
 import { knotCharges, NEW_TUTORIAL } from "../explore/tutorial";
@@ -33,11 +33,11 @@ function enemiesOf(foes: MapFoe[]): EnemySetup[] {
 
 /** The guide's lesson: its fight is the Test combat "tutorial" encounter, with what you wear (nothing, at first), and it can't be lost. */
 const lessonFight = (backTo: Journey) =>
-  newFight(ENCOUNTERS.find(e => e.id === "tutorial")!.enemies, loadoutOf(backTo.inventory), knotCharges(backTo.knot), { sparring: true });
+  newFight(ENCOUNTERS.find(e => e.id === "tutorial")!.enemies, loadoutOf(backTo.inventory), knotCharges(backTo.knot), { sparring: true }, backTo.eternity);
 
 /** A fight against these map enemies as you are now: what you wear and the knot's revive. */
 const fightFor = (foes: MapFoe[], backTo: Journey) =>
-  newFight(enemiesOf(foes), loadoutOf(backTo.inventory), knotCharges(backTo.knot));
+  newFight(enemiesOf(foes), loadoutOf(backTo.inventory), knotCharges(backTo.knot), {}, backTo.eternity);
 
 /** A new game that skips the tutorial, for testing: the lesson is behind you, and all that is left is to rest with the guide. */
 function skippedTutorial(): Journey {
@@ -59,6 +59,7 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
    * wound again.
    */
   const fall = (backTo: Journey) => {
+    // (The map wakes exactly as it does when you rest: see `wakeEnemies`. Falling also costs your ordinary gear.)
     const woke = wakeEnemies({ corpses: withCorpses(backTo.corpses ?? {}, backTo.defeated), defeated: backTo.defeated });
     setJourney({
       ...woke,
@@ -67,6 +68,8 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
       tutorial: backTo.tutorial,
       knot: backTo.knot && "wound",
       inventory: lose(backTo.inventory),
+      // (Reawakening fills your Eternity again.)
+      eternity: undefined,
     });
   };
   /** Back to the main menu, keeping `j`. */
@@ -89,7 +92,7 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
         wonText={fight.lesson ? "The lesson is over" : undefined}
         onRetry={() => setFight(f => f && { ...f, id: f.id + 1, wake: false, ...(f.lesson ? lessonFight(f.backTo) : fightFor(f.foes, f.backTo)) })}
         onExit={() => leave(backTo)}
-        onDone={(won, charges) => {
+        onDone={(won, charges, eternity) => {
           if (fight.lesson) {
             // The lesson can't be lost. Passed, you are on the map, in the labyrinth's first room.
             setJourney(won ? { ...backTo, tutorial: { ...backTo.tutorial, beaten: true } } : backTo);
@@ -103,17 +106,19 @@ export function Journeying({ fresh = false, skip = false, onExit }: { fresh?: bo
             // Back where you stood, the enemy gone, and what it carried yours.
             // What they carried lies where they fell, to pick up.
             const dropped: GroundItem[] = Object.entries(backTo.fallen ?? {}).flatMap(([key, c]) =>
-              dropsOf([{ kind: c.kind }]).map((gear, i) => ({ id: `drop-${key}-${i}-${Date.now()}`, at: { x: c.x, y: c.y, z: c.alt }, gear, from: key })),
+              dropsOf([{ kind: c.kind }])
+                .map((gear, i) => ({ id: `drop-${key}-${i}-${Date.now()}`, at: { x: c.x, y: c.y, z: c.alt }, gear: { ...gear, origin: key }, from: key })),
             );
             setJourney({
               ...backTo,
               knot,
+              // What the fight left of your Eternity: it doesn't fill again between fights.
+              eternity,
               defeated: [...backTo.defeated, ...foes.map(f => f.id)],
               // They lie where they fell.
               corpses: { ...backTo.corpses, ...backTo.fallen },
               fallen: undefined,
               ground: [...(backTo.ground ?? []), ...dropped],
-              found: dropped.length ? gotNote("Dropped", dropped.map(d => d.gear), []) : undefined,
             });
           } else {
             fall(backTo);

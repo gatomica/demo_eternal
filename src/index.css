@@ -78,12 +78,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   padding: 8px 16px; border: 1px solid var(--line); border-radius: 6px;
   background: rgb(21 20 27 / 0.85); color: var(--text); font-size: 0.95rem; pointer-events: none;
 }
-.explore-note {
-  position: absolute; left: 50%; top: 18vh; transform: translateX(-50%); max-width: min(560px, 86vw);
-  text-align: center; color: var(--accent); font-size: 1.05rem; letter-spacing: 0.02em; pointer-events: none;
-  text-shadow: 0 1px 6px #000; animation: explore-note 2.6s ease-in-out forwards;
-}
-@keyframes explore-note { 0% { opacity: 0; } 12% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; } }
+/* What you just picked up, in the prompt's place: its sprite and name, popping up and then fading away. */
+.explore-got { display: flex; align-items: center; gap: 12px; padding: 8px 18px 8px 10px; animation: explore-got 2.2s ease-out forwards; }
+.explore-got .gear-sprite.is-weapon { width: 64px; height: 26px; }
+@keyframes explore-got { 0% { opacity: 0; transform: translate(-50%, 6px) scale(0.92); } 10% { opacity: 1; transform: translate(-50%, 0) scale(1); } 70% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, 0); } }
+@media (prefers-reduced-motion: reduce) { .explore-got { animation: explore-got-fade 2.2s linear forwards; } }
+@keyframes explore-got-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 /* The guide speaking, along the bottom of the map. */
 .dialogue {
   position: absolute; left: 50%; bottom: 7vh; transform: translateX(-50%); z-index: 10;
@@ -96,30 +96,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Resting: dark, then light again. */
 .explore-sleep { position: absolute; inset: 0; z-index: 20; background: #000; pointer-events: none; animation: explore-sleep 2.4s ease-in-out forwards; }
 @keyframes explore-sleep { 0% { opacity: 0; } 38% { opacity: 1; } 55% { opacity: 1; } 100% { opacity: 0; } }
-/* The inventory over the map. */
-.inventory {
-  width: min(520px, calc(100% - 32px)); padding: 18px 20px; display: grid; gap: 14px;
-  border: 1px solid var(--line); border-radius: 10px; background: rgb(21 20 27 / 0.96); color: var(--text);
-}
-.inventory-title { margin: 0; font-size: 1.1rem; font-weight: 600; }
-.inventory-slots { display: grid; gap: 8px; }
-.inventory-slot {
-  display: grid; grid-template-columns: 5.5rem 1fr auto; gap: 2px 12px; align-items: baseline;
-  padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: transparent; text-align: left;
-}
-.inventory-slot.is-focused { border-color: var(--accent); }
-.inventory-slot-label { grid-row: 1 / 3; color: var(--accent); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; align-self: center; }
-.inventory-slot-name { font-size: 1.02rem; }
-.inventory-slot-stats { grid-column: 2; font-size: 0.8rem; opacity: 0.65; }
-.inventory-slot-hint { grid-column: 3; grid-row: 1 / 3; align-self: center; font-size: 0.75rem; opacity: 0.6; }
-.inventory-bag { display: grid; gap: 4px; font-size: 0.9rem; }
-.inventory-bag-title { font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.6; }
-.inventory-empty { opacity: 0.5; }
-.inventory-note { font-size: 0.8rem; opacity: 0.6; }
-.inventory-keys { font-size: 0.85rem; opacity: 0.7; }
-/* The way back to the main menu, in the corner of the inventory screen. */
-.inventory-exit { position: absolute; left: 16px; bottom: 16px; width: auto; padding: 8px 16px; font-size: 0.9rem; }
-.inventory-exit-note { opacity: 0.6; font-size: 0.8rem; margin-left: 4px; }
 /* The knot you carry, on the map. */
 .explore-knot {
   position: absolute; left: 14px; bottom: 14px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
@@ -329,6 +305,13 @@ kbd {
 .bar-death { background: var(--void); }
 .bar-flash { position: absolute; inset: -1px; border-radius: 3px; background: #fff; pointer-events: none; animation: bar-flash 0.3s ease-out forwards; }
 @keyframes bar-flash { from { opacity: 0.85; } to { opacity: 0; } }
+/* Your Eternity, a thin pale blue bar tucked right under your health bar. */
+.bar-stack { display: grid; gap: 3px; justify-items: start; }
+.bar-eternity { position: relative; height: 4px; border: 1px solid var(--line); border-radius: 2px; background: var(--bg); overflow: hidden; }
+.bar-eternity > i { position: absolute; left: 0; top: 0; bottom: 0; display: block; }
+.bar-eternity-now { background: #dcf1ff; box-shadow: 0 0 4px rgb(200 232 255 / 0.5); }
+.bar-eternity-trail { background: #7f9fb8; transition: width 0.6s ease-in 0.25s; }
+@media (prefers-reduced-motion: reduce) { .bar-eternity-trail { transition: none; } }
 .bar.is-staggered { border-color: var(--sleep); box-shadow: 0 0 6px rgb(243 241 248 / 0.45); }
 @media (prefers-reduced-motion: reduce) { .bar-trail > i { transition: none; } .bar-flash { animation: none; opacity: 0; } .bar-preview, .bar-heal { animation: none; opacity: 0.55; } .bar-recover { animation: none; opacity: 0.45; } }
 
@@ -448,6 +431,29 @@ kbd {
 .fig-metal { stroke: var(--metal); stroke-linecap: round; }
 .fig-metal-fill { fill: var(--metal); }
 .fig-grip { stroke: var(--grip); stroke-width: 2.5; stroke-linecap: round; }
+/* The demo's weapons (see Weapon in StickFigure.tsx). */
+.fig-wood-fill { fill: var(--grip); }
+.fig-wood-line { fill: none; stroke: color-mix(in srgb, var(--grip) 55%, black); stroke-width: 0.7; stroke-linecap: round; }
+.fig-fuller { stroke: color-mix(in srgb, var(--metal) 62%, black); stroke-width: 0.7; stroke-linecap: round; }
+.fig-bevel { stroke: #e2e4ee; stroke-width: 0.6; stroke-linecap: round; }
+.fig-wax-paint { fill: none; stroke: var(--wax); stroke-width: 0.6; stroke-linecap: round; opacity: 0.9; }
+.fig-cord { fill: none; stroke: #a48d64; stroke-width: 0.8; stroke-linecap: round; }
+.fig-char { fill: #2f2926; }
+.fig-wax-fill { fill: var(--wax); }
+.fig-wax-runnel { fill: none; stroke: var(--wax); stroke-width: 1.3; stroke-linecap: round; }
+.fig-wax-seal { fill: var(--wax); stroke: color-mix(in srgb, var(--wax) 70%, black); stroke-width: 0.8; }
+.fig-wax-stamp { fill: color-mix(in srgb, var(--wax) 82%, black); }
+.fig-stamp-line { fill: none; stroke: color-mix(in srgb, var(--wax) 45%, black); stroke-width: 0.42; stroke-linecap: round; }
+.fig-stamp-lash { fill: none; stroke: color-mix(in srgb, var(--wax) 40%, black); stroke-width: 0.42; stroke-linecap: butt; }
+.fig-brick { fill: #85838d; stroke: #4b4953; stroke-width: 0.8; stroke-linejoin: round; }
+.fig-mortar { fill: #c9c6bd; }
+.fig-crack { fill: none; stroke: #2a2930; stroke-width: 0.7; stroke-linejoin: round; stroke-linecap: round; }
+/* You spend Eternity on your weapon's effect: it flashes pale blue once, the colour of Eternity.
+   Drawn as a copy underneath, every stroke and fill turned pale blue and thickened. */
+.fig-eternal-flash { opacity: 0; animation: eternal-flash 0.75s ease-out forwards; }
+.fig-eternal-flash * { fill: #e6f6ff; stroke: #dcf1ff; stroke-width: 3.2px; stroke-linejoin: round; stroke-linecap: round; }
+@keyframes eternal-flash { 0% { opacity: 0; } 15% { opacity: 0.95; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .fig-eternal-flash { animation-duration: 0.3s; } }
 .fig-armor { stroke: var(--armor); stroke-linecap: round; }
 .fig-armor-fill { fill: var(--armor); }
 .fig-eyes { fill: var(--eyes); }
@@ -611,35 +617,94 @@ kbd {
 }
 @keyframes flame-hit-glow { 0% { opacity: 0; transform: scale(0.5); } 25% { opacity: 1; } 100% { opacity: 0; transform: scale(1.3); } }
 @media (prefers-reduced-motion: reduce) { .flame-hit-tongue, .flame-hit-glow { animation-duration: 0.01s; } }
-.inventory-swap { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--accent); border-radius: 6px; font-size: 0.85rem; }
-.inventory-swap span { opacity: 0.8; }
-
-/* The inventory's places: two squares per row, an eternal one and an ordinary one; the one you wield is filled in. */
-.inv-rows { display: grid; gap: 12px; justify-items: center; }
-.inv-row { display: flex; gap: 14px; }
-.inv-slot {
-  position: relative; width: 78px; height: 78px; padding: 8px; border: 1px solid var(--line); border-radius: 8px;
-  background: var(--panel); color: var(--ink);
+/* ---------- The inventory (E on the map) and the guide's menu (E by a keeper) ---------- */
+/* Over the map, framed like a fight's cinematic moments: the black strips slide in. */
+.inv-screen {
+  position: absolute; inset: 0; z-index: 20; overflow: hidden; background: rgb(0 0 0 / 0.45); color: var(--text);
+  /* The big figure at the side: its box's height, and where its knees are in it (about y 83 of 120, as the rig draws them). */
+  --fig-h: 104vh; --fig-knee: 0.69;
 }
-.inv-slot.is-equipped { background: color-mix(in srgb, var(--accent) 30%, var(--panel)); border-color: var(--accent); }
-.inv-slot.is-focused { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* The eternal place carries a small mark in its corner. */
-.inv-slot.is-eternal::after { content: "\221E"; position: absolute; top: 3px; left: 6px; font-size: 0.8rem; color: var(--accent); opacity: 0.8; }
+.inv-screen .letterbox-top { animation: letterbox-top-in 0.35s ease-out both; }
+.inv-screen .letterbox-bottom { animation: letterbox-bottom-in 0.35s ease-out both; }
+@keyframes letterbox-top-in { from { transform: translateY(-100%); } to { transform: none; } }
+@keyframes letterbox-bottom-in { from { transform: translateY(100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .inv-screen .letterbox { animation: none; } }
+/* The column of slots, to the right of your figure. */
+.inv-stage {
+  position: absolute; left: 0; right: 0; top: var(--strip-h); bottom: var(--strip-h);
+  display: flex; align-items: center; justify-content: flex-end; padding-right: 10vw;
+}
+/*
+ * The big figures at the sides (you on the left, the guide on the right), behind the black strips: the
+ * bottom one comes up to their knees, as in a visual novel. (The figure fills the middle 40% or so of its box.)
+ */
+.inv-figure, .guide-figure {
+  position: absolute; z-index: 1; height: var(--fig-h); aspect-ratio: 100 / 120; pointer-events: none;
+  top: calc(100% - var(--strip-h) - var(--fig-knee) * var(--fig-h));
+}
+.inv-figure { left: calc(20vw - var(--fig-h) * 0.4167); }
+.guide-figure { right: calc(20vw - var(--fig-h) * 0.4167); }
+.inv-figure .figure, .guide-figure .figure { width: 100%; height: 100%; }
+/* (Seen from the front a figure faces left; you turn toward your slots.) */
+.inv-figure .figure { transform: scaleX(-1); }
+.inv-column { display: grid; gap: 16px; }
+/* A slot: its name, then its places (eternal, ordinary, and on the ground while something lies within reach). */
+.inv-row { display: flex; align-items: center; gap: 12px; }
+.inv-row-label { width: 4.5rem; color: var(--accent); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.inv-place {
+  position: relative; display: flex; align-items: center; gap: 10px; height: 78px; min-width: 78px; padding: 8px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); text-align: left;
+  transition: border-color 0.12s;
+}
+.inv-place-icon { flex: none; width: 60px; height: 60px; display: block; }
+.inv-place-icon .gear-sprite.is-weapon, .inv-place-icon .gear-sprite.is-armor { width: 100%; height: 100%; }
+/* The place under the cursor stretches sideways to show its name and its weight. */
+.inv-place.is-open { padding-right: 16px; }
+.inv-place-text { display: grid; gap: 2px; white-space: nowrap; animation: inv-open 0.14s ease-out both; }
+@keyframes inv-open { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+.inv-place-name { font-size: 0.98rem; }
+.inv-place-weight { font-size: 0.78rem; opacity: 0.65; }
+/* What you wield, and the place under the cursor: white; in the eternal place, the light blue of Eternity. */
+.inv-place { --place-hi: #f3f1f8; }
+.inv-place.is-eternal { --place-hi: #bfe4ff; }
+.inv-place.is-equipped { background: color-mix(in srgb, var(--place-hi) 42%, var(--panel)); border-color: var(--place-hi); }
+.inv-place.is-equipped .inv-place-name { color: #fff; }
+.inv-place.is-focused { outline: 2px solid var(--place-hi); outline-offset: 2px; }
+/* The ground place is dashed, as if lying loose. */
+.inv-place.is-ground { border-style: dashed; background: transparent; }
+/* The keys, on the bottom strip. */
+.inv-keys { position: absolute; left: 0; right: 0; bottom: 0; height: var(--strip-h); z-index: 10; display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 0.85rem; opacity: 0.75; white-space: pre; }
 .gear-icon { width: 100%; height: 100%; display: block; }
 .gear-icon.is-faded { opacity: 0.2; }
 .gear-sprite .icon-plate { fill: var(--armor, #6f7489); stroke: var(--ink); stroke-width: 1.2; stroke-linejoin: round; }
 .gear-sprite .icon-seam { fill: none; stroke: var(--ink); stroke-width: 1; opacity: 0.6; }
 .gear-sprite .icon-rivet { fill: var(--ink); }
-/* Everything you own for a slot, opened from the place you wield. */
-.inv-list { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
-.inv-list-item { padding: 4px 8px; border-radius: 5px; font-size: 0.95rem; }
-.inv-list-item.is-equipped { color: var(--accent); }
-.inv-list-item.is-focused { background: color-mix(in srgb, var(--accent) 22%, transparent); }
-.inv-list-keys { font-size: 0.8rem; opacity: 0.65; margin-top: 4px; }
+
+/* The guide's menu: what you can do on the left, the guide on the right. */
+.guide-stage {
+  position: absolute; left: 0; right: 0; top: var(--strip-h); bottom: var(--strip-h);
+  display: flex; align-items: center; justify-content: flex-start; gap: 3vw; padding-left: 8vw;
+}
+/* The box between the slots and the guide: what the piece under the cursor is. */
+.guide-middle { width: min(360px, 28vw); }
+/* A memory whose dreams are unread: its sprite dimmed, as if not yet clear. */
+.inv-place.is-unread .inv-place-icon { opacity: 0.45; filter: grayscale(0.6); }
+.guide-options { width: min(400px, 32vw); }
+.guide-menu { display: grid; gap: 10px; }
+.guide-page { display: grid; gap: 14px; }
+.guide-page-title { color: var(--accent); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.guide-says { margin: 0; font-style: italic; opacity: 0.85; }
+.guide-item { display: flex; align-items: center; gap: 12px; text-align: left; }
+.guide-set-row { display: flex; align-items: center; gap: 10px; padding: 4px; border-radius: 8px; }
+.guide-set-row.is-focused { background: rgb(255 255 255 / 0.04); }
+/* What a read piece is: its name, its lore, and its effect. */
+.guide-lore { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: rgb(21 20 27 / 0.9); }
+.guide-lore-name { font-weight: 600; }
+.guide-lore-text { margin: 0; font-size: 0.92rem; line-height: 1.45; opacity: 0.9; }
+.guide-lore-effect { margin: 0; font-size: 0.85rem; line-height: 1.4; color: #dcf1ff; }
 
 /* Flat icons in the places; the real sprites in the list. */
 .gear-icon .flat { fill: var(--ink); }
-.inv-list-item { display: flex; align-items: center; gap: 12px; cursor: pointer; }
 .gear-sprite { flex: none; }
 .gear-sprite.is-weapon { height: 30px; width: 76px; }
 /* In a square place the weapon is slanted to fill it. */
@@ -647,8 +712,6 @@ kbd {
 /* The armor: the player's own torso, cropped (the figure is 100 x 120; this shows about half of it, around the chest). */
 .gear-sprite.is-armor { position: relative; overflow: hidden; width: 38px; height: 38px; }
 .gear-sprite.is-armor > svg { position: absolute; left: -2%; top: 10%; width: 100%; height: auto; transform: scale(2); transform-origin: 52% 33%; }
-.inv-slot .gear-sprite.is-armor { width: 100%; height: 100%; }
-.inv-list-name { flex: 1; }
 
 /* The Warden's remains in his second form: the wax burnt pitch black. */
 .is-charred .fig-wax-head { fill: #1b1915; stroke: #0b0a08; }

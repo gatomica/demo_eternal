@@ -2,7 +2,7 @@
  * HealthBar.tsx — the health bar, and the shards a stagger bursts into.
  */
 import { type CSSProperties, useEffect, useRef, useState } from "react";
-import type { Fighter } from "../core/types";
+import type { Fighter, Player } from "../core/types";
 
 /* ============================================================
  * Health bar
@@ -107,6 +107,77 @@ export function HealthBar({ fighter, before, className, mirrored, preview, recov
       <span className="bar-layer bar-now"><Segments v={now} maxHP={maxHP} preview={preview} recover={recover} /></span>
       {flash > 0 && <span key={`flash-${flash}`} className="bar-flash" />}
       {shatter > 0 && <Shards key={`shatter-${shatter}`} count={8} small />}
+    </div>
+  );
+}
+
+/* ============================================================
+ * Your bars: health, revives and Eternity
+ * ============================================================ */
+
+/** 1 → I, 4 → IV, 9 → IX... */
+function roman(n: number): string {
+  const table: [number, string][] = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
+  let out = "";
+  for (const [value, numeral] of table) {
+    while (n >= value) {
+      out += numeral;
+      n -= value;
+    }
+  }
+  return out;
+}
+
+/**
+ * Your bars in their fixed place at the top left (the same in a fight and in the inventory): the
+ * health bar, the Eternity bar under it, and your revives left as a red Roman numeral beside it
+ * (nothing once they're gone).
+ */
+export function PlayerBars({ player, preview, recover }: { player: Player; preview?: number; recover?: Recovery }) {
+  return (
+    // (A fixed slot, so nothing else on screen can push it around.)
+    <div className="bar-slot bar-slot-player">
+      {player.charges > 0 && (
+        <span className="revive-count" aria-label={`${player.charges} revives left`}>{roman(player.charges)}</span>
+      )}
+      <div className="bar-stack">
+        <HealthBar fighter={player} preview={preview} recover={recover} />
+        <EternityBar player={player} />
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+ * Eternity bar
+ * ============================================================ */
+
+/**
+ * Your Eternity: a thin, pale blue bar right under your health bar, as long as it (it holds as much
+ * as your max health). Eternal weapons' effects drain it; it only fills again when you reawaken.
+ * Like the health bar, a change cuts at once with a flash, and a trail of the old value slides after.
+ */
+export function EternityBar({ player }: { player: Player }) {
+  const { eternity, maxEternity, maxHP } = player;
+  const [trail, setTrail] = useState(eternity);
+  const [flash, setFlash] = useState(0);
+  const last = useRef(eternity);
+  useEffect(() => {
+    if (eternity !== last.current) { last.current = eternity; setFlash(f => f + 1); }
+    const timer = window.setTimeout(() => setTrail(eternity), 30);
+    return () => window.clearTimeout(timer);
+  }, [eternity]);
+  const pct = (x: number) => `${(Math.max(0, Math.min(x, maxEternity)) / maxEternity) * 100}%`;
+  return (
+    <div
+      className="bar-eternity"
+      role="img"
+      aria-label={`Eternity ${Math.round(eternity)} of ${maxEternity}`}
+      style={{ width: `calc(var(--bar-track) * ${Math.min(maxHP, BAR_FULL_HP) / BAR_FULL_HP})` }}
+    >
+      <i className="bar-eternity-trail" style={{ width: pct(trail) }} />
+      <i className="bar-eternity-now" style={{ width: pct(eternity) }} />
+      {flash > 0 && <span key={`flash-${flash}`} className="bar-flash" />}
     </div>
   );
 }

@@ -12,6 +12,8 @@ export interface TutorialState {
   beaten: boolean;
   /** You have reached the first floor's safe spot and been given the knot. */
   done: boolean;
+  /** The guide has shown you how to unwind memories (its menu opened on them, the first time you brought one). */
+  unwound?: boolean;
 }
 
 export const NEW_TUTORIAL: TutorialState = { beaten: false, done: false };
@@ -28,8 +30,8 @@ export type Knot = "wound" | "unwound";
 /** Revives you carry into a fight. */
 export const knotCharges = (k: Knot | undefined) => (k === "wound" ? 1 : 0);
 
-/** What follows the guide's last words: nothing, or the knot. */
-export type After = "none" | "knot";
+/** What follows the guide's last words: nothing, the knot, or back to the guide's menu (you talked from it). */
+export type After = "none" | "knot" | "guide";
 
 export interface Talk {
   lines: string[];
@@ -44,5 +46,14 @@ export const GIFT: Talk = {
     "Take this. A knot, tangled past all undoing. Look for its ends and you won't find them: no beginning, no end.",
     "Should you fade, it will unwind in your place, and you will not slip away. But only once. Then it hangs slack.",
     "Rest with me again, and I will wind it back for you.",
+  ],
+};
+
+/** Talk, from the guide's menu at a safe spot. (Placeholder words, to be remade.) */
+export const CHAT: Talk = {
+  after: "guide",
+  lines: [
+    "Still you walk. Good. The sleepers do not like it, but the sleepers do not like anything.",
+    "If you find a memory, bring it to me. I will read what it dreams of.",
   ],
 };

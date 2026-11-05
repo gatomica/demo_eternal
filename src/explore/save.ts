@@ -10,7 +10,7 @@ const KEY = "demo-eternal-journey-v3";
 /** Writes your progress down (without the one-off note about what the last fight dropped). */
 export function saveJourney(journey: Journey) {
   try {
-    const { found: _found, fallen: _fallen, ...keep } = journey;
+    const { fallen: _fallen, ...keep } = journey;
     localStorage.setItem(KEY, JSON.stringify(keep));
   } catch {
     // No storage: nothing to keep it in.

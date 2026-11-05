@@ -14,7 +14,7 @@ import { attackCost, restRecovery } from "../core/rules";
 import type { CombatState, Enemy, Opening, PlayerAction } from "../core/types";
 import { behind, bodiesOfEnemies, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
 import type { Projectile } from "../render/effects";
-import { type BarValues, HealthBar } from "../render/HealthBar";
+import { type BarValues, HealthBar, PlayerBars } from "../render/HealthBar";
 import { lookOf } from "../render/looks";
 import { actionPose, asPose, downPoseOf, flinchPoseOf, handOffOf, idlePoseOf, impactPoint, poseForIntent, type PoseName, strikePose, windUpPose } from "../render/poses";
 import { Scene, type SceneFigure } from "../render/Scene";
@@ -22,19 +22,6 @@ import { type Dir, useKeys, wrapIndex } from "../ui/input";
 import { type MenuOption, PauseMenu } from "../ui/Menu";
 import { IGNITE } from "../warden/scenes";
 import type { CandleArm, WardenPoseName } from "../warden/skeleton";
-
-/** 1 → I, 4 → IV, 9 → IX... */
-function roman(n: number): string {
-  const table: [number, string][] = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
-  let out = "";
-  for (const [value, numeral] of table) {
-    while (n >= value) {
-      out += numeral;
-      n -= value;
-    }
-  }
-  return out;
-}
 
 const barValues =(f: { hp: number; fatigue: number; death: number }): BarValues => ({ hp: f.hp, fatigue: f.fatigue, death: f.death });
 
@@ -87,7 +74,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   onChangeLoadout?: () => void;
   onExit: () => void;
   /** Set for fights from the map: when it's over, carry on (won or not) instead of retrying. */
-  onDone?: (won: boolean, charges: number) => void;
+  onDone?: (won: boolean, charges: number, eternity: number) => void;
 }) {
   const [fightRaw, setFight] = useState(initial);
   const fight = useMemo(() => (override ? override(fightRaw) : fightRaw), [fightRaw, override]);
@@ -640,7 +627,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // A shortcut for testing: win the fight on the spot (every enemy lies down).
     ...(playing && playSignal === undefined ? [{ label: "Skip battle", quiet: true, run: skipBattle }] : []),
   ];
-  const finish = () => onDone?.(fight.status === "won", fight.player.charges);
+  const finish = () => onDone?.(fight.status === "won", fight.player.charges, fight.player.eternity);
 
   /* ---------- the lesson's gate ---------- */
   const goalTarget: Selection | undefined = current?.goal
@@ -1119,8 +1106,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       flame: playerSealed,
       candle: p.waxed && p.staggered && !(usurpNow?.target === "player" && usurpStage === "reveal"),
       encased: playerSealed,
-      // Waxed but still standing: wax caked on you.
-      waxCaked: p.waxed && !p.staggered,
+      // Waxed (or waxed by a torch, which is only a look) but still standing: wax caked on you.
+      waxCaked: (p.waxed || !!p.coated) && !p.staggered,
+      // Your weapon flashes as you spend Eternity on its effect (yours only: enemies have none).
+      eternalFlash: impact && step?.events.some(ev => ev.kind === "eternal" && ev.attacker === "player" && ev.spent > 0) ? stepKey : undefined,
       weapon: p.weapon,
       armor: p.armor,
       // Fallen, you drop and stay there, a little faded (instead of fading out).
@@ -1147,6 +1136,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         weapon: e.weapon,
         armor: e.armor,
         variant: kindOf(e).variant,
+        hooded: !!kindOf(e).hood,
+        // Waxed by a torch (a look only), still standing: wax caked on it.
+        waxCaked: !!e.coated && !e.staggered && !kindOf(e).variant,
         // The outer parts of a Wax Blob stand a little smaller than the middle one.
         scale: (kindOf(e).scale ?? 1) * (e.part === "left" || e.part === "right" ? 0.85 : 1),
         body: e.body,
@@ -1218,13 +1210,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
 
       {/* Your health bar sits in a fixed slot, so nothing else on screen can push it around. The target's hangs right below it, in the scene. */}
-      <div className="bar-slot bar-slot-player">
-        {/* Revives left, as a red Roman numeral beside your bar. Nothing shows once they're gone. */}
-        {p.charges > 0 && (
-          <span className="revive-count" aria-label={`${p.charges} revives left`}>{roman(p.charges)}</span>
-        )}
-        <HealthBar fighter={p} preview={previewCost} recover={previewRecover} />
-      </div>
+      <PlayerBars player={p} preview={previewCost} recover={previewRecover} />
 
       {/* While a turn plays, the target's bar sits bottom right, mirroring yours (in planning it hangs below the enemy). */}
       {busy && (

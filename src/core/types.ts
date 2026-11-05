@@ -100,6 +100,12 @@ export interface Fighter {
   waxed: boolean;
   /** Its flame taken while staggered and Waxed (Usurp Flame): sealed whole in wax until it gets up. */
   encased?: boolean;
+  /** Its weapon is eternal: its blows carry the weapon's eternal effect (see `ETERNAL_EFFECT` in rules.ts). */
+  eternal?: boolean;
+  /** Whom it attacked with its weapon last turn, whether the blow landed or not (for the Jagged Chisel). */
+  lastTarget?: string;
+  /** Waxed by a Waxed Torch: looks only, no rules attached. Clears like Waxed, when Fatigue drops to 0. */
+  coated?: boolean;
   /** Staggered: Fatigue is pinned at full (it can't grow further) and the next turn is a forced Rest,
    *  which always ends with Fatigue at 0. */
   staggered: boolean;
@@ -111,6 +117,12 @@ export interface Player extends Fighter {
   /** True during the protected turn after falling with a charge left. Health stays at 0 until the
    *  turn ends, then comes back to full health (along with rests). */
   reviving: boolean;
+  /**
+   * Eternity: what eternal weapons' effects are paid with (the thin bar under your health bar), up to
+   * `maxEternity` (your max health). It refills only when you reawaken.
+   */
+  eternity: number;
+  maxEternity: number;
 }
 
 export interface Enemy extends Fighter {
@@ -201,6 +213,11 @@ export type CombatEvent =
   | { kind: "raised"; who: string; by?: string }
   /** A status of an enemy's own changed, e.g. Sealed. */
   | { kind: "flag"; who: string; flag: string; on: boolean }
+  /**
+   * An eternal weapon's effect, as its blow lands: `damage` more Health lost or `fatigue` more Fatigue for
+   * `target`. `spent`: the attacker's Eternity it cost; `death`: what Eternity couldn't pay, become Death on it.
+   */
+  | { kind: "eternal"; attacker: string; target: string; effect: "chisel" | "torch" | "hammer"; damage: number; fatigue: number; spent: number; death: number }
   /** A boss enters a new phase. */
   | { kind: "phase"; who: string; phase: number };
 
@@ -214,6 +231,9 @@ export interface FighterView {
   line?: Line;
   waxed?: boolean;
   encased?: boolean;
+  coated?: boolean;
+  /** Your Eternity. */
+  eternity?: number;
   /** How an enemy left the fight, once it has. */
   fate?: "fallen" | "encased";
 }
@@ -273,6 +293,10 @@ export interface PlayerSetup {
   weapon: WeaponTier;
   armor: ArmorTier;
   charges: number;
+  /** Your weapon is eternal. */
+  eternal?: boolean;
+  /** Your Eternity as the fight starts (default: full). */
+  eternity?: number;
 }
 
 export interface EnemySetup {

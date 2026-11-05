@@ -29,5 +29,3 @@ export const FADE_FAR = 3.6;
 /** How close you must stand to a keeper to rest by it, in tiles. */
 export const KEEPER_REACH = 1.1;
 
-/** How long the line after resting stays up. */
-export const REST_NOTE_MS = 2600;

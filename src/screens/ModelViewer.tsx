@@ -316,7 +316,7 @@ function PlayerViewerFight({ onBack, onRetry, onExit }: { onBack: () => void; on
         <button className="hud-button viewer-change" onClick={onBack}>Change model</button>
       </div>
       <LightToggle lit={lit} onChange={setLit} />
-      {chips("Weapon", Object.keys(WEAPONS) as WeaponTier[], weapon, o => WEAPONS[o].label, setWeapon)}
+      {chips("Weapon", Object.keys(WEAPONS) as WeaponTier[], weapon, o => (o === "baseline" ? "None" : WEAPONS[o].name), setWeapon)}
       {chips("Armor", Object.keys(ARMOR) as ArmorTier[], armor, o => ARMOR[o].label, setArmor)}
       {chips("Pose", [...PLAYER_POSES, "dead" as const, "model" as const], held, o => (o === "model" ? MODEL : o === "dead" ? "Dead" : o), o => { setHeld(o); setScenarioId(undefined); })}
       {model && chips("Angle", MODEL_ANGLES.map(a => a.id), angle, o => MODEL_ANGLES.find(a => a.id === o)!.label, setAngle)}

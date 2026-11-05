@@ -24,7 +24,8 @@ function Piece({ from, to, torn, tornNear }: { from: P; to: P; torn?: number; to
   );
 }
 
-export function Remains({ weapon, armor }: { weapon: WeaponTier; armor: ArmorTier }) {
+/** `hooded`: a patrol warden's, its pointed hood still on the sunk head, the point flopped along the ground. */
+export function Remains({ weapon, armor, hooded }: { weapon: WeaponTier; armor: ArmorTier; hooded?: boolean }) {
   return (
     <svg viewBox="0 0 100 120" className="figure figure-front" aria-hidden="true">
       <defs>
@@ -49,7 +50,9 @@ export function Remains({ weapon, armor }: { weapon: WeaponTier; armor: ArmorTie
       {/* The head, half sunk into the ground, its face down: no eyes show. */}
       <g clipPath="url(#remains-head)">
         <circle cx={67} cy={108} r={7.5} className="fig-head" />
+        {hooded && <circle cx={67} cy={108} r={8.9} className="fig-hood" />}
       </g>
+      {hooded && <path d="M61.5 104.5 L50.5 108.6 L60 108.2 Z" className="fig-hood" />}
       <ellipse cx={67} cy={108} rx={8.8} ry={1.7} className="fig-gore-pool" />
       {/* Its weapon, dropped. */}
       {weapon !== "baseline" && (

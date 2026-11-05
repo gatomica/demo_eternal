@@ -144,6 +144,8 @@ export function viewAt(from: CombatState, after: Step["after"]): CombatState {
     if ("line" in f && a.line) f.line = a.line;
     if (a.waxed !== undefined) f.waxed = a.waxed;
     if (a.encased !== undefined) f.encased = a.encased;
+    if (a.coated !== undefined) f.coated = a.coated;
+    if (a.eternity !== undefined && "eternity" in f) f.eternity = a.eternity;
     if ("fate" in f && a.fate) f.fate = a.fate;
   }
   return v;
@@ -266,7 +268,7 @@ export function effectsOf(step: Step | undefined, youManeuvered: boolean): Map<s
 export function involvedEnemy(step: Step | undefined): string | undefined {
   for (const ev of step?.events ?? []) {
     if (ev.kind === "splash") continue; // (the bar stays on whoever the blow was aimed at)
-    const ids = ev.kind === "attack" ? [ev.target, ev.attacker] : [ev.who];
+    const ids = ev.kind === "attack" || ev.kind === "eternal" ? [ev.target, ev.attacker] : [ev.who];
     const enemy = ids.find(id => id !== "player");
     if (enemy) return enemy;
   }

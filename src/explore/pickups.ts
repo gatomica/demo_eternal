@@ -1,5 +1,6 @@
 /**
- * pickups.ts — gear lying on the map, waiting to be picked up (E). Once taken it stays taken.
+ * pickups.ts — gear lying on the map, waiting to be picked up (E). Once taken it stays taken. On the
+ * floor every piece looks the same: a small glowing ball of yarn (light blue if eternal; `drawPickup`).
  */
 import type { GearSpec } from "./gear";
 
@@ -8,11 +9,13 @@ export interface Pickup {
   /** Where it lies: on the floor, in tiles on the world grid. */
   at: { x: number; y: number; z: number };
   gear: GearSpec;
-  /** How it looks lying there. */
-  look: "broken-sword" | "sword" | "armor";
 }
 
-export const PICKUPS: Pickup[] = [];
+export const PICKUPS: Pickup[] = [
+  // On the wheel's south corridor, at its west end: the ledge before the drop into the dug-out SW hall
+  // (not the brick sliver with the ladder).
+  { id: "eternal-hammer-south", at: { x: 19.5, y: 28, z: 6 }, gear: { slot: "weapon", tier: "heavy", eternal: true } },
+];
 
 /** Gear lying where something fell or where you let it go, not set on the map: picked up like the rest. */
 export interface GroundItem {
@@ -23,8 +26,6 @@ export interface GroundItem {
   from?: string;
 }
 
-/** How a piece of gear lies on the floor. */
-export const lookOfGear = (g: GearSpec): Pickup["look"] => (g.slot === "weapon" ? "sword" : "armor");
 
 /** How close you must stand to pick something up, in tiles. */
 export const PICKUP_REACH = 0.9;

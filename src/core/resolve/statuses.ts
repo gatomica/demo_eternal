@@ -17,10 +17,12 @@ export function waxOn(t: Turn, f: Fighter, damage: number) {
 /** Its Fatigue gone: so is the wax that hung on it. */
 export function fatigueGone(f: Fighter) {
   f.waxed = false;
+  f.coated = false;
 }
 
 /** Back on its feet (recovered or revived): the wax on it, and any sealing it whole, breaks away. */
 export function backOnFeet(f: Fighter) {
   f.waxed = false;
+  f.coated = false;
   f.encased = false;
 }

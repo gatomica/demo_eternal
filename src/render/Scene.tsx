@@ -42,6 +42,10 @@ export interface SceneFigure {
   candle?: boolean;
   /** Wax caked on it (the player, Waxed). */
   waxCaked?: boolean;
+  /** You just spent Eternity on your weapon's effect: it flashes (a new key flashes again). */
+  eternalFlash?: string;
+  /** A patrol warden's pointed hood. */
+  hooded?: boolean;
   /** Sealed whole in wax (its flame taken by Usurp Flame). */
   encased?: boolean;
   /** It has fallen: its body in "pieces" on the floor (drawn instead of the figure), or sealed in "wax". */
@@ -303,7 +307,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
           }}
         >
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} encased={f.encased} />}
+            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}
           </div>

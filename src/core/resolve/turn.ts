@@ -16,8 +16,8 @@ export function forcedAction(state: CombatState): "rest" | "revive" | null {
 /** Bars and positions of these fighters right now, so the screen can show the fight mid-turn. */
 export function snapshotOf(p: Player, enemies: Enemy[]): Record<string, FighterView> {
   const v: Record<string, FighterView> = {};
-  v[p.id] = { hp: p.hp, fatigue: p.fatigue, death: p.death, staggered: p.staggered, alive: p.hp > 0, waxed: p.waxed, encased: !!p.encased };
-  for (const e of enemies) v[e.id] = { hp: e.hp, fatigue: e.fatigue, death: e.death, staggered: e.staggered, alive: e.hp > 0, line: e.line, waxed: e.waxed, fate: e.fate };
+  v[p.id] = { hp: p.hp, fatigue: p.fatigue, death: p.death, staggered: p.staggered, alive: p.hp > 0, waxed: p.waxed, encased: !!p.encased, coated: !!p.coated, eternity: p.eternity };
+  for (const e of enemies) v[e.id] = { hp: e.hp, fatigue: e.fatigue, death: e.death, staggered: e.staggered, alive: e.hp > 0, line: e.line, waxed: e.waxed, coated: !!e.coated, fate: e.fate };
   return v;
 }
 
@@ -53,6 +53,8 @@ export interface Turn {
   pulls: Map<string, string>;
   /** Actions cancelled before they happened. */
   cancelled: Set<string>;
+  /** Weapon blows this turn, however they went: attacker id -> whom it attacked (for the Jagged Chisel, next turn). */
+  attacked: Map<string, string>;
   /** Rests broken by a blow. */
   interrupted: Set<string>;
   /** Enemies that fell with a revive left: their protected turn is next. */
@@ -102,7 +104,7 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
     wasFlags: new Map(alive.map(e => [e.id, { ...e.flags }])),
     wasStaggered: new Set(fighters.filter(f => f.staggered).map(f => f.id)),
     hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(),
-    cancelled: new Set(), interrupted: new Set(), fellReviving: new Set(),
+    cancelled: new Set(), attacked: new Map(), interrupted: new Set(), fellReviving: new Set(),
     recoverLast: false,
     steps: [],
     events: [],

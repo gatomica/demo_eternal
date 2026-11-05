@@ -10,11 +10,11 @@
  */
 import { conditionOf } from "./conditions";
 import type { ActionDef, Pattern } from "./patterns";
-import { SLEEPWALKER } from "./kinds/sleepwalker";
+import { PATROL_WARDEN, SLEEPWALKER, SLEEPWALKER_HAMMER } from "./kinds/sleepwalker";
 import { WARDEN } from "./kinds/warden";
 import { GUIDE_KIND } from "./kinds/guide";
-import { WAXED } from "./kinds/waxed";
-import { BLOB_BODY, BLOB_LEFT, BLOB_MID, BLOB_RIGHT } from "./kinds/blob";
+import { WAXED, WAXED_CHISEL, WAXED_HAMMER } from "./kinds/waxed";
+import { BLOB_BODY, BLOB_LEFT, BLOB_LEFT_HAMMER, BLOB_MID, BLOB_RIGHT, BLOB_RIGHT_HAMMER, SUPER_BLOB_BODY } from "./kinds/blob";
 import type { ArmorTier, CombatEvent, CombatState, Enemy, EnemySetup, Fighter, Intent, Line, Rng, Side, TurnReport, WeaponTier } from "./types";
 
 /** Special looks a kind can be drawn with: "waxed" (kneeling, sealed in wax), "warden" (his own figure). */
@@ -58,6 +58,13 @@ export interface EnemyKind {
   /** True weight it carries ("baseline": nothing). Actions may still have their own weight. */
   weapon: WeaponTier;
   armor: ArmorTier;
+  /**
+   * Its weapon is its own, not one of the demo's three (the Warden's flail): it carries no eternal effect. Every
+   * other enemy's weapon carries its effect (free for it), though it drops the ordinary weapon.
+   */
+  ownWeapon?: boolean;
+  /** Drawn wearing the Penitent Warden's pointed hood (a patrol warden), on the map too. */
+  hood?: boolean;
   /** Drawn with a special look (see render/looks.ts). */
   variant?: Variant;
   /** Drawn this much bigger than a normal figure. */
@@ -153,10 +160,16 @@ export interface EnemyKind {
 
 export const ENEMY_KINDS = {
   sleepwalker: SLEEPWALKER,
+  patrolWarden: PATROL_WARDEN,
+  sleepwalkerHammer: SLEEPWALKER_HAMMER,
   waxed: WAXED,
+  waxedChisel: WAXED_CHISEL,
+  waxedHammer: WAXED_HAMMER,
   blobLeft: BLOB_LEFT,
   blobMid: BLOB_MID,
   blobRight: BLOB_RIGHT,
+  blobLeftHammer: BLOB_LEFT_HAMMER,
+  blobRightHammer: BLOB_RIGHT_HAMMER,
   warden: WARDEN,
   guide: GUIDE_KIND,
 } satisfies Record<string, EnemyKind>;
@@ -174,7 +187,7 @@ export interface BodyDef {
 }
 
 /** Every multi-target enemy. */
-export const BODIES = { waxBlob: BLOB_BODY } satisfies Record<string, BodyDef>;
+export const BODIES = { waxBlob: BLOB_BODY, superBlob: SUPER_BLOB_BODY } satisfies Record<string, BodyDef>;
 
 export type BodyId = keyof typeof BODIES;
 

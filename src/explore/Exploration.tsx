@@ -2,7 +2,8 @@
  * Exploration.tsx — the exploration screen: a top-down dungeon you walk around with WASD or the
  * arrows.
  *
- * Movement is free (positions are floats) over a grid of tiles. Escape pauses.
+ * Movement is free (positions are floats) over a grid of tiles. E picks up what lies at your feet, speaks
+ * with the guide by a keeper, or else opens the inventory (Q closes it); Escape pauses.
  *
  * LEVELS. The dungeon is a stack of levels sharing one grid: a level-1 bridge can pass right over
  * a level-0 hall, and you can walk under it. Stairs and ladders are ramps: your height changes
@@ -19,20 +20,28 @@
  * The map itself is written in plans.ts.
  */
 import { useEffect, useRef, useState } from "react";
+import { PLAYER_MAX_HP } from "../combat/fight";
+import type { Player } from "../core/types";
 import { dirOf, wrapIndex } from "../ui/input";
+import { type MenuOption, PauseMenu } from "../ui/Menu";
 import { Dialogue } from "./Dialogue";
 import { drawBlobTop, drawPickup, drawKeeper, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
-import { choosePiece, equippedSide, equipSide, gearName, unequip, type GearSpec, type Inventory as Bag, loadoutOf, piecesFor, receive, SIDES, SLOTS } from "./gear";
-import { type ChoiceList, Inventory } from "./Inventory";
-import { type GroundItem, lookOfGear, PICKUP_REACH, PICKUPS } from "./pickups";
+import { equippedSide, equipSide, gearName, type GearSpec, hasMemories, type Inventory as Bag, loadoutOf, readDreams, receive, setEternal, type Slot, unequip } from "./gear";
+import { GearSprite } from "./GearIcons";
+import { GuideMenu } from "./GuideMenu";
+import { type InvFocus, InventoryScreen, type Place } from "./InventoryScreen";
+import { type GroundItem, PICKUP_REACH, PICKUPS } from "./pickups";
 import { CHASE_MEMORY, type Corpse, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, foeFloor, GRACE_MS, huddle, inFightArea, livingDef, MAP_FOES, type MapFoe, MAX_IN_FIGHT, memberKey, stepsFrom, TOUCH, wakeEnemies, waypoint, withCorpses } from "./foes";
-import { FADE_FAR, FADE_NEAR, KEEPER_REACH, KEEPERS, REST_NOTE_MS } from "./keepers";
+import { FADE_FAR, FADE_NEAR, KEEPER_REACH, KEEPERS } from "./keepers";
 import { cornerNudge, slide, surfaceNear, type Walker } from "./movement";
 import { createMapRenderer, type Light } from "./render";
 import { sight } from "./sight";
-import { type After, FIRST_FLOOR_KEEPER, GIFT, type Knot, type Talk, type TutorialState } from "./tutorial";
+import { type After, CHAT, FIRST_FLOOR_KEEPER, GIFT, type Knot, knotCharges, type Talk, type TutorialState } from "./tutorial";
 import { ACCEL, BODY_ABOVE_FEET, CAMERA_FOLLOW, FALL_DEATH_ALT, GRAVITY, HALF_W, LADDER_SPEED, RISE, SPEED, STAIRS_SPEED, STEP_TOLERANCE, STRIDE, VISION_RADIUS } from "./tuning";
 import { type Dir, LADDER, ladderSpan, LEVELS, STAIRS, WORLD } from "./world";
+
+/** How long what you picked up stays on screen, fading at the end. */
+const PICKED_UP_MS = 2200;
 
 /** Resting is a sleep: how long the screen is dark in all, and when, in the dark, it happens. */
 const SLEEP_MS = 2400;
@@ -58,10 +67,10 @@ export interface Journey {
   knot?: Knot;
   /** What you carry (and wear). */
   inventory: Bag;
+  /** Your Eternity, as the last fight left it (missing: full). It fills again only when you reawaken: resting by a keeper, or falling. */
+  eternity?: number;
   /** Gear lying on the map that you have already picked up (ids from pickups.ts). */
   taken: string[];
-  /** What the last fight left you, to say so when you're back on the map. */
-  found?: string;
 }
 
 export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
@@ -86,60 +95,38 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   const leaving = useRef(false);
   const latest = useRef({ journey, onEncounter, onSave, onDie });
   latest.current = { journey, onEncounter, onSave, onDie };
-  // Escape opens the inventory screen, which also holds the way back to the main menu.
-  const [paused, setPaused] = useState(false);
+  /**
+   * What is open over the map, if anything (the map stands still meanwhile): the inventory (E; `start`:
+   * where its cursor begins), the guide's menu (E by a keeper), or the pause menu (Esc).
+   */
+  type Screen = { kind: "inventory"; start?: InvFocus } | { kind: "guide"; unwindFirst?: boolean } | { kind: "pause" };
+  const [screen, setScreen] = useState<Screen | null>(null);
   const pausedRef = useRef(false);
-  pausedRef.current = paused;
+  pausedRef.current = screen !== null;
+  const paused = screen !== null;
+  const [pauseAt, setPauseAt] = useState(0);
   const held = useRef<Dir[]>([]);
   // The keeper you last rested by, and the one you're standing by now (if any).
   const restedAt = useRef<string | undefined>(journey.rested);
   const nearRef = useRef<string | null>(null);
   const [near, setNear] = useState<string | null>(null);
-  const [note, setNote] = useState<{ text: string; id: number } | null>(null);
+  // What you just picked up: its sprite and name pop up in a box where the "E Pick Up" prompt was, then fade.
+  const [got, setGot] = useState<{ gear: GearSpec; id: number } | null>(null);
   useEffect(() => {
-    if (!note) return;
-    const t = window.setTimeout(() => setNote(cur => (cur?.id === note.id ? null : cur)), REST_NOTE_MS);
+    if (!got) return;
+    const t = window.setTimeout(() => setGot(cur => (cur?.id === got.id ? null : cur)), PICKED_UP_MS);
     return () => window.clearTimeout(t);
-  }, [note]);
+  }, [got]);
   // The knot you carry, if you've been given it. Resting winds it tight again.
   const knotRef = useRef<Knot | undefined>(journey.knot);
-  const [knot, setKnotState] = useState<Knot | undefined>(journey.knot);
+  const [, setKnotState] = useState<Knot | undefined>(journey.knot);
   const setKnot = (k: Knot | undefined) => { knotRef.current = k; setKnotState(k); };
-  // What you carry, and the inventory screen over the map.
+  // Your Eternity between fights (missing: full). Resting fills it again.
+  const eternityRef = useRef<number | undefined>(journey.eternity);
+  // What you carry.
   const invRef = useRef<Bag>(journey.inventory);
   const [inv, setInvState] = useState<Bag>(journey.inventory);
   const setInv = (b: Bag) => { invRef.current = b; setInvState(b); };
-  const [invFocus, setInvFocus] = useState(0);
-  // The list of everything you own for a slot, open from the place you wield.
-  const [choice, setChoice] = useState<ChoiceList | null>(null);
-  const choiceRef = useRef<ChoiceList | null>(null);
-  choiceRef.current = choice;
-  /** After the places: the button to reawaken, then the one back to the main menu. */
-  const INV_REAWAKEN = SLOTS.length * SIDES.length;
-  const INV_MENU = INV_REAWAKEN + 1;
-  useEffect(() => { if (!paused) setChoice(null); }, [paused]);
-  /** E (or a click) on a place of the inventory: wield what lies there, or on the one you wield, open the list to pick another. */
-  const activatePlace = (i: number) => {
-    if (i === INV_MENU) { onExit(snapshot.current()); return; }
-    if (i === INV_REAWAKEN) { reawakenRef.current(); return; }
-    const slot = SLOTS[Math.floor(i / SIDES.length)], side = SIDES[i % SIDES.length];
-    if (equippedSide(invRef.current, slot) === side) {
-      // (The list starts with "Unequip", then the pieces: the cursor begins on what you wield.)
-      const at = piecesFor(invRef.current, slot, side).findIndex(g => g.id === invRef.current[slot]) + 1;
-      setChoice({ slot, side, at });
-    } else {
-      setInv(equipSide(invRef.current, slot, side));
-    }
-  };
-  /** E on an entry of the list: wield that piece. */
-  const chooseEntry = (index?: number) => {
-    const c = choiceRef.current;
-    if (!c) return;
-    const at = index ?? c.at;
-    const piece = at > 0 ? piecesFor(invRef.current, c.slot, c.side)[at - 1] : undefined;
-    setInv(piece ? choosePiece(invRef.current, c.slot, piece) : unequip(invRef.current, c.slot, c.side));
-    setChoice(null);
-  };
   // Gear on the floor: what you've taken, and what you're standing by.
   const takenRef = useRef<string[]>(journey.taken);
   // Who lies beaten, and where: the sleepwalkers get up again when you rest by a keeper (their remains go with them); the waxed and the Warden stay dead.
@@ -153,8 +140,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   const [nearPickup, setNearPickup] = useState<string | null>(null);
   /** Everything lying within reach to be picked up: gear set on the map that you haven't taken, and what lies where things fell. */
   const floorItems = () => [
-    ...PICKUPS.filter(p => !takenRef.current.includes(p.id)).map(p => ({ id: p.id, at: p.at, gear: p.gear, look: p.look })),
-    ...groundRef.current.map(g => ({ id: g.id, at: g.at, gear: g.gear, look: lookOfGear(g.gear) })),
+    ...PICKUPS.filter(p => !takenRef.current.includes(p.id)).map(p => ({ id: p.id, at: p.at, gear: p.gear })),
+    ...groundRef.current.map(g => ({ id: g.id, at: g.at, gear: g.gear })),
   ];
   /** Takes an item off the floor (wherever it lies). */
   const lift = (id: string) => {
@@ -163,57 +150,69 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
     nearPickupRef.current = null;
     setNearPickup(null);
   };
-  // The item on the ground that the inventory is offering to swap for what you wear.
-  const [swapId, setSwapId] = useState<string | null>(null);
-  const swapRef = useRef<string | null>(null);
-  swapRef.current = swapId;
-  /** The ordinary gear you wear in the slot of this piece, if any (the case where a pick-up becomes a swap). */
-  const wornInSlot = (gear: GearSpec) => {
-    const cur = invRef.current;
-    const piece = cur.bag.find(x => x.id === cur[gear.slot]);
-    return piece && !piece.eternal ? piece : undefined;
+  /** What lies within reach on the ground, for each slot: the nearest (set by the map's loop). */
+  const reachRef = useRef<string[]>([]);
+  const groundNear = (): Partial<Record<Slot, GearSpec>> => {
+    const items = floorItems();
+    const out: Partial<Record<Slot, GearSpec>> = {};
+    for (const id of reachRef.current) {
+      const item = items.find(x => x.id === id);
+      if (item && !out[item.gear.slot]) out[item.gear.slot] = item.gear;
+    }
+    return out;
   };
+  /**
+   * Takes the item lying within reach for this slot: an eternal piece goes with your memories; an
+   * ordinary one into the slot's ordinary place, and if one was there already, that one is left on the
+   * ground where the new one lay (a swap). Neither is put on by this (but a swapped piece takes the place
+   * of the one you wielded, if you did).
+   */
+  const takeFromGround = (id: string) => {
+    const item = floorItems().find(x => x.id === id);
+    if (!item) return;
+    lift(item.id);
+    const { inventory, replaced } = receive(invRef.current, [item.gear], false);
+    for (const old of replaced) {
+      const { id: _id, ...left } = old;
+      groundRef.current = [...groundRef.current, { id: `left-${Date.now()}-${old.id}`, at: item.at, gear: left as GearSpec }];
+    }
+    reachRef.current = reachRef.current.filter(x => x !== id);
+    setInv(inventory);
+    setGot({ gear: item.gear, id: Date.now() });
+    latest.current.onSave(snapshot.current());
+  };
+  /**
+   * E by gear on the floor: a memory (eternal) is picked up at once; anything you could wield opens the
+   * inventory on that slot's ground place, to take it into your ordinary place (or swap it for what is there).
+   */
   const pickUp = () => {
     const item = floorItems().find(x => x.id === nearPickupRef.current);
     if (!item) return;
-    // Wearing ordinary gear of its kind already: the inventory opens, to swap them (you leave what you wear here).
-    if (!item.gear.eternal && wornInSlot(item.gear)) {
-      held.current = [];
-      setSwapId(item.id);
-      setInvFocus(0);
-      setPaused(true);
+    held.current = [];
+    if (item.gear.eternal) { takeFromGround(item.id); return; }
+    setScreen({ kind: "inventory", start: { row: item.gear.slot === "weapon" ? 0 : 1, place: "ground" } });
+  };
+  /** E on a place of the inventory: wield it (or unequip it, if you already wield it), or take what lies on the ground. */
+  const useInventory = (slot: Slot, place: Place) => {
+    if (place === "ground") {
+      const items = floorItems();
+      const id = reachRef.current.find(x => items.find(i => i.id === x)?.gear.slot === slot);
+      if (id) takeFromGround(id);
       return;
     }
-    lift(item.id);
-    // It goes in the bag; wearing it is up to you.
-    const { inventory, replaced } = receive(invRef.current, [item.gear], false);
-    setInv(inventory);
-    setNote({
-      text: `You pick up the ${gearName(item.gear).toLowerCase()}.${replaced.length ? ` You let go of the ${replaced.map(gearName).join(", ").toLowerCase()}.` : ""} Open your inventory (Esc) to equip it.`,
-      id: Date.now(),
-    });
-    latest.current.onSave(snapshot.current());
+    const cur = invRef.current;
+    setInv(equippedSide(cur, slot) === place && (cur[slot] !== null) ? unequip(cur, slot, place) : equipSide(cur, slot, place));
   };
-  /** The swap: the gear on the ground goes on, and what you wore lies there instead. */
-  const swap = () => {
-    const item = floorItems().find(x => x.id === swapRef.current);
-    const worn = item && wornInSlot(item.gear);
-    setSwapId(null);
-    setPaused(false);
-    if (!item || !worn) return;
-    lift(item.id);
-    const { id: _id, ...left } = worn;
-    groundRef.current = [...groundRef.current, { id: `left-${Date.now()}`, at: item.at, gear: left as GearSpec }];
-    const { inventory } = receive(invRef.current, [item.gear], true);
-    setInv(inventory);
-    setNote({ text: `You take the ${gearName(item.gear).toLowerCase()} and leave your ${gearName(worn).toLowerCase()} here.`, id: Date.now() });
-    latest.current.onSave(snapshot.current());
+  /** You, as your bars show you between fights: full health, the knot's revive and your Eternity. */
+  const barsPlayer = (): Player => {
+    const look = loadoutOf(invRef.current);
+    return {
+      id: "player", name: "You", maxHP: PLAYER_MAX_HP, hp: PLAYER_MAX_HP, fatigue: 0, death: 0,
+      weapon: look.weapon, armor: look.armor, waxed: false, staggered: false,
+      charges: knotCharges(knotRef.current), reviving: false,
+      maxEternity: PLAYER_MAX_HP, eternity: Math.min(PLAYER_MAX_HP, eternityRef.current ?? PLAYER_MAX_HP),
+    };
   };
-  useEffect(() => {
-    // The gear a fight left you.
-    if (journey.found) setNote({ text: journey.found, id: Date.now() });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   // Where the tutorial stands (it moves on while you are here).
   const tutorialRef = useRef<TutorialState>(journey.tutorial);
   // Resting is a sleep: the screen fades out, you settle by the guide, and fades back in. What it
@@ -226,7 +225,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
     if (leaving.current) return;
     held.current = [];
     leaving.current = true;
-    setPaused(false);
+    setScreen(null);
     setSleeping(true);
     sleepTimers.current.push(window.setTimeout(() => latest.current.onDie(snapshot.current()), SLEEP_MID_MS));
   };
@@ -244,17 +243,14 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       window.setTimeout(() => {
         restedAt.current = id;
         respawnRef.current();
-        if (knotRef.current === "unwound") {
-          setKnot("wound");
-          setNote({ text: "The knot winds itself tight again.", id: Date.now() });
-        }
+        eternityRef.current = undefined;
+        if (knotRef.current === "unwound") setKnot("wound");
       }, SLEEP_MID_MS),
       window.setTimeout(() => {
         setSleeping(false);
         leaving.current = false;
         latest.current.onSave(snapshot.current());
         if (gift) setTalk({ ...GIFT, at: 0 });
-        else setNote(n => n ?? { text: "You rest by the hooded figure. Should you fall, you will wake here.", id: Date.now() });
       }, SLEEP_MS),
     ];
   };
@@ -268,12 +264,29 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   const snapshot = useRef<() => Journey>(() => latest.current.journey);
   /** What follows the guide's last words: the knot, once, at the first floor's safe spot. */
   const then = (after: After) => {
+    // Talking from the guide's menu: back to it.
+    if (after === "guide") { setScreen({ kind: "guide" }); return; }
     if (after !== "knot") return;
     tutorialRef.current = { ...tutorialRef.current, done: true };
     setKnot("wound");
-    setNote({ text: "The guide presses a tangled knot into your hands.", id: Date.now() });
     latest.current.onSave(snapshot.current());
   };
+
+  /**
+   * Speaking with the guide by a keeper. The first time after you have found a memory, its menu opens
+   * right on Unwind Memories (and from then on, it is one of its options).
+   */
+  const openGuide = () => {
+    const first = hasMemories(invRef.current) && !tutorialRef.current.unwound;
+    if (first) { tutorialRef.current = { ...tutorialRef.current, unwound: true }; latest.current.onSave(snapshot.current()); }
+    setScreen({ kind: "guide", unwindFirst: first });
+  };
+  /** The pause menu (Esc): carry on, die here and wake by the last safe spot, or back to the main menu (it saves). */
+  const pauseOptions = (): MenuOption[] => [
+    { label: "Resume", run: () => setScreen(null) },
+    { label: "Reawaken", run: () => reawakenRef.current() },
+    { label: "Save and Quit", run: () => onExit(snapshot.current()) },
+  ];
 
   const keyHandler = useRef<(e: KeyboardEvent, down: boolean) => void>(() => {});
   keyHandler.current = (e, down) => {
@@ -285,35 +298,21 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (leaving.current) return;
     const key = e.key.toLowerCase();
+    // The inventory and the guide's menu read their own keys.
+    if (screen && screen.kind !== "pause") return;
     if (key === "escape") {
       e.preventDefault();
-      if (!e.repeat) {
-        // (Esc closes an open list first.)
-        if (choiceRef.current) { setChoice(null); return; }
-        held.current = []; setInvFocus(0); setSwapId(null); setPaused(p => !p);
-      }
+      if (!e.repeat) { held.current = []; setPauseAt(0); setScreen(s => (s ? null : { kind: "pause" })); }
       return;
     }
-    if (paused) {
-      // The inventory screen: W/S pick a slot (or the way back to the main menu), A/D change
-      // what's worn in a slot, E uses the menu button, Q closes.
+    if (screen?.kind === "pause") {
+      // The pause menu: W/S choose, E picks, Q (or Esc) resumes.
       e.preventDefault();
       if (e.repeat) return;
-      const accept = key === "e" || key === "enter" || key === " ";
-      if (accept && swapRef.current) swap();
-      else if (choiceRef.current) {
-        // The list: W/S choose, E wields, Q goes back to the places.
-        const c = choiceRef.current;
-        if (dir === "up" || dir === "down") setChoice({ ...c, at: wrapIndex(c.at, dir === "up" ? -1 : 1, piecesFor(invRef.current, c.slot, c.side).length + 1) });
-        else if (accept) chooseEntry();
-        else if (key === "q") setChoice(null);
-      } else if (dir === "up" || dir === "down") {
-        // Rows of places, then the way back to the menu.
-        setInvFocus(i => (i === INV_MENU ? (dir === "up" ? INV_REAWAKEN : 0) : i === INV_REAWAKEN ? (dir === "up" ? INV_REAWAKEN - SIDES.length : INV_MENU) : dir === "up" ? (i < SIDES.length ? INV_MENU : i - SIDES.length) : i + SIDES.length >= INV_REAWAKEN ? INV_REAWAKEN : i + SIDES.length));
-      } else if (dir === "left" || dir === "right") {
-        setInvFocus(i => (i >= INV_REAWAKEN ? i : Math.floor(i / SIDES.length) * SIDES.length + (dir === "left" ? 0 : 1)));
-      } else if (accept) activatePlace(invFocus);
-      else if (key === "q") { setSwapId(null); setPaused(false); }
+      const options = pauseOptions();
+      if (dir === "up" || dir === "down") setPauseAt(i => wrapIndex(i, dir === "up" ? -1 : 1, options.length));
+      else if (key === "e" || key === "enter" || key === " ") options[pauseAt]?.run();
+      else if (key === "q") setScreen(null);
       return;
     }
     if (talk) {
@@ -329,10 +328,13 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       if (!e.repeat) held.current = [...held.current.filter(d => d !== dir), dir];
       return;
     }
-    if ((key === "e" || key === "enter") && !e.repeat && (nearRef.current || nearPickupRef.current)) {
+    // E: pick up what lies here, or speak with the guide by a keeper, or open the inventory.
+    if ((key === "e" || key === "enter") && !e.repeat) {
       e.preventDefault();
+      held.current = [];
       if (nearPickupRef.current) pickUp();
-      else rest();
+      else if (nearRef.current) openGuide();
+      else setScreen({ kind: "inventory" });
     }
   };
 
@@ -413,6 +415,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       tutorial: tutorialRef.current,
       knot: knotRef.current,
       inventory: invRef.current,
+      eternity: eternityRef.current,
       taken: takenRef.current,
     });
     // The guide is one presence: it fades in beside whichever keeper you come near, and out again as
@@ -531,7 +534,11 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       const by = KEEPERS.find(k => Math.abs(k.at.z - me.alt) < 0.2 && Math.hypot(k.at.x - me.x, k.at.y - me.y) < KEEPER_REACH)?.id ?? null;
       if (by !== nearRef.current) { nearRef.current = by; setNear(by); }
       // Gear on the floor within reach.
-      const onFloor = floorItems().find(p => Math.abs(p.at.z - me.alt) < 0.2 && Math.hypot(p.at.x - me.x, p.at.y - me.y) < PICKUP_REACH)?.id ?? null;
+      const inReach = floorItems()
+        .filter(p => Math.abs(p.at.z - me.alt) < 0.2 && Math.hypot(p.at.x - me.x, p.at.y - me.y) < PICKUP_REACH)
+        .sort((a, b) => Math.hypot(a.at.x - me.x, a.at.y - me.y) - Math.hypot(b.at.x - me.x, b.at.y - me.y));
+      reachRef.current = inReach.map(p => p.id);
+      const onFloor = inReach[0]?.id ?? null;
       if (onFloor !== nearPickupRef.current) { nearPickupRef.current = onFloor; setNearPickup(onFloor); }
     };
 
@@ -667,7 +674,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
      * seen from the camera at (ox, oy), back ones first.
      */
     const drawFoes = (ctx: CanvasRenderingContext2D, z: number, ox: number, oy: number, T: number, test: (y: number) => boolean, light: Light) => {
-      const list: { x: number; y: number; draw: () => void }[] = [];
+      // (`over`: drawn over what stands on the same row, as gear over the remains it dropped from.)
+      const list: { x: number; y: number; over?: boolean; draw: () => void }[] = [];
       for (const f of foes) {
         if (Math.round(f.alt) !== z || !test(f.y)) continue;
         list.push({ x: f.x, y: f.y, draw: () => {
@@ -695,7 +703,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       }
       for (const p of floorItems()) {
         if (Math.round(p.at.z) !== z || !test(p.at.y)) continue;
-        list.push({ x: p.at.x, y: p.at.y, draw: () => drawPickup(ctx, ox + p.at.x * T, oy + (p.at.y - p.at.z * RISE - BODY_ABOVE_FEET) * T, T, performance.now(), p.look) });
+        list.push({ x: p.at.x, y: p.at.y, over: true, draw: () => drawPickup(ctx, ox + p.at.x * T, oy + (p.at.y - p.at.z * RISE - BODY_ABOVE_FEET) * T, T, performance.now(), !!p.gear.eternal) });
       }
       // Whoever lies beaten, where it fell.
       for (const c of Object.values(corpsesRef.current)) {
@@ -713,7 +721,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         } });
       }
       if (!list.length) return false;
-      list.sort((a, b) => a.y - b.y).forEach(d => {
+      // (Gear lying on remains is drawn over them, though the two lie on the same spot.)
+      list.sort((a, b) => a.y + (a.over ? 0.3 : 0) - (b.y + (b.over ? 0.3 : 0))).forEach(d => {
         // Each is as bright as the light where it stands (the keepers fade in on top of that).
         const lit = light(d.x, d.y);
         if (lit < 0.01) return;
@@ -776,21 +785,37 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
     <div className="explore">
       <canvas ref={canvasRef} className="explore-canvas" />
       {preparing !== null && <div className="explore-loading">Preparing the map… {Math.round(preparing * 100)}%</div>}
-      {nearPickup && !paused && !entering && !talk && (
+      {nearPickup && !got && !paused && !entering && !talk && (
         <div className="explore-prompt"><kbd>E</kbd> Pick Up</div>
       )}
+      {/* What you just picked up, in the prompt's place: its sprite and its name, fading away. */}
+      {got && !paused && (
+        <div key={got.id} className="explore-prompt explore-got">
+          <GearSprite slot={got.gear.slot} tier={got.gear.tier} />
+          <span>{gearName(got.gear)}</span>
+        </div>
+      )}
       {near && !nearPickup && !paused && !entering && !talk && (
-        <div className="explore-prompt"><kbd>E</kbd> Rest</div>
+        <div className="explore-prompt"><kbd>E</kbd> Speak with the guide</div>
       )}
       {sleeping && <div className="explore-sleep" />}
       {talk && <Dialogue speaker="The guide" text={talk.lines[talk.at]} last={talk.at + 1 >= talk.lines.length} />}
-      {note && <div key={note.id} className="explore-note">{note.text}</div>}
       {entering && <div className="explore-fade" />}
-      {paused && (() => {
-        const offered = swapId ? floorItems().find(p => p.id === swapId) : undefined;
-        const worn = offered && wornInSlot(offered.gear);
-        return <Inventory inv={inv} knot={knot} focus={invFocus} onFocus={setInvFocus} onActivate={activatePlace} list={choice ?? undefined} onListHover={at => choice && setChoice({ ...choice, at })} onListPick={chooseEntry} swap={offered && worn ? { gear: offered.gear, worn } : undefined} />;
-      })()}
+      {screen?.kind === "inventory" && (
+        <InventoryScreen inv={inv} player={barsPlayer()} ground={groundNear()} start={screen.start} onUse={useInventory} onClose={() => setScreen(null)} />
+      )}
+      {screen?.kind === "guide" && (
+        <GuideMenu
+          inv={inv}
+          unwindFirst={screen.unwindFirst}
+          onTalk={() => { setScreen(null); setTalk({ ...CHAT, at: 0 }); }}
+          onRest={() => { setScreen(null); rest(); }}
+          onRead={id => { setInv(readDreams(invRef.current, id)); latest.current.onSave(snapshot.current()); }}
+          onSet={(slot, id) => { setInv(setEternal(invRef.current, slot, id)); latest.current.onSave(snapshot.current()); }}
+          onClose={() => setScreen(null)}
+        />
+      )}
+      {screen?.kind === "pause" && <PauseMenu options={pauseOptions()} focus={pauseAt} onFocus={setPauseAt} />}
     </div>
   );
 }

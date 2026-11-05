@@ -58,7 +58,7 @@ What is planned but not built is in `docs/todo.md`: read it when starting a task
   figures, `MAP_FIGURES` by kind), `foes.ts` (`MAP_FOES`, chasing), `keepers.ts` (`KEEPERS`, rest
   points; the guide fades in at each), `tutorial.ts` (the guide's teaching: state, the gift, the
   knot), `sealed.ts` (the sleepers sealed in the labyrinth's wax, painted into the chunks), `gear.ts` (inventory, drops, losing it all on
-  a fall), `pickups.ts` (gear lying on the floor), gear lying where enemies fell (`Journey.ground`, `GroundItem` in `pickups.ts`), the beaten enemies' remains (`Journey.corpses`, drawn by `MAP_REMAINS` in `figures.ts`; the sleepwalkers get up when you rest, per `respawns`), `save.ts` (progress in localStorage), `Inventory.tsx`, `Dialogue.tsx`, `tuning.ts`, `Exploration.tsx`. The tutorial fight:
+  a fall; eternal memories, read and set with the guide), `InventoryScreen.tsx` (the inventory, E), `GuideMenu.tsx` (the guide's menu by a keeper), `lore.ts` (eternal weapons' lore and effect texts), `pickups.ts` (gear lying on the floor), gear lying where enemies fell (`Journey.ground`, `GroundItem` in `pickups.ts`), the beaten enemies' remains (`Journey.corpses`, drawn by `MAP_REMAINS` in `figures.ts`; the sleepwalkers get up when you rest, per `respawns`), `save.ts` (progress in localStorage), `Dialogue.tsx`, `tuning.ts`, `Exploration.tsx`. The tutorial fight:
   a new game opens in the lesson (`Journeying`'s `lessonFight`, `CombatScreen`'s `wakeUp`: you wake in the dark, the guide's light approaching): the guide against you, bare-handed,
   under `combat/lesson.ts` (`CombatScreen`'s `lesson` prop).
 - `audio/sfx.ts`: the combat's sounds, synthesized with Tone.js (no files; loaded on the first sound); `sfxFor(event)` maps a
