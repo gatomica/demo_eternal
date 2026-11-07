@@ -5,7 +5,7 @@ import { StringAura } from "./StringCounter";
 import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Variant } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
-import { type Cam, darkAt, ease, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, focusOf, NEAR, planningCamera, project, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec } from "./camera";
+import { type Cam, darkAt, ease, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, focusOf, NEAR, planningCamera, project, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec, yawOf } from "./camera";
 import { ClangBurst, EternityHalo, FlameHit, HaloBurst, ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
 import type { Pt } from "./geom";
 import { Blood, Shards } from "./HealthBar";
@@ -13,6 +13,8 @@ import { lookOf } from "./looks";
 import { flameOf, type PoseName } from "./poses";
 import { CloakRemains, GuideRemains, Remains } from "./Remains";
 import { StickFigure } from "./StickFigure";
+import { facingYaw } from "./rig3d";
+import { Waxed3D } from "./Waxed3D";
 import { BlobBack, BlobFront, type BlobBox } from "./WaxBlob";
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "../warden/arena";
 import { IGNITE } from "../warden/scenes";
@@ -39,6 +41,11 @@ export interface SceneFigure {
   /** A level swing's trail (see StickFigure). */
   trail?: number;
   variant?: Variant;
+  /**
+   * It is dodging: the way it goes (a unit vector on the floor), and whether it is backing off. It faces along it (advancing), or away
+   * from it (retreating), for as long as this is set; the combat screen sets it from the dodge until the figure starts repositioning.
+   */
+  dodge?: { dir: Vec; retreat: boolean };
   /** It carries a flame of its own (a waxed): phase two's scene draws on it. */
   flame?: boolean;
   arm?: CandleArm;
@@ -243,6 +250,15 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   };
   const toScreen = (box: { x: number; y: number; w: number; h: number }, p: readonly [number, number], mirror: boolean): Pt =>
     [box.x + (box.w * (mirror ? 100 - p[0] : p[0])) / 100, box.y + (box.h * p[1]) / 120];
+  /**
+   * Which way a figure faces while it is dodging (the drawn-in-3D ones only): along its dodge when it closes in, away from it when it
+   * backs off. (undefined: not dodging; it faces you.)
+   */
+  const dodgeFacing = (f: SceneFigure): Vec | undefined => {
+    if (!f.dodge || f.straight) return undefined;
+    const { dir, retreat } = f.dodge;
+    return retreat ? { x: -dir.x, z: -dir.z } : dir;
+  };
   /** The hand a figure's stolen flames stream into, in figure units. */
   const handOf = (f: SceneFigure) => lookOf(f.variant)?.flameHand ?? flameOf(f.pose);
   // Lit for good once the arena is lit, or from the moment his flare relights them.
@@ -317,7 +333,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         >
           {f.holdsString && !f.dead && <StringAura layer="back" spread={f.body ? 2.4 : 1} />}
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
+            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : f.variant === "waxed" && !f.body && w > 0 ? <Waxed3D pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={dodgeFacing(f) ? yawOf(dodgeFacing(f)!) : facingYaw(c, at, posNow("player"), f.view, !!f.straight)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}
           </div>

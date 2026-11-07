@@ -30,6 +30,9 @@ export const partLabel = (sub: EnemySubject, i: number) => (sub in BODIES ? BODI
 /** Which line it stands on: every kind can be shown on either (its own statuses come from its kind). */
 export const LINE_TOGGLE: StatusToggle = { key: "back", off: "Front line", on: "Back line" };
 
+/** Debug, for every model: its right arm and right leg drawn red, to tell the sides apart. */
+export const DEBUG_TOGGLE: StatusToggle = { key: "debug", off: "Debug: off", on: "Debug: on" };
+
 /** How the Model stance sees the enemy: 3/4 (as enemies appear in a fight, and as you do) or straight on, from the front or behind. */
 export type ModelAngle = "front34" | "front" | "back34" | "back";
 

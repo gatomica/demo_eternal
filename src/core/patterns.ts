@@ -30,6 +30,10 @@
  *   - Comes from: action names (and `Recover`, or an event the kind declares, like the Warden's
  *     `Second Phase`: right after he enters it) separated by `/` or `,`, or `All`.
  *   - Leads to: the actions it allows, in order of priority, separated by `,` or `/`.
+ * - A Block can be told by what it did: `Brace` in a "comes from" list is a Brace that stopped an
+ *   attack, `!Brace` one that stopped nothing (only once the pattern writes `!Brace` somewhere;
+ *   otherwise `Brace` is either).
+ * - An action no stance comes from defaults to the Recover stances.
  * - Recover is the turn after being staggered (or reviving). `Recover >` stances are also the
  *   ones an enemy opens a fight with.
  *
@@ -85,6 +89,8 @@ export interface Pattern {
   stances: StanceDef[];
   /** The stances that can follow each action ("recover" included), worked out once. */
   after: Map<string, StanceDef[]>;
+  /** Blocks whose pattern tells "stopped an attack" (`Brace`) from "stopped nothing" (`!Brace`). */
+  split: Set<string>;
 }
 
 export class PatternError extends Error {}
@@ -149,7 +155,11 @@ export function parsePattern(label: string, src: string, { events = [] }: { even
     else {
       fromSet = new Set<string>();
       for (const n of from.split(/[/,]/).map(x => x.trim()).filter(Boolean)) {
-        if (fromNames.has(n.toLowerCase())) fromSet.add(n.toLowerCase());
+        if (n.startsWith("!")) {
+          const a = find(n.slice(1), where);
+          if (a.type !== "block") fail(`${where}: "!${a.name}" only works on a Block (it means the Block stopped nothing)`);
+          fromSet.add("!" + a.name.toLowerCase());
+        } else if (fromNames.has(n.toLowerCase())) fromSet.add(n.toLowerCase());
         else fromSet.add(find(n, where).name.toLowerCase());
       }
     }
@@ -158,21 +168,20 @@ export function parsePattern(label: string, src: string, { events = [] }: { even
     return { name, from: fromSet, actions: list };
   });
 
-  // No dead ends: Recover, and every action a stance can lead to, must lead to some stance.
-  const leadsSomewhere = (n: string) => stances.some(s => s.from === "all" || s.from.has(n));
-  if (!leadsSomewhere("recover")) fail(`no stance comes from Recover (or All), so it can't open a fight or recover from a stagger`);
-  for (const s of stances) for (const a of s.actions) {
-    if (!leadsSomewhere(a.name.toLowerCase())) fail(`"${a.name}" (from stance "${s.name}") doesn't lead to any stance`);
-  }
+  // Recover must lead somewhere. (An action nothing follows is no error: it defaults to Recover's stances.)
+  if (!stances.some(s => s.from === "all" || s.from.has("recover"))) fail(`no stance comes from Recover (or All), so it can't open a fight or recover from a stagger`);
+  // A Block written with "!" somewhere splits in two: its bare name then means "it stopped an attack".
+  const split = new Set<string>();
+  for (const s of stances) if (s.from !== "all") for (const k of s.from) if (k.startsWith("!")) split.add(k.slice(1));
   if (new Set(stances.map(s => s.name.toLowerCase())).size !== stances.length) fail(`a stance name is used twice`);
 
   // What can follow each action, looked up every time an enemy picks.
   const after = new Map<string, StanceDef[]>();
-  for (const key of [...fromNames, ...actions.keys()]) {
+  for (const key of [...fromNames, ...actions.keys(), ...[...split].map(n => "!" + n)]) {
     const next = stances.filter(s => s.from === "all" || s.from.has(key));
     if (next.length) after.set(key, next);
   }
-  return { label, actions, stances, after };
+  return { label, actions, stances, after, split };
 }
 
 /** What happened with the last action, as far as picking the next stance is concerned. */
@@ -180,6 +189,8 @@ export interface PatternMemory {
   /** The action's name, if it had one. */
   action?: string;
   outcome: "done" | "undone" | "recover";
+  /** For a Block: it stopped an attack. Unknown (undefined) counts as stopped. */
+  blocked?: boolean;
   /** A stance to steer clear of when picking among the Recover stances: the one a flinched Rest was broken out of. */
   avoid?: string;
 }
@@ -188,7 +199,8 @@ const pick = <T>(items: readonly T[], rng: () => number): T => items[Math.floor(
 
 /** The stances that can follow the last action (or the Recover stances at the start of a fight). */
 export function nextStances(p: Pattern, last: PatternMemory | null): StanceDef[] {
-  const key = last && last.outcome === "done" && last.action ? last.action.toLowerCase() : "recover";
+  let key = last && last.outcome === "done" && last.action ? last.action.toLowerCase() : "recover";
+  if (p.split.has(key) && last!.blocked === false) key = "!" + key;
   const known = p.after.get(key);
   if (known) {
     // A flinched unit recovers into a different stance than the one it was flinched out of (so a

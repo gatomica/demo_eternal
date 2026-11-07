@@ -56,6 +56,8 @@ export interface Turn {
   cancelled: Set<string>;
   /** Weapon blows this turn, however they went: attacker id -> whom it attacked (for the Jagged Chisel, next turn). */
   attacked: Map<string, string>;
+  /** Who blocked at least one attack this turn. */
+  blocked: Set<string>;
   /** Rests broken by a blow. */
   interrupted: Set<string>;
   /** Enemies that fell with a revive left: their protected turn is next. */
@@ -107,7 +109,7 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
     wasFlags: new Map(alive.map(e => [e.id, { ...e.flags }])),
     wasStaggered: new Set(fighters.filter(f => f.staggered).map(f => f.id)),
     hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(),
-    cancelled: new Set(), attacked: new Map(), interrupted: new Set(), fellReviving: new Set(),
+    cancelled: new Set(), blocked: new Set(), attacked: new Map(), interrupted: new Set(), fellReviving: new Set(),
     swing: act?.type === "attack" ? swingFor(p.stance, alive.find(e => e.id === act.target)) : undefined,
     steps: [],
     events: [],
@@ -135,12 +137,18 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
       return (f as Enemy).intent.type === "block";
     },
     /**
-     * A Maneuver dodges every attack, whatever its line, its target or its range. (Only you attack
-     * enemies, so an enemy's Maneuver dodges you.)
+     * A Maneuver dodges attacks, whatever their line or range. Falling back dodges every attack; advancing on an enemy dodges only
+     * that enemy's (all the parts of its body, for a multi-part one). (Only you attack enemies, so an enemy's Maneuver, which
+     * advances on you, dodges you.)
      */
     isDodging: (f, attacker) => {
       if (t.out.has(f.id)) return false;
-      if (f === p) return act?.type === "maneuver";
+      if (f === p) {
+        if (act?.type !== "maneuver") return false;
+        if (!act.target || act.target === "self") return true;
+        const aimed = t.s.enemies.find(e => e.id === act.target);
+        return !!aimed && bodyOf(t.s.enemies, aimed).some(m => m.id === attacker.id);
+      }
       return (f as Enemy).intent.type === "maneuver" && attacker === p;
     },
   };

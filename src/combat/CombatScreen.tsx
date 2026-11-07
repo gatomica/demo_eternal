@@ -5,7 +5,7 @@ import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, us
 import { PHASE_TWO, playMusic } from "../audio/music";
 import { eternalSfx, play as playSfx, prepare as prepareSfx, sfxFor } from "../audio/sfx";
 import { ActionWheel, type Anchor } from "./ActionWheel";
-import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_SIDE, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
+import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_LATERAL, DODGE_PAST, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
 import { LessonBox } from "./LessonBox";
 import { prepareWalk, speak } from "../audio/walk";
 import { useDev } from "../ui/dev";
@@ -15,7 +15,7 @@ import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveTurn, snapshotOf } from "../core/resolve";
 import { attackCost, restRecovery } from "../core/rules";
 import type { CombatEvent, CombatState, Enemy, Opening, Player, PlayerAction, Stance, Swing } from "../core/types";
-import { behind, bodiesOfEnemies, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
+import { behind, bodiesOfEnemies, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, SCENE_TILT, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
 import type { Projectile } from "../render/effects";
 import { type BarValues, HealthBar, PlayerBars } from "../render/HealthBar";
 import { lookOf } from "../render/looks";
@@ -25,6 +25,7 @@ import { StringFx, type StringBurst } from "../render/StringFx";
 import type { StringPop } from "../render/StringCounter";
 import { type Dir, menuSound, useKeys, wrapIndex } from "../ui/input";
 import { type MenuOption, PauseMenu } from "../ui/Menu";
+import { DebugLimbsContext } from "../render/debugLimbs";
 import { IGNITE } from "../warden/scenes";
 import type { CandleArm, WardenPoseName } from "../warden/skeleton";
 
@@ -36,7 +37,7 @@ const BOSS_STRINGS = 12;
 /** How an enemy's look draws it differently (its kind's variant). */
 const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 
-export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, playerAction, playerHold, playerAngle, playerDead, light = true, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, figureAngle, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
+export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, playerAction, playerHold, playerAngle, playerDead, light = true, debugLimbs = false, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, figureAngle, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
   initial: CombatState;
   /** A scene to play before the first turn (it leaves the fight as `initial`). */
   opening?: Opening;
@@ -62,6 +63,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   playerDead?: boolean;
   /** The fight's limited light (default on). The Model viewer can turn it off to see everything. */
   light?: boolean;
+  /** The Model viewer's Debug status: every figure draws its right arm and leg red. */
+  debugLimbs?: boolean;
   /** The pause menu's label for onChangeLoadout. */
   changeLabel?: string;
   /** The pause menu's label for onExit. */
@@ -279,6 +282,17 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return out;
   };
 
+  /**
+   * The camera's yaw for a scene between two fighters: turned so the enemy is on the right of the screen and what it is aimed at (you,
+   * or the ally it hits) on the left, whichever way the fight faces. Sprites and animations then always look the same.
+   */
+  const sceneYaw = (a: string, b: string, fallback: number): number => {
+    const [enemy, other] = a === "player" ? [b, a] : [a, b];
+    const e = world.current.pos[enemy], o = world.current.pos[other];
+    if (!e || !o || Math.hypot(e.x - o.x, e.z - o.z) < 0.05) return fallback;
+    return yawOf(sub(e, o)) - Math.PI / 2 + SCENE_TILT;
+  };
+
   const linesOf = (st: CombatState) => ({
     front: st.enemies.filter(e => e.alive && e.line === "front").map(e => e.id),
     back: st.enemies.filter(e => e.alive && e.line === "back").map(e => e.id),
@@ -402,7 +416,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // The camera settles between him and his target, then closes in as he dashes at it.
       const a = w.pos[usurp.who], t = w.pos[usurp.target];
       if (!a || !t) return;
-      const between: ShotCamera = { between: [usurp.who, usurp.target], yaw: shotCamera(shot).yaw };
+      const between: ShotCamera = { between: [usurp.who, usurp.target], yaw: sceneYaw(usurp.who, usurp.target, shotCamera(shot).yaw) };
       if (usurpStage === "focus") shoot(w.pos, between, USURP_STAGES.dash);
       if (usurpStage === "dash") {
         const at = closeIn(a, t, STRIKE_GAP);
@@ -413,7 +427,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // Staggered in phase two, the Warden sends a flame to a fallen waxed: the camera follows it there, to see it rise.
     const raise = step?.events.find(ev => ev.kind === "raised" && ev.by);
     if (raise && raise.kind === "raised" && raise.by && playback.phase !== "approach") {
-      shoot(w.pos, { between: [raise.by, raise.who], yaw: shotCamera(shot).yaw }, RAISE_CAMERA_MS);
+      shoot(w.pos, { between: [raise.by, raise.who], yaw: sceneYaw(raise.by, raise.who, shotCamera(shot).yaw) }, RAISE_CAMERA_MS);
       return;
     }
     const attack = step?.events.find(ev => ev.kind === "attack");
@@ -437,9 +451,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     const t = w.pos[attack.target];
     if (!a || !t) return;
     /** Where a dodge carries the target. */
-    const dodgeTo = () => {
+    const dodgeTo = (strike: Vec): { to: Vec; retreating: boolean } => {
       // A dodge gets out of the way: further back, and away from the attacker, if they were retreating; if they
-      // were closing in, past the attack to the attacker's side.
+      // were closing in, past the attacker, to its far side.
       const retreating = attack.target === "player"
         ? playback.action?.type === "maneuver" && playback.action.target === "self"
         : playback.from.enemies.find(e => e.id === attack.target)?.intent.dir === "retreat";
@@ -451,24 +465,32 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       const back = { x: (t.x - cam.x) / cd, z: (t.z - cam.z) / cd };
       let side = { x: -back.z, z: back.x };
       if (side.x * (t.x - a.x) + side.z * (t.z - a.z) < 0) side = { x: -side.x, z: -side.z }; // away from the attacker
-      return retreating
-        ? { x: t.x + (back.x + side.x) * DODGE_BACK, z: t.z + (back.z + side.z) * DODGE_BACK }
-        : { x: t.x - side.x * DODGE_SIDE, z: t.z - side.z * DODGE_SIDE };
+      if (retreating) return { retreating, to: { x: t.x + (back.x + side.x) * DODGE_BACK, z: t.z + (back.z + side.z) * DODGE_BACK } };
+      // Closing in: on along the line from the dodger through the attacker's striking spot, to a point beyond it, so the dodger ends up on
+      // the opposite side of its attacker. A little to one side as well (the far side from the camera), to pass it, not run into it.
+      const through = { x: strike.x - t.x, z: strike.z - t.z }, reach = Math.hypot(through.x, through.z);
+      const along = reach > 0.05 ? { x: through.x / reach, z: through.z / reach } : { x: -back.x, z: -back.z };
+      let lateral = { x: -along.z, z: along.x };
+      if (lateral.x * back.x + lateral.z * back.z < 0) lateral = { x: -lateral.x, z: -lateral.z };
+      return { retreating, to: { x: strike.x + along.x * DODGE_PAST + lateral.x * DODGE_LATERAL, z: strike.z + along.z * DODGE_PAST + lateral.z * DODGE_LATERAL } };
     };
     let cleanup: (() => void) | undefined;
     if (playback.phase === "approach") {
       // A melee attacker closes in (a ranged one stays put), and the camera moves in on the two.
       const at = attack.ranged ? a : closeIn(a, t, STRIKE_GAP);
       // (It stays centered between the two as they move: closing in, knocked back, dodging.)
-      const camera: ShotCamera = { between: [attack.attacker, attack.target], yaw: shotCamera(shot).yaw };
+      const camera: ShotCamera = { between: [attack.attacker, attack.target], yaw: sceneYaw(attack.attacker, attack.target, shotCamera(shot).yaw) };
       shoot(dragBody(w.pos, attack.attacker, at), camera, APPROACH_MS);
       if (attack.result === "dodged") {
         // A target that dodges gets clear late in the approach, timed to be gone just as the blow arrives (the
         // blow lands where it was), and only then takes its dodge pose.
-        const to = dodgeTo();
+        const { to, retreating } = dodgeTo(at);
         const timer = window.setTimeout(() => {
           shoot(dragBody(world.current.pos, attack.target, to), camera, APPROACH_MS - DODGE_DELAY_MS);
           setDodgeStarted(stepKey);
+          // The dodger faces the way it goes (or, backing off, away from it) from here until it starts repositioning (see `dodgeFor`).
+          const go = { x: to.x - t.x, z: to.z - t.z }, len = Math.hypot(go.x, go.z) || 1;
+          setDodging(prev => ({ ...prev, [attack.target]: { dir: { x: go.x / len, z: go.z / len }, retreat: retreating } }));
         }, DODGE_DELAY_MS);
         cleanup = () => window.clearTimeout(timer);
       }
@@ -872,6 +894,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   }, [stepKey]);
   // The approach (step key) in which a target has started to dodge.
   const [dodgeStarted, setDodgeStarted] = useState<string | null>(null);
+  // Who has dodged this turn, and the way they went.
+  const [dodging, setDodging] = useState<Record<string, { dir: Vec; retreat: boolean }>>({});
   // A Rest's own animation (its pose) starts the moment it goes through and lasts REST_ANIM_MS.
   const [restPoseOver, setRestPoseOver] = useState<string | null>(null);
   useEffect(() => {
@@ -891,6 +915,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     const t = window.setTimeout(() => setWalkOff(null), NUDGE_MS);
     return () => window.clearTimeout(t);
   }, [walkOff]);
+  useEffect(() => {
+    if (!playback && !walkOff) setDodging(prev => (Object.keys(prev).length ? {} : prev));
+  }, [playback, walkOff]);
   const track = (id: string, pose: PoseName): PoseName => {
     if (playback && maneuvering(id) && dodgedBefore(id)) dodgers[id] = pose;
     return pose;
@@ -1256,9 +1283,20 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     : !wardenHere.alive);
   const candlesLit = arenaLit && !wardenDown;
   const playerSealed = (p.waxed || !!p.encased) && p.staggered;
+  /**
+   * The dodge a figure faces along (or, backing off, away from) in the scene: from the moment it dodges until its repositioning starts,
+   * the step where it walks to its new spot (the pose changes then too). After that, and outside a turn, it faces you again.
+   */
+  const dodgeFor = (id: string) => {
+    const d = dodging[id];
+    if (!d || !playback) return undefined;
+    const repositioning = stepOf("maneuver", id);
+    return repositioning >= 0 && playback.index >= repositioning ? undefined : d;
+  };
   const figures: SceneFigure[] = [
     {
       id: "player",
+      dodge: dodgeFor("player"),
       view: playerAngle?.view ?? "back",
       straight: playerAngle?.straight,
       sides: playerAngle?.sides,
@@ -1294,6 +1332,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       .filter(e => e.alive || fx.get(e.id)?.classes.includes("fx-fall") || kindOf(e).remains || looksDead(e))
       .map((e): SceneFigure => ({
         id: e.id,
+        dodge: dodgeFor(e.id),
         view: figureAngle?.view ?? "front",
         straight: figureAngle?.straight,
         sides: figureAngle?.sides,
@@ -1407,6 +1446,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   return (
     <div className={`hud ${busy ? "is-cinematic" : ""}`} ref={hudRef}>
       <section className="stage" aria-label="Battlefield">
+        <DebugLimbsContext.Provider value={debugLimbs}>
         <Scene
           figures={figures} shot={shot} projectiles={projectiles} usurpTrails={usurpTrails} arenaLit={candlesLit}
           arena={fight.enemies.some(e => kindOf(e).arena)}
@@ -1414,6 +1454,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           dark={wakeDark ?? (ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark)}
           ignite={ignite ? { who: ignite.who, start: ignite.start, seed: ignite.seed } : undefined}
         />
+        </DebugLimbsContext.Provider>
         {/* String on its way to you flies over the field, but under your figure (and the rest of the HUD): it winds round you from behind. */}
         <StringFx bursts={bursts} root={hudRef} onLand={stringLanded} />
       </section>

@@ -150,6 +150,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
     return;
   }
   const blocking = t.isBlocking(target, attacker);
+  if (blocking) t.blocked.add(target.id);
   const resisted = dmg * resistance(target, blocking ? t.weightOf(target) : null);
   // On a Block, everything resisted goes back to the attacker; unless the attack is ranged,
   // when it simply stops there.

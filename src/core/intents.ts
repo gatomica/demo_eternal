@@ -42,7 +42,7 @@ function chooseIntent(e: Enemy, state: CombatState, rng: Rng): Intent {
 
   const available = (a: ActionDef) => isAvailable(kind, e, state, a);
   // Something it must pick on from (a boss's second phase) overrides what it just did.
-  const memory = e.nextFrom ? { action: e.nextFrom, outcome: "done" as const } : e.last ? { action: e.last.name, outcome: e.last.outcome, avoid: e.last.flinchedFrom } : null;
+  const memory = e.nextFrom ? { action: e.nextFrom, outcome: "done" as const } : e.last ? { action: e.last.name, outcome: e.last.outcome, blocked: e.last.blocked, avoid: e.last.flinchedFrom } : null;
   e.nextFrom = undefined;
   const picked = choose(kind.pattern, memory, available, rng);
   if (!picked) return { type: "rest", dir: lineDir, forced: false };

@@ -10,6 +10,15 @@ import { flailOf, WARDEN_POSES, type WardenPoseName } from "../warden/skeleton";
 import { checkAdjust, type BoneAdjust } from "./rig";
 import { PLAYER_POSES_BUILT } from "./playerPoses";
 
+/** Where an arm puts its hand in the 3D rig: see `arms3`. */
+export type ArmPlan =
+  | { plant: { out: number; reach?: number; bend?: readonly [number, number, number]; shift?: number } }
+  | { to: readonly [number, number, number]; bend?: readonly [number, number, number] }
+  /** The two bones' directions, as they end up on the figure (sideways, up, ahead; any length): the upper arm from the shoulder, then the forearm from the elbow. */
+  | { dirs: readonly [readonly [number, number, number], readonly [number, number, number]] }
+  /** The whole arm, shoulder to hand, points `dir` as it ends up on the figure (any length), `reach` of its length (default 1: straight; under: bent), the elbow bending toward `bend`: a direction, or "shoulders" (along the shoulder line, outward from the arm's own shoulder: the arm bends in the plane that holds the shoulder line) or "-shoulders" (inward). */
+  | { aim: { dir: readonly [number, number, number]; reach?: number; bend?: readonly [number, number, number] | "shoulders" | "-shoulders" } };
+
 export interface Skeleton {
   head: Pt;
   neck: Pt;
@@ -78,6 +87,53 @@ export interface Skeleton {
   /** A level swing: the trail is a flat crescent at the weapon's height, this much of a full circle's height (0 to 1). */
   flat?: number;
   /**
+   * The 3D rig only (rig3d.ts), for the waxed: the legs mirror each other, both knees at the average of the pose's two and both
+   * feet at the average of its two feet, the knees this far to each side of the middle and the feet this far (figure units).
+   * Without it the shins are bound close together all the way.
+   * `sit`: sitting back on the heels: the pelvis lowered to this height (figure units) and, with it, the whole upper body; the knees and
+   * the bound shins lie on the floor (knees in front and apart, the shins running back to the feet), the thighs resting on top of them.
+   * `ahead` instead: the knees this far ahead of the pelvis (figure units; negative: behind it), which sets how high the pelvis is (a thigh's
+   * length from the knees on the floor), the shins running back from the knees along the floor.
+   * `swing`: the legs lean sideways (positive: to the figure's own right): the feet swing out this many figure units, and the pelvis, with
+   * the whole body above it, and the knees a quarter of that, so the bound legs trail back on a diagonal.
+   */
+  legs3?: { knees: number; feet: number; sit?: number; ahead?: number; swing?: number };
+  /**
+   * The 3D rig only: the upper body leans sideways (positive: to the figure's own right). The spine curves over from the pelvis, the waist
+   * `shift` figure units over to the right at a quarter of the way, the neck all of it, the head a little more, and the shoulders roll
+   * (the right one `tilt` lower, the left one `tilt` higher): weight on the right hand.
+   */
+  lean3?: { shift: number; tilt: number };
+  /**
+   * The 3D rig only, for the waxed: where each hand goes (the figure's own right and left), reached by its arm (the arm's `adjust` lengths).
+   * `plant`: resting on the floor, `out` figure units to the outside of its shoulder, `reach` of the arm's full length from the shoulder
+   * (default 1: straight; under that: bent, the more the lower), so the height of the shoulders decides how far in front of them it lands;
+   * the elbow bends toward `bend` (default: back and a little out); `shift` moves the hand that many figure units forward (negative: back).
+   * `to`: a spot [sideways, height off the floor, ahead of the pelvis], in figure units; the elbow bends toward `bend` (default: back and out).
+   */
+  arms3?: { right: ArmPlan; left: ArmPlan };
+  /**
+   * The 3D rig only: everything above the pelvis pitched up this many degrees about the pelvis, as one block (the back straightens, the
+   * head and shoulders swing up and back): the angles between the lower spine, ribcage, neck and head do not change. Done before the arms
+   * reach their spots, so the hands stay where `arms3` puts them and the arms re-solve.
+   */
+  pitch3?: number;
+  /**
+   * The 3D rig only: the shoulders and ribcage twisted about the spine, this many degrees, the figure's right shoulder going down and its
+   * left one up (negative: the other way). The arms re-solve to their hands; the head and the spine itself do not move.
+   */
+  roll3?: number;
+  /**
+   * The 3D rig only: everything above the pelvis turned (yawed) as one block, this many degrees to the figure's own right (negative: left),
+   * about the vertical through the pelvis. Everything below the pelvis stays put; nothing above it changes relative to anything else above
+   * it (the arms and their hands turn with the body); only the angle between the pelvis and the spine does.
+   */
+  turn3?: number;
+  /** The 3D rig only: the shoulders turned, the figure's right one this many figure units back and the left one as far forward (negative: the other way). */
+  twist3?: number;
+  /** The 3D rig only: this pose drawn in 3D with these fields changed (the flat drawing, on the map, keeps the pose as written). */
+  for3d?: Partial<Omit<Skeleton, "for3d">>;
+  /**
    * The player's body as it is really turned (see body.ts): the shoulders and the pelvis each turned this many degrees (positive: to the right,
    * so the left side leads). With it the player's right side is the near one, and the shoulders and hips are placed from these angles.
    */
@@ -110,7 +166,7 @@ export type PoseName =
   | "sw-windup" | "sw-brace" | "sw-flinch" | "sw-down" | "sw-idle" | "sw-charging" | "sw-struggling" | "sw-guarded"
   | "sw-overhead" | "sw-chop" | "sw-parry" | "sw-charge" | "sw-backstep" | "sw-despair"
   | "w-idle" | "w-hands" | "w-scratch" | "w-wax-hand" | "w-hurl"
-  | "w-dead" | "w-cower" | "w-crawl" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
+  | "w-dead" | "w-cower" | "w-crawl" | "w-low-windup" | "w-low-strike" | "w-drag" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
   | WardenPoseName
   | GuidePoseName;
 
@@ -125,6 +181,45 @@ const KNEELING = {
 
 /** The waxed carry nothing; the grip just follows a hand (and isn't drawn). */
 const bare = (hand: Pt) => ({ at: hand, angle: 0 });
+
+/** Crawling's flat drawing (also the map's), the base of the Low Attack's poses as well. */
+const CRAWL_2D: Omit<Skeleton, "for3d"> = {
+  head: [74, 71], neck: [65, 78], hip: [43, 93],
+  adjust: { torso: 0.832, leadThigh: 0.763, leadShin: 0.832, rearThigh: 0.777, rearShin: 0.873, weaponUpper: 1.152, weaponFore: 1.197, freeUpper: 1.221, freeFore: 1.178 },
+  weaponArm: { elbow: [70, 96], hand: [75, 112] },
+  freeArm: { elbow: [62, 96], hand: [66, 112] },
+  leadLeg: { knee: [48, 111], foot: [28, 107] },
+  rearLeg: { knee: [42, 112], foot: [21, 108] },
+  weapon: bare([75, 112]),
+};
+
+/**
+ * Crawling in 3D: the back nearly straight (a slight rise at the waist), the ribcage level, the head lifted a little, the elbows bent,
+ * the hands on the floor beside the shoulders (the left a little ahead of the right, the shoulders turned with them). The right arm is
+ * nearly straight, out to the side and behind the shoulder, the hand on the floor.
+ */
+const CRAWL_3D: NonNullable<Skeleton["for3d"]> = {
+  head: [79.3, 78.5], neck: [72.8, 85], waist: [54.8, 85.5],
+  adjust: { leadThigh: 0.763, leadShin: 0.832, rearThigh: 0.777, rearShin: 0.873, weaponUpper: 1.2, weaponFore: 1.2, freeUpper: 1.2, freeFore: 1.2 },
+  twist3: 1.5,
+  arms3: {
+    right: { to: [20, 2.5, 12.8], bend: [0.9, 0.35, -0.4] },
+    left: { plant: { out: 1.5, reach: 0.8, bend: [0.9, 0.35, -0.4], shift: -3.6 } },
+  },
+};
+
+/**
+ * The Low Attack in 3D, before it is turned (the wind-up turns it to the right, the strike to the left): the crawl, the left hand on the floor
+ * as in the crawl, the elbow out toward the watchers, the right arm fully extended back and up, the hand above the shoulders.
+ */
+const LOW_ATTACK_3D: NonNullable<Skeleton["for3d"]> = {
+  ...CRAWL_3D,
+  arms3: {
+    right: { to: [17.7, 40.9, -0.1], bend: [0.9, 0.35, -0.4] },
+    // (In a scene, what watches is on the figure's left and a little ahead of it: the elbow points out to the left and forward, at it.)
+    left: { to: [7.5, 2.5, 37.4], bend: [0.86, 0.1, 0.51] },
+  },
+};
 
 /**
  * Drawn facing right in a 100 × 120 box, feet on y = 114. The figures are 2D drawings of a 3/4 view:
@@ -404,12 +499,13 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
 
   /* ---------- The waxed: kneeling, head sealed in a lump of wax ---------- */
   // Slumped on its knees, arms hanging.
+  // Slouching, sat back on its heels: the lower spine arched back a little (15°), the ribcage leaning forward over it (the angle the arms decide: their length, stretched 20%, puts the shoulders about 35 units up), the head lifted to look at the player, the arms down at its sides with the hands on the floor.
   "w-idle": {
-    head: [53, 45], neck: [51, 56], hip: [47, 88],
-    adjust: { leadThigh: 1.041, leadShin: 0.832, rearShin: 0.832, freeUpper: 1.189 },
-    weaponArm: { elbow: [55, 72], hand: [57, 86] },
-    freeArm: { elbow: [45, 72], hand: [47, 86] },
-    ...KNEELING, weapon: bare([57, 86]),
+    head: [61, 53], neck: [57, 62], waist: [43, 74], hip: [47, 88],
+    adjust: { leadThigh: 1.041, leadShin: 0.832, rearShin: 0.832, weaponUpper: 1.2, weaponFore: 1.2, freeUpper: 1.2, freeFore: 1.2 },
+    weaponArm: { elbow: [59, 77], hand: [61, 91] },
+    freeArm: { elbow: [53, 77], hand: [55, 91] },
+    ...KNEELING, weapon: bare([61, 91]), legs3: { knees: 7, feet: 0.8, sit: 11 }, arms3: { right: { plant: { out: 1.5, reach: 0.975 } }, left: { plant: { out: 1.5, reach: 0.975 } } },
   },
   // Dead: folded right down onto its knees, hunched low over itself, head bowed to its knees, arms
   // wrapped round its own body, hugging itself.
@@ -461,14 +557,38 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
     ...KNEELING, weapon: bare([40, 46]),
   },
   // Crawling: on its hands, dragging its bound legs.
-  "w-crawl": {
-    head: [74, 71], neck: [65, 78], hip: [43, 93],
-    adjust: { torso: 0.832, leadThigh: 0.763, leadShin: 0.832, rearThigh: 0.777, rearShin: 0.873, weaponUpper: 1.152, weaponFore: 1.197, freeUpper: 1.221, freeFore: 1.178 },
-    weaponArm: { elbow: [70, 96], hand: [75, 112] },
-    freeArm: { elbow: [62, 96], hand: [66, 112] },
-    leadLeg: { knee: [48, 111], foot: [28, 107] },
-    rearLeg: { knee: [42, 112], foot: [21, 108] },
-    weapon: bare([75, 112]),
+  "w-crawl": { ...CRAWL_2D, for3d: CRAWL_3D },
+  // Low Attack, wind-up: the crawl, with everything above the pelvis turned 40° to its right as one block (the legs and pelvis stay put); the
+  // left arm as in the crawl's lean, the elbow out toward the watchers; the right arm fully extended back and up, the hand above the
+  // shoulders, pointing away from the target.
+  "w-low-windup": { ...CRAWL_2D, for3d: { ...LOW_ATTACK_3D, turn3: 40 } },
+  // Low Attack, strike: the wind-up, turned the other way: 40° to its left; the hips lower (sat back) and the back straighter (the whole
+  // upper body pitched up 38° from the pelvis, the spine and ribcage keeping the angle between them), the shoulders and ribcage twisted
+  // about the spine 65°: the right shoulder down toward the ground, the left one up; the right arm straight out to its left and down, the
+  // left arm clear of the ground: the upper arm up and back from the raised shoulder to the elbow, which has not moved, the forearm then pointing
+  // the exact opposite way to before (back across to its left, where it had pointed to its right).
+  "w-low-strike": {
+    ...CRAWL_2D,
+    for3d: {
+      ...LOW_ATTACK_3D, turn3: -40, legs3: { knees: 7, feet: 0.8, sit: 14 }, pitch3: 38, roll3: 65,
+      arms3: {
+        // The right arm fully extended, away from him to his left, angled down; the left arm bent, the forearm pointing the opposite way.
+        right: { dirs: [[-0.85, -0.5, 0.15], [-0.85, -0.5, 0.15]] },
+        left: { dirs: [[0.3898, 0.7928, -0.4685], [-0.9736, -0.0092, -0.2279]] },
+      },
+      // (Sat back, the legs are their true length: the crawl's shorter thighs are for how it is seen lying flat.)
+      adjust: { weaponUpper: 1.2, weaponFore: 1.2, freeUpper: 1.2, freeFore: 1.2 },
+    },
+  },
+  // Drag Forward: the hips thrown forward, the knees trailing well behind them, the whole body leaning far forward as if catching itself
+  // from a fall, head up toward you; the right hand planted ahead on the floor, about to pull, the left swept back off it, having just pulled.
+  "w-drag": {
+    head: [83, 73], neck: [77, 79], waist: [60, 82], hip: [47, 88],
+    adjust: { leadThigh: 1.041, leadShin: 0.832, rearShin: 0.832, weaponUpper: 1.2, weaponFore: 1.2, freeUpper: 1.2, freeFore: 1.2 },
+    weaponArm: { elbow: [83, 92], hand: [88, 108] },
+    freeArm: { elbow: [68, 88], hand: [58, 94] },
+    ...KNEELING, weapon: bare([88, 108]), legs3: { knees: 7, feet: 0.8, ahead: -12, swing: 8 }, lean3: { shift: 3, tilt: 1.8 },
+    arms3: { right: { plant: { out: 1.5, reach: 0.985 } }, left: { to: [9, 16, 6], bend: [-0.3, 1, -0.4] } },
   },
   // Slither Back: sat down, dragging itself backwards on its rear, hands planted behind it,
   // bound legs stretched out toward you, heels digging in, head still turned your way.

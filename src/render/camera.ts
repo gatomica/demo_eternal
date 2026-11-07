@@ -88,6 +88,20 @@ export function screenOf(u: number, v: number, w: number, h: number): Projected 
   return { sx: w / 2 + (f * u) / depth, sy: HORIZON * h + (f * EYE_HEIGHT) / depth, ppm: f / depth, depth: v };
 }
 
+/**
+ * Where a point `height` meters above the floor lands on a screen of the given size (the same lens as `project`,
+ * which is this at height 0). `depth` is how far ahead of the camera it is, `ppm` the pixels a meter is there.
+ */
+export function projectPoint(cam: Cam, p: Vec, height: number, w: number, h: number): Projected {
+  const { u, v } = toCamera(cam, p);
+  const f = FOCAL * h;
+  const d = Math.max(v, 0.05);
+  return { sx: w / 2 + (f * u) / d, sy: HORIZON * h + (f * (EYE_HEIGHT - height)) / d, ppm: f / d, depth: v };
+}
+
+/** The unit vector a yaw faces along, on the floor. */
+export const facingVec = (yaw: number): Vec => forward(yaw);
+
 /** Where a floor point lands on a screen of the given size. */
 export function project(cam: Cam, p: Vec, w: number, h: number): Projected {
   const { u, v } = toCamera(cam, p);
@@ -108,6 +122,13 @@ const LINES = {
   front: { side: 2.2, ahead: 1.3, spacing: 1.15 },
   back: { side: 4.3, ahead: 3.6, spacing: 1.5 },
 } as const;
+
+/**
+ * How a scene between two fighters is turned: the enemy on the right of the screen, what it is aimed at on the left, the enemy a
+ * little farther from the camera (the angle the front line stands at from you), so a sprite always looks the same, whatever the
+ * way the fight happens to face.
+ */
+export const SCENE_TILT = Math.atan2(LINES.front.ahead, LINES.front.side);
 
 /**
  * The light around the player in a fight, as distances on the floor from them (meters): fully lit
@@ -254,7 +275,10 @@ export const lerpCam = (a: Cam, b: Cam, t: number): Cam => ({
 /** The figure's drawing (100 × 120 box) spans this many units from head to feet. */
 const FIGURE_UNITS = 102;
 
-const FEET_Y = 114;
+export const FEET_Y = 114;
+
+/** One unit of a figure's drawing, in meters (a standing figure is `FIGURE_HEIGHT` tall over `FIGURE_UNITS` units). */
+export const METERS_PER_UNIT = FIGURE_HEIGHT / FIGURE_UNITS;
 
 /**
  * Where a figure standing at `p` appears on screen: its 100 × 120 drawing box, and its depth.

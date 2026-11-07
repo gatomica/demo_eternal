@@ -30,6 +30,26 @@ Rules and designs live in `enemies.md`; this is only the list.
 - [ ] The action wheel and its mark (`ActionWheel.tsx`, `render/ring.tsx`): sizes, thickness and fade stops are first guesses. The ring follows the figure's settled position, not its live one, so it can lead the figure while the camera eases. A target near the screen edge shifts the wheel to keep all four options on-screen.
 - [ ] Player animations in the Model viewer ("You" mode is built; poses are tuned by eye with the user, see the pose workflow in `CLAUDE.md`).
 
+## Visual clarity: the Waxed, one stance or action at a time (3D rig; `render/Waxed3D.tsx`)
+
+Checked in the Model viewer, in the order you reach them from Idle (each is looked at together with the transition into it). Legs: in every pose, thigh and shin are their true length (24.5), each following its pose's direction and resting on the floor rather than through it; the knees show and the shins are inside the wax (a wax mass from the knees to the feet, no gap); in every pose the knees are apart, Idle's distance, the feet meeting (`legs3` on a pose overrides it, `DEFAULT_LEGS` in `rig3d.ts` is the default). The Model viewer's Debug status also shows a dot on the front of the face, level, to tell where it looks.
+
+- [x] **Idle** (stance): sat back on its heels, slouching, hands on the floor at its sides, head lifted toward the player. Checked with the user.
+- [x] **Drag Forward** (action, from Idle when far) → leads to Crawling: its own pose `w-drag`: hips thrown forward, knees trailing well behind them, the body leaning far forward and to the right, head up, the right hand planted ahead, the left swept back off the floor. Checked with the user.
+- [x] Slither Back (action, from Idle when close) → leads to Wax on Hand / Cradle Flame: fine as it is with the camera turning each scene so the enemy is on the right (checked with the user).
+- [x] **Crawling** (stance) → Drag Forward / Low Attack: in 3D (`for3d` on `w-crawl`): the back nearly straight, ribcage level, head lifted, the left arm bent with the hand on the floor, the right arm nearly straight out to the side and behind, the hand on the floor. Checked with the user.
+- [x] **Low Attack** (action, from Crawling) → leads to Reared Back: `w-low-windup` (the crawl with everything above the pelvis turned 40° to its right as one block, the left elbow out to the left and forward, the right arm fully extended back and up, the hand above the shoulders) and `w-low-strike` (the wind-up turned 40° the other way, hips lowered, back straightened (upper body pitched up 38°), shoulders and ribcage twisted about the spine 65°: right shoulder down, left up; the right arm fully extended out to its left and angled down, the left arm bent, the elbow up and back, the forearm pointing back across to its left). Checked with the user. Open: the armed variants hold the weapon in the left (free) hand, which the strike lifts and bends; check how the weapon reads.
+- [ ] Reared Back (stance) → Overhead Attack / Brace
+- [ ] Overhead Attack (action, from Reared Back when close) → back to a Recover stance
+- [ ] Brace (action, from Reared Back) → Crawling / Reared Back (blocked), Wax on Hand / Cradle Flame (blocked nothing)
+- [ ] Wax on Hand (stance) → Hurl Wax
+- [ ] Hurl Wax (action) → back to a Recover stance
+- [ ] Cradle Flame (stance) → Clutch Flame / Flame Immolation
+- [ ] Clutch Flame (action, the Rest) → Idle
+- [ ] Flame Immolation (action, when lit)
+- [ ] Flinch (a Rest broken by a blow), Staggered, Dead (the remains)
+- [ ] The armed variants (Chisel, Hammer) in each of the above, and the encased look
+
 ## Housekeeping
 
 - [ ] Code optimization: only write an audit to `docs/cleanup.md` (no refactors yet). **First pass done (by reading, not profiled):** the map draws the actors between the walls above you only at rows where such a wall lies (`groupRows` in `explore/view.ts`; before, every row with a body or enemy cost a full-screen canvas clear and upload), skips offscreen actors, fades a sprite through a layer of its own only when it is not fully lit, keeps the path search's queue, and leaves far-off idle enemies still. Profile (F3 on the map) before going further.

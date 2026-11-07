@@ -13,6 +13,8 @@
  * front at a 3/4 angle while facing left, his right arm is the far one and the candle arm the
  * near one, so the flail sits behind his body and the candle arm in front of it.
  */
+import { useContext } from "react";
+import { DebugLimbsContext } from "../render/debugLimbs";
 import { add, lerp, limb } from "../render/geom";
 import { Beard, CandleArmEl, ChainInHand, Cloak, Flail, HeadInHand, Hood, SmokePuff, Stain } from "./parts";
 import { type CandleArm, FlailFire, straightOn, sweepAt, WARDEN_POSES, wardenMounts, type WardenPoseName, type WardenSkeleton } from "./skeleton";
@@ -36,6 +38,7 @@ export function WardenFigure({ s: pose, front, straight, sides, arm, lingerFrom,
   /** The flail is on fire. */
   flailFire?: boolean;
 }) {
+  const red = useContext(DebugLimbsContext) ? " dbg-red" : ""; // the Model viewer's Debug status: his right (flail) arm red
   const s = straight ? straightOn(pose, front) : pose;
   const turn = straight ? 0 : s.shoulderTurn ?? s.turn ?? 0;
   const { flailShoulder, candleShoulder } = wardenMounts(s, front, straight);
@@ -48,19 +51,19 @@ export function WardenFigure({ s: pose, front, straight, sides, arm, lingerFrom,
   const flailForearm = (
     <>
       {s.spin !== "behind" && <Flail s={s} />}
-      <polyline points={limb(s.weaponArm.elbow, s.weaponArm.hand)} className="fig-limb fig-far" />
+      <polyline points={limb(s.weaponArm.elbow, s.weaponArm.hand)} className={`fig-limb fig-far${red}`} />
     </>
   );
   const flailUpper = (
     <>
-      <polyline points={limb(flailShoulder, s.weaponArm.elbow)} className="fig-limb" />
+      <polyline points={limb(flailShoulder, s.weaponArm.elbow)} className={`fig-limb${red}`} />
       <polyline points={limb(flailShoulder, sleeveEnd)} className="fig-sleeve" />
     </>
   );
   const flailArm = flailBehind ? flailUpper : (
     <>
       {s.spin !== "behind" && <Flail s={s} />}
-      <polyline points={limb(flailShoulder, s.weaponArm.elbow, s.weaponArm.hand)} className={`fig-limb ${swapped || s.flailArmOver ? "" : "fig-far"}`} />
+      <polyline points={limb(flailShoulder, s.weaponArm.elbow, s.weaponArm.hand)} className={`fig-limb ${swapped || s.flailArmOver ? "" : "fig-far"}${red}`} />
       <polyline points={limb(flailShoulder, sleeveEnd)} className={`fig-sleeve ${swapped || s.flailArmOver ? "" : "fig-sleeve-far"}`} />
     </>
   );

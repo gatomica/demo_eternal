@@ -79,6 +79,8 @@ export interface LastAction {
    * being staggered.
    */
   outcome: "done" | "undone" | "recover";
+  /** For a Block: it stopped at least one attack this turn. */
+  blocked?: boolean;
   /** A Rest cut short by a hit (it flinched): the stance it was resting from, which its recovery avoids. */
   flinchedFrom?: string;
 }

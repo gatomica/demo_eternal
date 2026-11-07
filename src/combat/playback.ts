@@ -56,10 +56,15 @@ export const KNOCKBACK = 0.45;
 /** How far a Block jolts the blocker and the attacker apart. */
 export const BLOCK_PUSH = 0.3;
 
-/** How far a dodge carries someone: back (and away) if retreating, sideways past the attack if closing in. */
+/**
+ * How far a dodge carries someone: back (and away) if retreating; if closing in, past the attacker: this far beyond where it strikes
+ * from, on its far side, and this far to one side of the line (the side away from the camera), so it goes by it and not through it.
+ */
 export const DODGE_BACK = 1.5;
 
-export const DODGE_SIDE = 1.2;
+export const DODGE_PAST = 1.2;
+
+export const DODGE_LATERAL = 0.9;
 
 /** A Maneuver toward an enemy ends this far short of it; falling back covers this much ground. */
 export const ENGAGE_GAP = 1.4;

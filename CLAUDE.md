@@ -47,6 +47,7 @@ What is planned but not built is in `docs/todo.md`: read it when starting a task
   wax looks), `looks.ts` (what a `variant` draws differently: its own figure, candle arm, scenes),
   `rig.ts` (the true bone lengths, `RIG`, and `fitTorso`/`fitLimbs`, which re-solve a pose to them when a figure is drawn), `Scene.tsx` (the field, figures, darkness, flames, and the fight's light: `LightFall`, tuned by `LIGHT` in `camera.ts`), `effects.tsx` (projectiles, shockwaves), `WaxBlob.tsx` (the heap round the Wax Blob's three parts),
   `HealthBar.tsx`, `geom.ts`.
+  **3D rig (trying it on the Waxed only):** `rig3d.ts` (a skeleton in meters in body space, x its right, y up, z the way it faces; `liftPose` lifts a flat pose into it; `placeRig` stands it on the floor at a facing and projects every joint through the scene's camera with `projectPoint` in `camera.ts`; `facingYaw`) and `Waxed3D.tsx` (connects the projected joints with segments, far to near by real depth, sized by perspective). `Scene.tsx` uses it for a lone waxed in a fight (not the Wax Blob's parts, not the map's sprites); the other figures still use `StickFigure`'s flat drawing. `debugLimbs.ts`: the Model viewer's Debug status (right arm and leg red).
 - `warden/`: the Warden's figure. `skeleton.ts` (`WARDEN_POSES`, built with `pose(...)` and its
   flags, `flailOf`), `parts.tsx` (cloak, hood, beard, flame, flail, candle arm), `trails.tsx`,
   `WardenFigure.tsx` (the layering), `look.ts`, `arena.tsx` (sealed sleepwalkers, lit in phase

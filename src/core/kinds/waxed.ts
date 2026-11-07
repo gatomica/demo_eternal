@@ -7,12 +7,18 @@ import type { EnemyKind } from "../bestiary";
 import { parsePattern } from "../patterns";
 
 /**
- * The Waxed's pattern, with its clawing attack: its own Scratch, or, for a waxed carrying a weapon,
- * a blow of that weapon (in its free hand: Hurl Wax still tears the wax off with the other).
+ * The Waxed's pattern. Its two clawing attacks are blows of whatever it holds in its free hand
+ * (Hurl Wax still tears the wax off with the other): barehanded, they are its own baseline blow
+ * (damage 2, cost 2, as its old Scratch); armed, the weapon's weight, numbers and effect.
+ *
+ * Stances lead by what just happened: a Brace that stopped an attack (`Brace`) takes it to
+ * Crawling or Reared Back, one that stopped nothing (`!Brace`) to Wax on Hand or Cradle Flame.
+ * Actions nothing follows (Hurl Wax, Overhead Attack) go back to the Recover stances.
  */
-const waxedPattern = (name: string, claw: string) => parsePattern(name, `
+const waxedPattern = (name: string, armed: boolean) => parsePattern(name, `
     actions:
-      ${claw}
+      Low Attack:      attack${armed ? "" : ", baseline, damage 2, cost 2"}   // a low blow, from the crawl
+      Overhead Attack: attack${armed ? "" : ", baseline, damage 2, cost 2"}, *Close   // only within reach
       Hurl Wax:     attack, light, ranged
       Brace:        block, baseline
       Drag Forward: maneuver, advance, *Far   // crawls in only when far away
@@ -20,11 +26,11 @@ const waxedPattern = (name: string, claw: string) => parsePattern(name, `
       Clutch Flame: rest
       Flame Immolation: attack, heavy, ranged, *Lit, #fire, #shockwave   // a lit waxed bursts: it dies, and its fire hits everyone
     stances:
-      All > Hands Raised      > ${claw.split(":")[0].trim()}
-      All > Wax on Hand       > Hurl Wax
-      All > Cowering Sideways > Brace
-      All > Crawling          > Drag Forward, Slither Back
-      All > Cradle Flame      > Flame Immolation, Clutch Flame
+      Recover, Clutch Flame                > Idle        > Drag Forward, Slither Back
+      Recover, Drag Forward, Brace         > Crawling    > Drag Forward, Low Attack
+      Slither Back, !Brace                 > Wax on Hand > Hurl Wax
+      Recover, Slither Back, !Brace        > Cradle Flame > Flame Immolation, Clutch Flame
+      Low Attack, Brace                    > Reared Back > Overhead Attack, Brace
   `);
 
 export const WAXED: EnemyKind = {
@@ -47,24 +53,25 @@ export const WAXED: EnemyKind = {
     r.self.fatigue = 0;
     r.event({ kind: "fall", who: r.self.id });
   },
-  // Scratch: a punch, but it hurts and tires as much as a light blow.
-  pattern: waxedPattern("Waxed", "Scratch:      attack, baseline, damage 2, cost 2"),
+  // Its blows hurt and tire as much as a light one, barehanded.
+  pattern: waxedPattern("Waxed", false),
   modelPoses: { front: "w-t", back: "w-t-b" },
   stancePoses: {
-    "Hands Raised": "w-hands",
-    "Wax on Hand": "w-wax-hand",
-    "Cowering Sideways": "w-cower",
+    Idle: "w-idle",
     Crawling: "w-crawl",
+    "Wax on Hand": "w-wax-hand",
     "Cradle Flame": "w-cradle",
+    "Reared Back": "w-hands",
   },
   idlePose: "w-idle",
   downPose: "w-fallen",
   flinchPose: "w-flinch",
   actionPoses: {
-    Scratch: { act: "w-hands", strike: "w-scratch" },
+    "Low Attack": { act: "w-low-windup", strike: "w-low-strike" },
+    "Overhead Attack": { act: "w-hands", strike: "w-scratch" },
     "Hurl Wax": { act: "w-wax-hand", strike: "w-hurl", projectile: "wax" },
     Brace: { act: "w-cower" },
-    "Drag Forward": { act: "w-crawl" },
+    "Drag Forward": { act: "w-drag" },
     "Slither Back": { act: "w-slither" },
     "Clutch Flame": { act: "w-clutch" },
     // The cradled flame bursts: the same pose as clutching it, as the blast rolls out.
@@ -80,18 +87,17 @@ export const WAXED: EnemyKind = {
 };
 
 /**
- * A waxed carrying a weapon in its free hand: the same kneeling wretch, but its clawing
- * attack is a blow of the weapon (its weight's numbers and speed, and its effect, free for it),
+ * A waxed carrying a weapon in its free hand: the same kneeling wretch, but its two clawing
+ * attacks are blows of the weapon (its weight's numbers and speed, and its effect, free for it),
  * and beaten, it drops the ordinary weapon. Hurl Wax is thrown with its other hand, as ever, and
  * carries no effect; its Brace is still bare. (No Waxed Torch: that is the wardens' own.)
  */
-const armedWaxed = (name: string, weapon: "light" | "heavy", strike: string): EnemyKind => ({
+const armedWaxed = (name: string, weapon: "light" | "heavy"): EnemyKind => ({
   ...WAXED,
   name,
   weapon,
-  pattern: waxedPattern(name, `${strike}: attack   // a blow of its weapon, in its free hand`),
-  actionPoses: (({ Scratch, ...rest }) => ({ ...rest, [strike]: Scratch }))(WAXED.actionPoses!),
+  pattern: waxedPattern(name, true),
 });
 
-export const WAXED_CHISEL = armedWaxed("Chisel Waxed", "light", "Chisel Stab");
-export const WAXED_HAMMER = armedWaxed("Hammer Waxed", "heavy", "Hammer Blow");
+export const WAXED_CHISEL = armedWaxed("Chisel Waxed", "light");
+export const WAXED_HAMMER = armedWaxed("Hammer Waxed", "heavy");

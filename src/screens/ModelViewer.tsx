@@ -13,7 +13,7 @@ import type { CombatState } from "../core/types";
 import { ARMOR, WEAPONS } from "../core/rules";
 import type { ArmorTier, WeaponTier } from "../core/types";
 import type { PoseName } from "../render/poses";
-import { applyPlayerShow, applyShow, DEAD, type EnemySubject, figureAngleOf, LINE_TOGGLE, MODEL, MODEL_ANGLES, type ModelAngle, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow } from "./viewerModel";
+import { applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, type EnemySubject, figureAngleOf, LINE_TOGGLE, MODEL, MODEL_ANGLES, type ModelAngle, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow } from "./viewerModel";
 import { cycle, useKeys } from "../ui/input";
 import { Picker } from "../ui/Picker";
 
@@ -81,7 +81,7 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
   const shown = useMemo(() => applyShow(initial, show), [initial, show]);
   // The statuses of all the parts (by key), after the line they share.
   const statuses = [...new Map(kinds.flatMap(k => k.statuses ?? []).map(t => [t.key, t])).values()];
-  const toggles = [LINE_TOGGLE, ...statuses];
+  const toggles = [LINE_TOGGLE, ...statuses, DEBUG_TOGGLE];
   const flip = (toggle: StatusToggle) =>
     setShow(prev => {
       const on = { ...prev.on, [toggle.key]: !prev.on[toggle.key] };
@@ -263,6 +263,7 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
       override={override}
       panel={panel}
       light={lit}
+      debugLimbs={!!show.on.debug}
       playSignal={playSignal}
       playTarget={playTarget}
       attackOnPlay={!!show.interrupt}
@@ -290,6 +291,7 @@ function PlayerViewerFight({ onBack, onRetry, onExit }: { onBack: () => void; on
   const [angle, setAngle] = useState<ModelAngle>("front34");
   const [scenarioId, setScenarioId] = useState<string | undefined>();
   const [lit, setLit] = useState(true);
+  const [debug, setDebug] = useState(false);
   const [playSignal, setPlaySignal] = useState(0);
   const scenario = PLAYER_SCENARIOS.find(sc => sc.id === scenarioId);
   const initial = useMemo(() => playerViewerFight("normal", "light"), []);
@@ -317,6 +319,12 @@ function PlayerViewerFight({ onBack, onRetry, onExit }: { onBack: () => void; on
         <button className="hud-button viewer-change" onClick={onBack}>Change model</button>
       </div>
       <LightToggle lit={lit} onChange={setLit} />
+      <div className="viewer-section">
+        <span className="picker-label">Status</span>
+        <div className="picker-options">
+          <button className="chip viewer-toggle" aria-pressed={debug} onClick={() => setDebug(!debug)}>{debug ? DEBUG_TOGGLE.on : DEBUG_TOGGLE.off}</button>
+        </div>
+      </div>
       {chips("Weapon", Object.keys(WEAPONS) as WeaponTier[], weapon, o => (o === "baseline" ? "None" : WEAPONS[o].name), setWeapon)}
       {chips("Armor", Object.keys(ARMOR) as ArmorTier[], armor, o => ARMOR[o].label, setArmor)}
       {chips("Pose", [...PLAYER_POSES, "dead" as const, "model" as const], held, o => (o === "model" ? MODEL : o === "dead" ? "Dead" : o), o => { setHeld(o); setScenarioId(undefined); })}
@@ -341,6 +349,7 @@ function PlayerViewerFight({ onBack, onRetry, onExit }: { onBack: () => void; on
       override={override}
       panel={panel}
       light={lit}
+      debugLimbs={debug}
       playSignal={playSignal}
       playerAction={scenario ? playerActionOf(scenario) : undefined}
       playerHold={model ? (seen.view === "back" ? "t-pose-b" : "t-pose") : held === "dead" ? undefined : held}

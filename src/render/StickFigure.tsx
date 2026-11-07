@@ -13,7 +13,8 @@
  *    waxed holds its weapon in its free hand, see `waxedGrip`.)
  * Gear attaches to joints: the weapon to the weapon hand, armor to the torso, shoulders and head.
  */
-import { memo, type ReactNode } from "react";
+import { memo, type ReactNode, useContext } from "react";
+import { DebugLimbsContext } from "./debugLimbs";
 import type { Variant } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
 import { lerp, limb, type Pt } from "./geom";
@@ -602,7 +603,7 @@ function WaxShell({ s, near, far }: { s: Skeleton; near: Pt; far: Pt }) {
 }
 
 /** A held wax lump, or a small flame. */
-function Prop({ prop }: { prop: NonNullable<Skeleton["prop"]> }) {
+export function Prop({ prop }: { prop: NonNullable<Skeleton["prop"]> }) {
   const [x, y] = prop.at;
   if (prop.kind === "wax") return <circle cx={x} cy={y} r={4.5} className="fig-wax-head" />;
   return (
@@ -615,14 +616,13 @@ function Prop({ prop }: { prop: NonNullable<Skeleton["prop"]> }) {
 
 /** Colour the right arm and leg while posing (dev server only): see `debug` in StickFigure below. Off for now. */
 const DEBUG_LIMB_COLORS = import.meta.env.DEV && false;
-/** The player's right arm and right leg drawn red, to see which is which while tuning the poses (set to false to turn it off). */
-const RED_RIGHT = false;
-
 /** How much a T-pose's sideways arms are foreshortened in a 3/4 view (they run across the view). */
 const ACROSS_34 = 0.72;
 
 /** A figure, redrawn only when something about its look changes (the scene redraws every frame). */
 export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor, weaponItem, armorItem, headItem, trail, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, eternalFlash, hooded, encased, straight = false, foe, gearOnly = false, skeleton, hand = "right", sides = false }: StickFigureProps) {
+  // The Model viewer's Debug status: the right arm and the right leg red.
+  const debugLimbs = useContext(DebugLimbsContext);
   const raw = skeleton ?? ALL_POSES[pose];
   const front = view === "front";
   // A look that draws itself (the Warden), in its own poses.
@@ -663,7 +663,8 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
   // is on the player's side of the page, from the front (the far one), and on the other, from behind (the
   // near one). Always the weapon arm goes out toward its own side: the same side as straight on.
   // A pose can be turned like the model too (`torso34`): then the model's 3/4 body, whichever way it's seen from.
-  const yaw = raw.torso34 ?? (raw.armsOut ? (front ? "front" : "back") : undefined);
+  // The waxed, seen from the front in a fight, have the same 3/4 front body: chest and hips turned toward the player.
+  const yaw = raw.torso34 ?? (raw.armsOut ? (front ? "front" : "back") : waxed && front ? "front" : undefined);
   const yawFront = yaw === "front";
   const modelled = !!yaw && !straight;
   // The player's own poses (`yaw`): the shoulders and the hips placed from how each is turned, the right side the near one (see body.ts).
@@ -683,8 +684,8 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
   // player. Each hip is on its own side of the body, the same page side as the shoulder above it (the right one
   // toward +x, like the weapon arm), and nearer or farther like that shoulder: from the front the right side is
   // the far one, from behind the near one.
-  const nearHip0: Pt = faceCam ? [base.hip[0] - 2.4, base.hip[1] + 0.3] : yawed ? [base.hip[0] + onBody(0, nearH * HIP_HALF, raw.yaw!.hips)[0], base.hip[1] + onBody(0, nearH * HIP_HALF, raw.yaw!.hips)[1]] : waxed ? base.hip : modelled ? [base.hip[0] + (yawFront ? -2 : 2), base.hip[1]] : straight ? [base.hip[0] - 3.5 * side, base.hip[1]] : [base.hip[0] + (turned ? 2 : -2), base.hip[1] + 1];
-  const farHip0: Pt = faceCam ? [base.hip[0] + 2.2, base.hip[1] - 0.3] : yawed ? [base.hip[0] - onBody(0, nearH * HIP_HALF, raw.yaw!.hips)[0], base.hip[1] - onBody(0, nearH * HIP_HALF, raw.yaw!.hips)[1]] : waxed ? base.hip : modelled ? [base.hip[0] + (yawFront ? 2 : -2), base.hip[1]] : straight ? [base.hip[0] + 3.5 * side, base.hip[1]] : [base.hip[0] + (turned ? -2 : 2), base.hip[1] - 1];
+  const nearHip0: Pt = faceCam ? [base.hip[0] - 2.4, base.hip[1] + 0.3] : yawed ? [base.hip[0] + onBody(0, nearH * HIP_HALF, raw.yaw!.hips)[0], base.hip[1] + onBody(0, nearH * HIP_HALF, raw.yaw!.hips)[1]] : waxed && !modelled ? base.hip : modelled ? [base.hip[0] + (yawFront ? -2 : 2), base.hip[1]] : straight ? [base.hip[0] - 3.5 * side, base.hip[1]] : [base.hip[0] + (turned ? 2 : -2), base.hip[1] + 1];
+  const farHip0: Pt = faceCam ? [base.hip[0] + 2.2, base.hip[1] - 0.3] : yawed ? [base.hip[0] - onBody(0, nearH * HIP_HALF, raw.yaw!.hips)[0], base.hip[1] - onBody(0, nearH * HIP_HALF, raw.yaw!.hips)[1]] : waxed && !modelled ? base.hip : modelled ? [base.hip[0] + (yawFront ? 2 : -2), base.hip[1]] : straight ? [base.hip[0] + 3.5 * side, base.hip[1]] : [base.hip[0] + (turned ? -2 : 2), base.hip[1] - 1];
   const nearShoulder = nearShoulder0, farShoulder = farShoulder0, nearHip = nearHip0, farHip = farHip0;
 
   // Which side is which. The right shoulder is the near one when crossing, in the model seen from behind, and
@@ -713,7 +714,10 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
   const weaponBehind = straight || (raw.weaponLayer ? raw.weaponLayer === "behind" : !weaponShoulderNear && !raw.weaponOver);
   const freeBehind = straight || (raw.freeLayer ? raw.freeLayer === "behind" : weaponShoulderNear);
   // Then the limbs from them, and how far the figure drops so its feet stay where the pose put them.
-  const fit = fitLimbs(base, { weaponShoulder, freeShoulder, leadHip, rearHip, across: straight ? 1 : ACROSS_34, weaponLength: WEAPON_REACH[weapon] });
+  // The waxed's hips are set apart in the 3/4 front body: each leg keeps the direction its pose gave it, now from its own hip.
+  const fromHip = (l: Skeleton["leadLeg"], hip: Pt): Skeleton["leadLeg"] => ({ knee: [l.knee[0] + hip[0] - base.hip[0], l.knee[1] + hip[1] - base.hip[1]], foot: [l.foot[0] + hip[0] - base.hip[0], l.foot[1] + hip[1] - base.hip[1]] });
+  const legsBase = waxed && modelled ? { ...base, leadLeg: fromHip(base.leadLeg, leadHip), rearLeg: fromHip(base.rearLeg, rearHip) } : base;
+  const fit = fitLimbs(legsBase, { weaponShoulder, freeShoulder, leadHip, rearHip, across: straight ? 1 : ACROSS_34, weaponLength: WEAPON_REACH[weapon] });
   // A hammer-carrying waxed, outside its attacks, holds it out ahead like a cane: its hand raised and forward.
   const stick = weapon === "heavy" && !WAXED_ATTACK_POSES.has(pose) && pose !== "w-fallen";
   const cane = stick && CANE_POSES.has(pose);
@@ -725,9 +729,10 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
   const debug = (far: boolean, lead: boolean) => (!DEBUG_LIMB_COLORS || waxed ? "" : far && lead ? " dbg-both" : lead ? " dbg-lead" : far ? " dbg-far" : "");
   const rightArmDebug = debug(!rightIsNear, rightIsNear);
   const rightLeadDebug = leadSide === "right";
-  // (A temporary aid for tuning the player: the right arm and the right leg are drawn red. `RED_RIGHT` in this file turns it off.)
-  const player = !foe && !waxed && !variant;
-  const redArm = RED_RIGHT && player && hand === "right" ? " dbg-red" : "";
+  // (The Model viewer's Debug status: the right arm and the right leg are drawn red.)
+  const redArm = debugLimbs && hand === "right" ? " dbg-red" : "";
+  const redFree = debugLimbs && hand === "left" ? " dbg-red" : "";
+  const redLeg = debugLimbs ? " dbg-red" : "";
   // The weapon arm's upper arm (shoulder to elbow) can be drawn behind everything while its forearm stays in front
   // (`upperArmBehind`, for an arm crossing the body): the upper arm in the far tone, drawn first.
   const upperBehind = !!raw.upperArmBehind && !weaponBehind;
@@ -741,7 +746,7 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
     <LimbPoly pts={upperBehind ? [s.weaponArm.elbow, s.weaponArm.hand] : [weaponShoulder, s.weaponArm.elbow, s.weaponArm.hand]} className={`fig-limb ${weaponBehind && !straight ? "fig-far" : ""}${weaponDebug}`} item={armorItem} tag="w" />
   );
   const freeArm = (
-    <LimbPoly pts={[freeShoulder, s.freeArm.elbow, s.freeArm.hand]} className={`fig-limb ${freeBehind && !straight ? "fig-far" : ""}${hand === "left" ? rightArmDebug : ""}`} item={armorItem} tag="f" />
+    <LimbPoly pts={[freeShoulder, s.freeArm.elbow, s.freeArm.hand]} className={`fig-limb ${freeBehind && !straight ? "fig-far" : ""}${hand === "left" ? rightArmDebug : ""}${redFree}`} item={armorItem} tag="f" />
   );
   const weaponEl = waxed ? null : (
     <g transform={`translate(${s.weapon.at[0]} ${s.weapon.at[1]}) rotate(${s.weapon.angle})`}>
@@ -799,7 +804,7 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
         {foreBehind && <LimbPoly pts={[s.weaponArm.elbow, s.weaponArm.hand]} className={`fig-limb ${weaponDebug}`} item={armorItem} tag="wf" />}
         {freeBehind && freeWeaponEl}
         {freeBehind && freeArm}
-        <LimbPoly pts={leadIsNear ? [rearHip, s.rearLeg.knee, s.rearLeg.foot] : [leadHip, s.leadLeg.knee, s.leadLeg.foot]} className={`fig-limb ${straight ? "" : "fig-far"}${rightHipNear ? "" : debug(true, rightLeadDebug)}${RED_RIGHT && player && !rightHipNear ? " dbg-red" : ""}`} item={armorItem} leg tag="l1" />
+        <LimbPoly pts={leadIsNear ? [rearHip, s.rearLeg.knee, s.rearLeg.foot] : [leadHip, s.leadLeg.knee, s.leadLeg.foot]} className={`fig-limb ${straight ? "" : "fig-far"}${rightHipNear ? "" : debug(true, rightLeadDebug)}${!rightHipNear ? redLeg : ""}`} item={armorItem} leg tag="l1" />
         {waxed && <WaxBinding s={s} />}
         <polyline points={limb(farShoulder, nearShoulder)} className="fig-limb" />
         {frail ? <Ribcage s={s} nearSide={straight ? 0 : Math.sign(nearShoulder[0] - nx)} behind={yaw ? !yawFront : !front || !!raw.ribsBehind} /> : <polyline points={s.waist ? limb(s.neck, s.waist, s.hip) : limb(s.neck, s.hip)} className="fig-limb" />}
@@ -813,7 +818,7 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
         {hooded && <PatrolHood x={hx} y={hy} front={front} />}
         {!headItem && eyes}
         {/* The waxed's shins are under the binding, behind the body: only the thigh shows in front. */}
-        {waxed ? <polyline points={limb(s.hip, s.leadLeg.knee)} className={`fig-limb${rightHipNear ? debug(false, rightLeadDebug) : ""}`} /> : <LimbPoly pts={leadIsNear ? [leadHip, s.leadLeg.knee, s.leadLeg.foot] : [rearHip, s.rearLeg.knee, s.rearLeg.foot]} className={`fig-limb${rightHipNear ? debug(false, rightLeadDebug) : ""}${RED_RIGHT && player && rightHipNear ? " dbg-red" : ""}`} item={armorItem} leg tag="l2" />}
+        {waxed ? <polyline points={limb(leadHip, s.leadLeg.knee)} className={`fig-limb${rightHipNear ? debug(false, rightLeadDebug) : ""}`} /> : <LimbPoly pts={leadIsNear ? [leadHip, s.leadLeg.knee, s.leadLeg.foot] : [rearHip, s.rearLeg.knee, s.rearLeg.foot]} className={`fig-limb${rightHipNear ? debug(false, rightLeadDebug) : ""}${rightHipNear ? redLeg : ""}`} item={armorItem} leg tag="l2" />}
         {waxed && <WaxHead s={s} />}
         {!freeBehind && freeWeaponEl}
         {!freeBehind && freeArm}

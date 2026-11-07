@@ -44,6 +44,13 @@ const DODGE = ["Drag Forward", "Slither Back"];
 const FLAME = ["Clutch Flame", "Flame Immolation"];
 
 /** Keeps only the poses of the stances and actions a part has. */
+/** The blob keeps the Waxed's old stances and Scratch: its pattern is its own, not yet reworked. */
+const BLOB_STANCE_POSES: Record<string, string> = { "Hands Raised": "w-hands", "Wax on Hand": "w-wax-hand", "Cowering Sideways": "w-cower", "Cradle Flame": "w-cradle" };
+const BLOB_ACTION_POSES = (() => {
+  const { "Low Attack": _l, "Overhead Attack": _o, ...rest } = WAXED.actionPoses!;
+  return { ...rest, Scratch: { act: "w-hands", strike: "w-scratch" } } as NonNullable<EnemyKind["actionPoses"]>;
+})();
+
 const without = <T,>(poses: Record<string, T> | undefined, names: string[]) =>
   Object.fromEntries(Object.entries(poses ?? {}).filter(([k]) => !names.includes(k))) as Record<string, T>;
 
@@ -55,8 +62,8 @@ export const BLOB_MID: EnemyKind = {
   // The blob's parts never splash each other, whatever they burn with.
   shockwave: () => false,
   pattern: parsePattern("Wax Blob (middle)", `${actions()}${FLAME_ACTIONS}${stances()}${FLAME_STANCE}`),
-  stancePoses: without(WAXED.stancePoses, ["Crawling"]),
-  actionPoses: without(WAXED.actionPoses, DODGE),
+  stancePoses: BLOB_STANCE_POSES,
+  actionPoses: without(BLOB_ACTION_POSES, DODGE),
 };
 
 /**
@@ -74,8 +81,8 @@ function side(name: string, hammer = false): EnemyKind {
     flame: undefined,
     shockwave: () => false,
     pattern: parsePattern(name, `${actions()}${stances()}`),
-    stancePoses: without(WAXED.stancePoses, ["Crawling", "Cradle Flame"]),
-    actionPoses: without(WAXED.actionPoses, [...DODGE, ...FLAME]),
+    stancePoses: without(BLOB_STANCE_POSES, ["Cradle Flame"]),
+    actionPoses: without(BLOB_ACTION_POSES, [...DODGE, ...FLAME]),
   };
   if (!hammer) return kind;
   const { Scratch, ...rest } = kind.actionPoses!;

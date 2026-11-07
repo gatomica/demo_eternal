@@ -82,6 +82,7 @@ export function endTurn(t: Turn) {
     e.last = {
       name: e.intent.action,
       outcome: forced ? "recover" : undone ? "undone" : "done",
+      blocked: type === "block" ? t.blocked.has(e.id) : undefined,
       // (A flinched unit recovers into a stance other than the one it was flinched out of.)
       flinchedFrom: flinched && !forced ? e.intent.stance : undefined,
     };

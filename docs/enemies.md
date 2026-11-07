@@ -35,7 +35,7 @@ Tutorial-area enemy roster and boss, as agreed in brainstorming. Items marked **
   - **A Maneuver has a target.** It pulls its target closer (front line) and pushes its *opponents* away (back line), never its allies. Falling back is a Maneuver with no target. An enemy's Maneuver either closes in on you (you're its target) or backs off.
   - **Distance is settled per enemy, between you and it.** If only one of you Maneuvered, that one decides. If you both did and agree, it happens. If one wants closer and the other farther, both play the move but the distance stays.
   - **A melee attack closes in on its target only if the target didn't Maneuver.** You can't drag in an enemy that's backing off, and an enemy can't follow you when you fall back, even if its attack hits you.
-  - **Dodging is global (built):** a Maneuver dodges every attack on it, from either line, whoever it targets, melee or ranged. A retreating dodge goes back and away from the attacker; an advancing one steps past the attack, to the attacker's side of the screen. The dodge starts late in the attacker's approach (about 0.14 s in), timed to be clear just as the blow arrives, so the target is already out of the way when the attack animation lands; its pose changes only when it starts to dodge.
+  - **Dodging (built):** a Maneuver dodges attacks on it, from either line, melee or ranged. **Falling back dodges every attack.** **Advancing on an enemy dodges only that enemy's attacks** (every part of its body, for a multi-part one such as the Wax Blob); the others still hit you. A retreating dodge goes back and away from the attacker; an advancing one goes **past the attacker, to its far side** (the dodger ends up on the opposite side of the attacker from where it started, passing it on the side away from the camera rather than through it). The dodge starts late in the attacker's approach (about 0.14 s in), timed to be clear just as the blow arrives, so the target is already out of the way when the attack animation lands; its pose changes only when it starts to dodge. A dodging Waxed (drawn in 3D) faces the way it goes (away from it, backing off) until its repositioning step starts, then faces you again.
   - **Cost:** a Maneuver itself is free, so even heavy builds can reposition on safe turns. A dodged attack does no damage and becomes Fatigue instead: (8 + armor weight + weapon weight) / 16 of its damage (weights 0 / 0.5 / 1 / 1.5, as below). Half of it is the baseline; the weight of what you carry (**true weight**, whatever the action) is added on top.
   - **Maneuver sprites (built):** a unit that dodged an attack this turn holds its dodge pose, then takes the sprite of its next stance as the repositioning step (its Maneuver) starts, and walks to its new spot in that. One that didn't dodge takes its Maneuver sprite from the repositioning step.
 
@@ -121,6 +121,8 @@ Effects tied to an action (like the Warden becoming Sealed after Clutch Arm) als
 
 **Notation.** Enemies are written in this notation in the game's code (one file per kind in `src/core/kinds/`) and parsed when the game loads, so the doc and the game read the same.
 - `A / B > Stance > X / Y` means: after action A or B, the enemy can take this stance; from it, it can do X or Y.
+- **Telling a Block by what it did:** `Brace` in a "comes from" list is a Brace that stopped at least one attack, `!Brace` one that stopped nothing. This only splits a Block in two once a pattern writes `!Brace` somewhere (the Waxed's does); otherwise `Brace` is either, as before.
+- **An action no stance comes from** goes back to the **Recover** stances (it is not an error).
 - A stance's actions are an ordered list (`,` or `/`, they mean the same): the first available one is taken. `> Stride, Wax Guard, Rising Flail` is Stride if it can, else Wax Guard, else Rising Flail.
 - `All >` means the stance can follow any action. `Recover` can be listed like an action.
 - Actions are declared first, one per line: `Name: kind, modifiers`.
@@ -143,7 +145,7 @@ stances:
   Stride > Flail Clutched > Flail Swing / Chain Guard
 ```
 
-- **The parser refuses broken patterns** when the game loads: an unknown action name (typos), a Maneuver without a direction, an action listed twice in a stance, no stance coming from Recover, or an action that leads to no stance (a dead end).
+- **The parser refuses broken patterns** when the game loads: an unknown action name (typos), a Maneuver without a direction, an action listed twice in a stance, no stance coming from Recover, or no stance coming from Recover.
 - **The game also refuses broken kinds** when it loads: a `*Condition` that doesn't exist, a pose for a stance or action that isn't in the pattern, a pose that doesn't exist, or a fixed-rule action that isn't in the pattern.
 
 ### Sleepwalker in this format
@@ -178,13 +180,14 @@ All of humanity fell into eternal sleep long ago. Every person is a **sleepwalke
 
 Sleepwalkers that wardens have tried to soothe back to sleep. Always **on their knees**, their lower legs bound together with wax, their heads encased in wax. **No armor or weapons.**
 
-- **Extremely telegraphed: one kind of action per stance.** There's never any doubt about what kind of thing it will do this turn; which stance it takes from turn to turn is random. Its job is to teach the actions plainly: see this stance, answer with that action.
+- **Reworked after the playtest (built; `kinds/waxed.ts`):** the playtests found defensive options spammed and too many attacks from the back line. It is no longer "one action per stance": a stance can offer actions by condition, and **what the last action did decides where it goes next**. A Block that stopped an attack (`Brace`) and one that stopped nothing (`!Brace`) lead to different stances.
 
-**Built:** 12 health, baseline weight, no armor. **Its Scratch (a baseline attack) deals and costs 2/16**, the same as a light blow's damage, instead of a baseline attack's 1/16 (an action can set its own numbers: `damage N`, `cost N` in the pattern notation; it is still the fastest attack, and your own bare-handed punch is unchanged). Its Hurl Wax is a plain light attack.
+**Built:** 12 health, baseline weight, no armor. Barehanded, its two clawing attacks (**Low Attack**, **Overhead Attack**) deal and cost 2/16 each (`damage 2, cost 2`, as its old Scratch); armed, they are blows of the weapon. Its Hurl Wax is a plain light attack.
 
 | Action | Kind | Notes |
 |---|---|---|
-| Scratch | Attack | Baseline |
+| Low Attack | Attack | Baseline barehanded; the weapon's weight when armed |
+| Overhead Attack | Attack | As Low Attack; only when close (`*Close`) |
 | Hurl Wax | Attack | Light, ranged |
 | Brace | Block | Baseline (no bonus Resistance) |
 | Drag Forward | Maneuver | Advance; only when far (`*Far`) |
@@ -192,18 +195,23 @@ Sleepwalkers that wardens have tried to soothe back to sleep. Always **on their 
 | Clutch Flame | Rest | |
 
 ```
-All > Hands Raised      > Scratch
-All > Wax on Hand       > Hurl Wax
-All > Cowering Sideways > Brace
-All > Crawling          > Drag Forward, Slither Back
-All > Cradle Flame      > Clutch Flame
+Recover, Clutch Flame         > Idle         > Drag Forward, Slither Back
+Recover, Drag Forward, Brace  > Crawling     > Drag Forward, Low Attack
+Slither Back, !Brace          > Wax on Hand  > Hurl Wax
+Recover, Slither Back, !Brace > Cradle Flame > Flame Immolation, Clutch Flame
+Low Attack, Brace             > Reared Back  > Overhead Attack, Brace
 ```
 
-- **Armed variants (built; `kinds/waxed.ts`):** the **Chisel Waxed** and the **Hammer Waxed** hold a Jagged Chisel or Brick Hammer in their **free hand**: the other hand still tears off the wax for Hurl Wax, which is unchanged (a light ranged attack, no eternal effect). Their Scratch becomes a blow of the weapon (**Chisel Stab**, **Hammer Blow**: the weapon's weight, numbers and speed, scaled to the waxed's 12 health, and its eternal effect, free for them); everything else is the Waxed's (Brace still bare, the flame, the stances, death sealed in wax). Beaten, they drop the ordinary weapon (they don't get up again). No Waxed Torch variant: the torch is the wardens' own. Drawn: the weapon in the free hand, pointing on along the forearm (raised with Hands Raised, thrust forward in the strike, which reuses the Scratch's poses), and where that would run it into the floor (slumped, crawling, slithering, toppled) it tilts up just enough to rest its tip on the floor (`waxedGrip` in `StickFigure.tsx`). Outside its attack (Hands Raised and the blow) the **hammer** is held like a walking stick: straight up, the brick on top, the butt of the haft on the floor, the haft passing through the hand (`walkingStick`). Where the hand is higher than the haft reaches (Wax on Hand, Cowering, Flinch) it is held just under the brick, the butt a little off the floor. Toppled (staggered), it lies on the floor by the hand. In Test combat as "Chisel waxed" and "Hammer waxed"; not yet on the map, where they look like any waxed.
-- Each stance 20%. Crawling is the only one with two actions, picked by distance **(built)**: Drag Forward when far, Slither Back when close. It attacks even when the attack will stagger it.
-- **Looks (built):** kneeling, shins bound in wax and laid flat behind, head a lump of wax (no face). Hands Raised: both hands up, clawing. Wax on Hand: leaning back, a wax lump held behind the shoulder. Cowering Sideways: twisted away, arms over the head. Crawling: on its hands. Cradle Flame: a small flame cupped at the chest; Clutch Flame folds over it. Staggered: toppled forward onto its head.
+- Order matters inside a stance (the first available action is taken): Idle drags in when far, else slithers; Crawling drags in when far, else attacks low; Reared Back strikes overhead when close, else braces. Hurl Wax and Overhead Attack lead to no stance, so the next one is picked among the **Recover** stances (Idle, Crawling, Cradle Flame). The ranged Hurl Wax now only comes after backing off or a wasted Brace.
+- **Stance poses (reused, to be redrawn; the lone Waxed is drawn from a 3D skeleton, `render/rig3d.ts`; Idle and Drag Forward are redrawn):** Idle `w-idle`, Drag Forward `w-drag`, Crawling `w-crawl`, Wax on Hand `w-wax-hand`, Cradle Flame `w-cradle`, Reared Back `w-hands`. Brace shows `w-cower` when it happens. Both attacks use the Scratch's strike pose for now. The old Hands Raised and Cowering Sideways stances are gone.
+- **The Wax Blob keeps the old Waxed pattern** (Scratch, Hands Raised, Cowering Sideways) until it gets its own rework; so do the other enemies.
+
+- **Armed variants (built; `kinds/waxed.ts`):** the **Chisel Waxed** and the **Hammer Waxed** hold a Jagged Chisel or Brick Hammer in their **free hand**: the other hand still tears off the wax for Hurl Wax, which is unchanged (a light ranged attack, no eternal effect). Their Low Attack and Overhead Attack become blows of the weapon (the weapon's weight, numbers and speed, scaled to the waxed's 12 health, and its eternal effect, free for them); everything else is the Waxed's (Brace still bare, the flame, the stances, death sealed in wax). Beaten, they drop the ordinary weapon (they don't get up again). No Waxed Torch variant: the torch is the wardens' own. Drawn: the weapon in the free hand, pointing on along the forearm (raised with Hands Raised, thrust forward in the strike, which reuses the Scratch's poses), and where that would run it into the floor (slumped, crawling, slithering, toppled) it tilts up just enough to rest its tip on the floor (`waxedGrip` in `StickFigure.tsx`). Outside its attack (Hands Raised and the blow) the **hammer** is held like a walking stick: straight up, the brick on top, the butt of the haft on the floor, the haft passing through the hand (`walkingStick`). Where the hand is higher than the haft reaches (Wax on Hand, Cowering, Flinch) it is held just under the brick, the butt a little off the floor. Toppled (staggered), it lies on the floor by the hand. In Test combat as "Chisel waxed" and "Hammer waxed"; not yet on the map, where they look like any waxed.
+- Stances are picked evenly among those the last action leads to. It attacks even when the attack will stagger it.
+- **Body (built):** seen from the front in a fight, the Waxed has the Model's 3/4 front body: chest and hips turned toward the player, level shoulders, the right (weapon) side toward the player, hips set 4 apart (not one point). Each leg keeps the direction its pose gave it, from its own hip. (In the 3D rig, in every pose the knees are apart, as far as in Idle, and the feet meet, so the legs don't share a knee.) Seen from behind or straight on, nothing changed.
+- **Looks (built):** kneeling, shins bound in wax and laid flat behind, head a lump of wax (no face). Reared Back: both hands up, clawing. Wax on Hand: leaning back, a wax lump held behind the shoulder. Brace: twisted away, arms over the head. Crawling: on its hands. Cradle Flame: a small flame cupped at the chest; Clutch Flame folds over it. Staggered: toppled forward onto its head.
 - On the map it crawls slowly after you on its hands once it sees you.
-- Assumed (unconfirmed): Scratch is the "Lunge" in Hands Raised; Hurl Wax has no extra effect.
+- Assumed (unconfirmed): Hurl Wax has no extra effect.
 
 **Proposals**
 - *The wax decides what it can't do.* Variants sealed differently (a waxed arm means no Hurl Wax) give variety without new rules.
