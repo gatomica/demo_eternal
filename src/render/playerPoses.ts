@@ -17,7 +17,7 @@ import { HIP_HALF, onBody, SHOULDER_HALF } from "./body";
 import { reachArm, RIG } from "./rig";
 import type { Skeleton } from "./poses";
 
-interface Stand {
+export interface Stand {
   psiS: number; psiH: number; D: number; W: number; c: number; lean: number;
   /** The way the feet are lined up (degrees; default the pelvis's turn): a bladed stance's feet stand along the way to the enemy, whatever way the hips face. */
   psiF?: number;
@@ -47,7 +47,7 @@ interface Stand {
 
 const add = (a: Pt, b: Pt): Pt => [a[0] + b[0], a[1] + b[1]];
 
-function stand(o: Stand): Skeleton {
+export function stand(o: Stand): Skeleton {
   const hip: Pt = [50, 66 + o.c];
   const neck: Pt = [hip[0] + o.lean, hip[1] - 32];
   const head: Pt = [neck[0] + (o.head ?? o.lean * 0.5), neck[1] - 11];

@@ -40,7 +40,7 @@ export interface MapFoe {
   /**
    * The fight starts the moment you stand in this rectangle (world tiles, on level `z`), whatever it does: for the boss, who never chases.
    */
-  trigger?: { x0: number; y0: number; x1: number; y1: number; z: number };
+  trigger?: { x0: number; y0: number; x1: number; y1: number; z: number; /** The corner tiles of the rectangle (this many tiles square) do not start it: only stepping beyond them does. */ cut?: number };
   /**
    * What it is sure to drop when it falls, on top of the ordinary chance and the gear it carries: a lump of eternal string (as much as its
    * max health) and/or a piece of gear (an eternal memory). Dropped once for the group, by its first member to lie down.
@@ -192,56 +192,14 @@ export const MAP_FOES: MapFoe[] = [
   // chases you: the fight and its opening scene begin the moment you step onto the platform. (The fight is Test combat's "warden".)
   {
     id: "warden", kind: "warden", home: { x: 27.5, y: 19.5, z: 13 }, still: true,
-    trigger: { x0: 24.7, y0: 16.7, x1: 30.3, y1: 22.3, z: 13 },
+    // The whole platform (plan tiles 23-29 by 15-21, so world x 24 to 31 and y 16 to 23) except its four corner tiles, where the bridges come
+    // in: the fight starts once you have stepped beyond the corner tile (and so can see him), wherever along the rim you go.
+    trigger: { x0: 24, y0: 16, x1: 31, y1: 23, z: 13, cut: 1 },
     fight: ENCOUNTERS.find(e => e.id === "warden")!.enemies,
-    // Waxed A in the north-west corner, the Warden, Waxed B in the south-east corner, Waxed C (whose flame he takes) in the north-east corner.
-    // (The south-west corner, where the bridge comes in, is left open.)
-    spread: [[-2.6, -2.6], [0, 0], [2.6, 2.6], [2.6, -2.6]],
+    // In the order of the fight: Waxed A north-west of him, Waxed C (whose flame he takes) south-west, the Warden in the middle, Waxed B
+    // south-east: the three waxed on the tiles next to him, all looking toward him.
+    spread: [[-1, -1], [-1, 1], [0, 0], [1, 1]],
   },
-];
-
-/** A beaten body left lying where it is as decoration: not an enemy, nothing to fight or pick up. Drawn as the remains of its kind. */
-export interface Decor { kind: KindId; at: { x: number; y: number; z: number }; /** Mirrored, so they don't all face one way. */ flip?: boolean }
-
-/**
- * People sealed whole in wax, lying about the rooms of the enemies that carry chisels (the labyrinth's east room and the dungeon's
- * east chapel). Written as plan tiles, [x, y, z], and set a tile and a half off (the world grid is the plan plus one, and a tile's middle is a half).
- */
-const sealed = (kind: KindId, z: number, tiles: [number, number][]): Decor[] =>
-  tiles.map(([x, y], i) => ({ kind, at: { x: x + 1.5, y: y + 1.5, z }, flip: i % 2 === 1 }));
-
-/** A well-mixed number from 0 to 1 for plan tile (x, y) of level z: the same every run. */
-function roll(z: number, x: number, y: number) {
-  let h = (Math.imul(x + 1, 73856093) ^ Math.imul(y + 1, 19349663) ^ Math.imul(z + 1, 83492791)) >>> 0;
-  h = Math.imul(h ^ (h >>> 15), 2246822519) >>> 0;
-  h = Math.imul(h ^ (h >>> 13), 3266489917) >>> 0;
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
-
-/** Plan tiles of a room (corners x0,y0 to x1,y1) where a body lies, each tile with this chance, except `skip` (the ways through and where enemies stand). */
-const scatter = (z: number, [x0, y0, x1, y1]: number[], chance: number, skip: (x: number, y: number) => boolean): [number, number][] => {
-  const out: [number, number][] = [];
-  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (!skip(x, y) && roll(z, x, y) < chance) out.push([x, y]);
-  return out;
-};
-
-export const MAP_DECOR: Decor[] = [
-  // The labyrinth's east room: one in each corner of it.
-  ...sealed("waxed", 0, [[36, 15], [37, 15], [36, 17], [37, 17]]),
-  // The dungeon's east chapel: round its walls, leaving the way in free.
-  ...sealed("waxed", 8, [[42, 16], [44, 16], [46, 16], [43, 17], [45, 18], [43, 19], [42, 20], [44, 20], [46, 20]]),
-  // Floor B (level 10): all four rooms are full of them, and the side room north of the east room most of all.
-  // North room (the bridge comes in down column 26; the Wax Blob lies in the middle).
-  ...sealed("waxed", 10, scatter(10, [23, 5, 29, 10], 0.3, (x, y) => (x === 26 && y >= 9) || (x >= 25 && x <= 27 && y >= 5 && y <= 7))),
-  // South room (the bridge, and the three waxed).
-  ...sealed("waxed", 10, scatter(10, [23, 26, 29, 31], 0.3, (x, y) => (x === 26 && y <= 27) || (x === 24 && y === 28) || (x === 28 && y === 28) || (x === 26 && y === 30))),
-  // West room (the bridge runs out of it along row 18; the stairs start in its south-west corner).
-  ...sealed("waxed", 10, scatter(10, [10, 15, 16, 21], 0.3, (x, y) => y === 18 || (x === 11 && y === 21))),
-  // East room (the bridge comes in along row 18; the passage north is at column 44; the three enemies).
-  ...sealed("waxed", 10, scatter(10, [36, 15, 45, 21], 0.3, (x, y) => y === 18 || (x === 44 && y <= 16) || (x === 40 && (y === 16 || y === 20)))),
-  // The side room, waxed over, floor and walls: thick with them.
-  ...sealed("waxed", 10, scatter(10, [42, 6, 47, 12], 0.55, (x, y) => x === 44 && y === 12)),
-  ...sealed("waxed", 10, [[44, 14]]),
 ];
 
 interface FoeTuning {

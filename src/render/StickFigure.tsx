@@ -441,7 +441,7 @@ export function HeadGear({ item, x, y, front }: { item: HeadItem; x: number; y: 
 }
 
 /** The hood's inside, pitch black, drawn under the head: it shows through the hood's opening round the face. */
-function HoodInside({ x, y }: { x: number; y: number }) {
+export function HoodInside({ x, y }: { x: number; y: number }) {
   return (
     <g>
       <path d={`M${x - 2.4} ${y - 6.6} L${x - 10.4} ${y - 10.2} L${x - 7.8} ${y + 0.8} Z`} fill="#050507" />
@@ -529,6 +529,10 @@ interface StickFigureProps {
   straight?: boolean;
   /** An enemy (frail, a ribcage and no solid torso), whichever way it's seen. Default: seen from the front. */
   foe?: boolean;
+  /** Only the armor, with no body: its torso piece alone (the sprite of a piece of armor, as it is worn seen from the front). */
+  gearOnly?: boolean;
+  /** A skeleton to draw instead of the named pose's (the map's walking frames: a stride, or a figure seen straight on). `pose` still says which kind of pose it is. */
+  skeleton?: Skeleton;
   /** The hand that holds the weapon (default right). */
   hand?: Side;
   /** Label the hands and feet R and L (the Model stance). */
@@ -618,8 +622,8 @@ const RED_RIGHT = false;
 const ACROSS_34 = 0.72;
 
 /** A figure, redrawn only when something about its look changes (the scene redraws every frame). */
-export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor, weaponItem, armorItem, headItem, trail, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, eternalFlash, hooded, encased, straight = false, foe, hand = "right", sides = false }: StickFigureProps) {
-  const raw = ALL_POSES[pose];
+export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor, weaponItem, armorItem, headItem, trail, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, eternalFlash, hooded, encased, straight = false, foe, gearOnly = false, skeleton, hand = "right", sides = false }: StickFigureProps) {
+  const raw = skeleton ?? ALL_POSES[pose];
   const front = view === "front";
   // A look that draws itself (the Warden), in its own poses.
   const own = lookOf(variant)?.figure;
@@ -770,6 +774,16 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
             )}
           </g>
         ) : null;
+  // A piece of armor on its own: just what is worn on the torso, not mirrored (the inventory turns the player round, so this is how it shows on you).
+  if (gearOnly) {
+    return (
+      <svg viewBox="0 0 100 120" className={`figure figure-${view}${armorItem ? ` armor-${armorItem}` : ""}`} aria-hidden="true">
+        <g transform={fit.drop ? `translate(0 ${fit.drop})` : undefined}>
+          <Armor tier={armor} s={s} near={nearShoulder} item={armorItem} turn={faceCam ? 0.5 : 0} frontShown />
+        </g>
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 100 120" className={`figure figure-${view}${armorItem ? ` armor-${armorItem}` : ""}`} role="img" aria-label={title}>
       {title && <title>{title}</title>}

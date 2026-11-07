@@ -3,6 +3,8 @@
  */
 import { ENEMY_KINDS, type KindId } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, HeadItem, WeaponItem, WeaponTier } from "../core/types";
+import { paintSealed } from "./props";
+import { drawSprite, UNITS_PER_TILE } from "./sprites";
 import { COLORS } from "./tuning";
 import type { Dir } from "./world";
 
@@ -66,7 +68,11 @@ export function drawWalker(
   // The sleepwalkers are hunched: the neck sunk and the head low.
   const howling = look.howl !== undefined;
   const slump = look.reach ? (howling ? -0.25 : 1) : 0;
-  const foot = 0.36, hip = 0.08 + bob, neck = -0.2 + bob + 0.06 * slump, shoulder = neck + 0.05, headY = -0.36 + bob + 0.11 * slump, r = 0.15;
+  // (The proportions of the figures in a fight, which stand 100 units tall: a head 15 across, a torso of 32, legs of 49, arms of 28. A tile is
+  // about 115 of those, the figure's feet 0.36 below its middle.)
+  const foot = 0.36, hip = -0.066 + bob, neck = -0.344 + bob + 0.05 * slump, shoulder = neck + 0.03, headY = -0.44 + bob + 0.085 * slump, r = 0.075;
+  /** How much smaller than before the head and what sits on it are (they were drawn for a head twice the size). */
+  const hk = r / 0.15;
   /** How far forward the head is carried (set when seen from the side). */
   let headX = 0;
   const HX = (u: number) => X(u + headX);
@@ -76,6 +82,13 @@ export function drawWalker(
     // Mid-fall, the shadow stays on the ground below and shrinks the higher you are above it.
     const s = 1 / (1 + shadowDrop);
     g.beginPath(); g.ellipse(X(0), Y(foot + 0.01 + shadowDrop), 0.2 * T * s, 0.07 * T * s, 0, 0, Math.PI * 2); g.fill();
+  }
+
+  // The figure as the fight draws it (sprites.ts), once its picture is made; until then, and for a howl, the stick figure below.
+  if (drawSprite(g, x, y, T, facing, frame, look)) {
+    // (A howl's rings roll out from where the sprite's head is thrown back, about 92 units above its feet.)
+    if (look.howl !== undefined) howlRings(g, x, y + (foot - 92 / UNITS_PER_TILE) * T, T, look.howl);
+    return;
   }
 
   /** What the armor is made of: a class's own armor has its own colour. */
@@ -158,7 +171,7 @@ export function drawWalker(
     if (look.reach) {
       // Arms hanging down, loose. The weapon is in the right hand (on the left of the screen facing you, the right when
       // facing away), held level: pointing toward you or away, so seen short.
-      const handY = howling ? shoulder - 0.2 : hip + 0.1, reachX = howling ? 0.17 : 0.1;
+      const handY = howling ? shoulder - 0.2 : hip + 0.06, reachX = howling ? 0.17 : 0.1;
       const side = facing === "down" ? -1 : 1;
       // (Howling: both arms flung up, the weapon raised in the right hand.)
       const hold = () => (howling ? weapon(side * reachX, handY, side * 0.2, 1, -1) : weapon(side * 0.1, handY, side * 0.15, 0.5, facing === "down" ? 1 : -1));
@@ -171,10 +184,10 @@ export function drawWalker(
       // The weapon is in your right hand: on the left of the screen when you face it, the
       // right when you turn away. Seen from behind, it hangs behind the body.
       const side = facing === "down" ? -1 : 1;
-      if (facing === "up") weapon(side * 0.16, 0.02 + swing(side), side * 0.35);
-      line(-0.02, shoulder, -0.16, 0.02 + swing(-1));
-      line(0.02, shoulder, 0.16, 0.02 + swing(1));
-      if (facing === "down") weapon(side * 0.16, 0.02 + swing(side), side * 0.35);
+      if (facing === "up") weapon(side * 0.13, hip + 0.07 + swing(side), side * 0.35);
+      line(-0.02, shoulder, -0.13, hip + 0.07 + swing(-1));
+      line(0.02, shoulder, 0.13, hip + 0.07 + swing(1));
+      if (facing === "down") weapon(side * 0.13, hip + 0.07 + swing(side), side * 0.35);
     }
     pads([-0.05, 0.05]);
   } else {
@@ -185,13 +198,13 @@ export function drawWalker(
     leg(0, hip, -m * reach, foot + (step ? -0.02 : 0));
     // Hunched: the neck and head carried well forward of the hips.
     const lean = look.reach ? m * 0.09 : 0;
-    if (look.reach) headX = howling ? -m * 0.04 : m * 0.11;
+    if (look.reach) headX = howling ? -m * 0.03 : m * 0.08;
     line(lean, neck, 0, hip);
     plate();
     if (look.reach) {
       // Arms hanging down from the sunk shoulders, the weapon held level ahead. The right hand is the far one facing
       // right (the weapon goes behind), the near one facing left.
-      const handY = howling ? shoulder - 0.2 : hip + 0.1;
+      const handY = howling ? shoulder - 0.2 : hip + 0.06;
       const far = lean + m * (howling ? 0.08 : 0.01), near = lean + m * (howling ? 0.14 : 0.07);
       // (Howling: both arms flung up and forward, the weapon raised.)
       const hold = (u: number) => (howling ? weapon(u, handY, m * 0.3, 1, -1) : weapon(u, handY - (u === far ? 0.01 : 0), m * 1000));
@@ -203,32 +216,22 @@ export function drawWalker(
       const arm = step ? 0.1 : 0.045;
       // The weapon hangs from the front hand, tip a little ahead. Facing right, your right hand
       // is the far one, so it goes behind the body.
-      if (facing === "right") weapon(m * arm, 0.03, m * 0.3);
-      line(0, shoulder, -m * arm, 0.03);
-      line(0, shoulder, m * arm, 0.03);
-      if (facing === "left") weapon(m * arm, 0.03, m * 0.3);
+      if (facing === "right") weapon(m * arm, hip + 0.07, m * 0.3);
+      line(0, shoulder, -m * arm, hip + 0.07);
+      line(0, shoulder, m * arm, hip + 0.07);
+      if (facing === "left") weapon(m * arm, hip + 0.07, m * 0.3);
     }
     pads([0]);
   }
 
-  // A howl rolls out from the head in rings.
-  if (howling) {
-    g.save();
-    g.lineWidth = Math.max(1.5, 0.03 * T);
-    for (let k = 0; k < 3; k++) {
-      const ph = (look.howl! * 2.4 + k / 3) % 1;
-      g.strokeStyle = `rgba(232, 224, 204, ${0.55 * (1 - ph)})`;
-      g.beginPath(); g.arc(HX(0), Y(headY), (0.2 + 0.5 * ph) * T, 0, Math.PI * 2); g.stroke();
-    }
-    g.restore();
-  }
+  if (howling) howlRings(g, HX(0), Y(headY), T, look.howl!);
   g.fillStyle = look.ink;
   g.beginPath(); g.arc(HX(0), Y(headY), r * T, 0, Math.PI * 2); g.fill();
   // Heavy armor comes with a helmet over the top of the head, stopping above the eyes.
   if (look.armor === "heavy" && !look.armorItem && !look.headItem) {
     g.fillStyle = ARMOR_INK;
-    g.beginPath(); g.arc(HX(0), Y(headY - 0.015), r * 1.07 * T, Math.PI, Math.PI * 2); g.fill();
-    g.fillRect(HX(-r * 1.14), Y(headY - 0.04), r * 2.28 * T, 0.03 * T);
+    g.beginPath(); g.arc(HX(0), Y(headY - 0.015 * hk), r * 1.07 * T, Math.PI, Math.PI * 2); g.fill();
+    g.fillRect(HX(-r * 1.14), Y(headY - 0.04 * hk), r * 2.28 * T, 0.03 * hk * T);
   }
 
   // A class's own head gear: a bronze helm with its red crest, a black hood, a clay mask on the side of the face.
@@ -238,18 +241,18 @@ export function drawWalker(
       g.fillStyle = "#a63a2e";
       g.beginPath(); g.moveTo(HX(-r * 0.8), Y(headY - r * 0.5)); g.quadraticCurveTo(HX(0), Y(headY - r * 2.1), HX(r * 0.8), Y(headY - r * 0.5)); g.closePath(); g.fill();
       g.fillStyle = "#b4803f";
-      g.beginPath(); g.arc(HX(0), Y(headY + 0.01), r * 1.12 * T, Math.PI, Math.PI * 2); g.fill();
-      g.fillRect(HX(-r * 1.12), Y(headY - 0.02), r * 2.24 * T, 0.045 * T);
+      g.beginPath(); g.arc(HX(0), Y(headY + 0.01 * hk), r * 1.12 * T, Math.PI, Math.PI * 2); g.fill();
+      g.fillRect(HX(-r * 1.12), Y(headY - 0.02 * hk), r * 2.24 * T, 0.045 * hk * T);
     } else if (look.headItem === "hood") {
       g.fillStyle = "#17171c";
       g.beginPath(); g.arc(HX(0), Y(headY), r * 1.22 * T, 0, Math.PI * 2); g.fill();
-      if (fx) { g.beginPath(); g.moveTo(HX(-fx * 0.04), Y(headY - 0.1)); g.lineTo(HX(-fx * 0.24), Y(headY - 0.15)); g.lineTo(HX(-fx * 0.13), Y(headY + 0.03)); g.fill(); }
+      if (fx) { g.beginPath(); g.moveTo(HX(-fx * 0.04 * hk), Y(headY - 0.1 * hk)); g.lineTo(HX(-fx * 0.24 * hk), Y(headY - 0.15 * hk)); g.lineTo(HX(-fx * 0.13 * hk), Y(headY + 0.03 * hk)); g.fill(); }
       // The opening: just a gap, the face beneath showing through the hood's pitch-black inside (the eyes are drawn after, over the face).
       if (facing !== "up") {
         g.fillStyle = "#050507";
         g.beginPath(); g.arc(HX(0), Y(headY), r * 1.1 * T, 0, Math.PI * 2); g.fill();
         g.fillStyle = look.ink;
-        g.beginPath(); g.arc(HX(fx * 0.03), Y(headY + 0.01), r * 0.95 * T, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.arc(HX(fx * 0.03 * hk), Y(headY + 0.01 * hk), r * 0.95 * T, 0, Math.PI * 2); g.fill();
       }
     } else if (look.headItem === "mask") {
       // Cloth wrapped about the whole head, only a sliver open for the eyes.
@@ -273,13 +276,13 @@ export function drawWalker(
     const back = facing === "left" ? 1 : facing === "right" ? -1 : 0;
     g.fillStyle = "#6c6871";
     g.beginPath();
-    if (back) { g.moveTo(HX(back * 0.05), Y(headY - 0.13)); g.lineTo(HX(back * 0.24), Y(headY - 0.2)); g.lineTo(HX(back * 0.15), Y(headY + 0.02)); }
-    else { g.moveTo(HX(-0.07), Y(headY - 0.12)); g.lineTo(HX(0), Y(headY - (facing === "up" ? 0.3 : 0.27))); g.lineTo(HX(0.07), Y(headY - 0.12)); }
+    if (back) { g.moveTo(HX(back * 0.05 * hk), Y(headY - 0.13 * hk)); g.lineTo(HX(back * 0.24 * hk), Y(headY - 0.2 * hk)); g.lineTo(HX(back * 0.15 * hk), Y(headY + 0.02 * hk)); }
+    else { g.moveTo(HX(-0.07 * hk), Y(headY - 0.12 * hk)); g.lineTo(HX(0), Y(headY - (facing === "up" ? 0.3 : 0.27) * hk)); g.lineTo(HX(0.07 * hk), Y(headY - 0.12 * hk)); }
     g.fill();
     g.beginPath(); g.arc(HX(0), Y(headY), r * 1.18 * T, 0, Math.PI * 2); g.fill();
     if (facing !== "up") {
       g.fillStyle = "#0c0a0f";
-      g.beginPath(); g.ellipse(HX(-back * 0.06), Y(headY + 0.02), (back ? 0.06 : 0.09) * T, (howling ? 0.15 : 0.1) * T, 0, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.ellipse(HX(-back * 0.06 * hk), Y(headY + 0.02 * hk), (back ? 0.06 : 0.09) * hk * T, (howling ? 0.15 : 0.1) * hk * T, 0, 0, Math.PI * 2); g.fill();
     }
     return;
   }
@@ -287,9 +290,21 @@ export function drawWalker(
   if (!look.eye || look.headItem === "helm") return;
   g.fillStyle = look.eye;
   const eye = (u: number, v: number) => { g.beginPath(); g.arc(HX(u), Y(v), Math.max(1, 0.022 * T), 0, Math.PI * 2); g.fill(); };
-  if (facing === "down") { eye(-0.05, headY + 0.01); eye(0.05, headY + 0.01); }
-  if (facing === "left") eye(-0.08, headY);
-  if (facing === "right") eye(0.08, headY);
+  if (facing === "down") { eye(-0.05 * hk, headY + 0.01 * hk); eye(0.05 * hk, headY + 0.01 * hk); }
+  if (facing === "left") eye(-0.08 * hk, headY);
+  if (facing === "right") eye(0.08 * hk, headY);
+}
+
+/** A howl rolling out from the head in rings, `howl` (0 to 1) of the way through it. */
+function howlRings(g: CanvasRenderingContext2D, cx: number, cy: number, T: number, howl: number) {
+  g.save();
+  g.lineWidth = Math.max(1.5, 0.03 * T);
+  for (let k = 0; k < 3; k++) {
+    const ph = (howl * 2.4 + k / 3) % 1;
+    g.strokeStyle = `rgba(232, 224, 204, ${0.55 * (1 - ph)})`;
+    g.beginPath(); g.arc(cx, cy, (0.12 + 0.4 * ph) * T, 0, Math.PI * 2); g.stroke();
+  }
+  g.restore();
 }
 
 /**
@@ -303,7 +318,7 @@ function drawKneeler(
   weapon: (u: number, v: number, lean: number, k?: number, dir?: number) => void,
 ) {
   const wax = look.wax!;
-  const hip = 0.2, neck = 0.02;
+  const hip = 0.2, neck = -0.06;
   /** A hammer-carrier holds it out like a walking stick. */
   const cane = look.weapon === "heavy";
   const waxLine = (x1: number, y1: number, x2: number, y2: number, w = 0.12) => {
@@ -312,7 +327,7 @@ function drawKneeler(
   };
   const head = (u: number, v: number) => {
     g.fillStyle = wax;
-    g.beginPath(); g.ellipse(X(u), Y(v), 0.15 * T, 0.16 * T, 0, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(X(u), Y(v), 0.09 * T, 0.095 * T, 0, 0, Math.PI * 2); g.fill();
     g.strokeStyle = "rgba(0,0,0,0.35)"; g.lineWidth = 1; g.stroke();
     g.strokeStyle = look.ink; g.lineWidth = Math.max(2, 0.075 * T);
   };
@@ -335,7 +350,7 @@ function drawKneeler(
     line(nx, ny + 0.03, handA[0], handA[1]);
     line(nx, ny + 0.03, handB[0], handB[1]);
     if (facing === "left") holdIt();
-    head(m * (0.2 + lean), ny - 0.1);
+    head(m * (0.18 + lean), ny - 0.075);
   } else {
     // From the front or behind: knees apart on the ground, shins bound behind them.
     const toward = facing === "down" ? 1 : -1;
@@ -354,7 +369,7 @@ function drawKneeler(
     line(-0.02, neck + 0.05, handL[0], handL[1]);
     line(0.02, neck + 0.05, handR[0], handR[1]);
     if (toward > 0) hold();
-    head(0, neck - 0.13);
+    head(0, neck - 0.095);
   }
 }
 
@@ -455,25 +470,11 @@ export function drawRemains(g: CanvasRenderingContext2D, x: number, y: number, T
 }
 
 /**
- * A waxed that has been beaten, as in a fight: sealed whole in wax, folded right down on its
+ * A waxed that has been beaten, as in a fight: sealed whole in wax, every limb, the body and the head coated, folded right down on its
  * knees, hunched over itself, hugging itself.
  */
 export function drawDeadWaxed(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
-  const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
-  const foot = 0.36, wax = WAXED_LOOK.wax!;
-  g.lineCap = "round"; g.lineJoin = "round";
-  g.fillStyle = COLORS.shadow;
-  g.beginPath(); g.ellipse(X(0), Y(foot), 0.36 * T, 0.08 * T, 0, 0, Math.PI * 2); g.fill();
-  // The bound legs behind it, the folded body over them, the head bowed to its knees.
-  g.strokeStyle = wax; g.lineWidth = Math.max(3, 0.13 * T);
-  g.beginPath(); g.moveTo(X(-0.05), Y(foot - 0.06)); g.lineTo(X(-0.34), Y(foot - 0.03)); g.stroke();
-  g.fillStyle = wax;
-  g.beginPath(); g.ellipse(X(0.03), Y(foot - 0.13), 0.22 * T, 0.14 * T, -0.15, 0, Math.PI * 2); g.fill();
-  g.beginPath(); g.ellipse(X(0.2), Y(foot - 0.12), 0.1 * T, 0.09 * T, 0, 0, Math.PI * 2); g.fill();
-  g.strokeStyle = "rgba(0,0,0,0.35)"; g.lineWidth = 1; g.stroke();
-  // The arms wrapped round itself.
-  g.strokeStyle = WAXED_LOOK.ink; g.lineWidth = Math.max(2, 0.05 * T);
-  g.beginPath(); g.moveTo(X(-0.1), Y(foot - 0.2)); g.quadraticCurveTo(X(0.08), Y(foot - 0.26), X(0.16), Y(foot - 0.12)); g.stroke();
+  paintSealed(g, x, y, T, 0, 0);
 }
 
 /**
@@ -592,14 +593,14 @@ export function drawPickup(g: CanvasRenderingContext2D, x: number, y: number, T:
   // Its light: warm and faint, or (eternal) light blue, wider and stronger, pulsing.
   const reach = (eternal ? 0.62 + 0.12 * pulse : 0.3) * T;
   const halo = g.createRadialGradient(X(cx), Y(cy), 0, X(cx), Y(cy), reach);
-  halo.addColorStop(0, eternal ? `rgb(190 228 255 / ${0.5 + 0.3 * pulse})` : `rgb(255 250 235 / ${0.22 + 0.08 * pulse})`);
-  halo.addColorStop(1, eternal ? "rgb(190 228 255 / 0)" : "rgb(255 250 235 / 0)");
+  halo.addColorStop(0, eternal ? `rgb(150 205 255 / ${0.5 + 0.3 * pulse})` : `rgb(255 255 255 / ${0.22 + 0.08 * pulse})`);
+  halo.addColorStop(1, eternal ? "rgb(150 205 255 / 0)" : "rgb(255 255 255 / 0)");
   g.fillStyle = halo;
   g.beginPath(); g.arc(X(cx), Y(cy), reach, 0, Math.PI * 2); g.fill();
   // Its shadow, then the ball.
   g.fillStyle = COLORS.shadow;
   g.beginPath(); g.ellipse(X(cx), Y(foot), r * 1.3 * T, r * 0.45 * T, 0, 0, Math.PI * 2); g.fill();
-  g.fillStyle = eternal ? "#eef8ff" : "#f2efe4";
+  g.fillStyle = eternal ? "#c9e4ff" : "#ffffff";
   g.beginPath(); g.arc(X(cx), Y(cy), r * T, 0, Math.PI * 2); g.fill();
   // The yarn wound round it, every which way.
   g.save();
@@ -612,24 +613,23 @@ export function drawPickup(g: CanvasRenderingContext2D, x: number, y: number, T:
 
 /**
  * A faint string winding round a figure standing at (x, y) (the point `drawWalker` takes), `k` times its size: the String it holds
- * (what you lost when it killed you). Two strands of a helix, slowly turning.
+ * (what you lost when it killed you). A single string, coiling slowly round it.
  */
 export function drawStringAura(g: CanvasRenderingContext2D, x: number, y: number, T: number, k: number, t: number) {
   g.save();
   g.lineCap = "round";
+  g.lineJoin = "round";
   g.lineWidth = Math.max(1, 0.022 * T);
-  g.strokeStyle = "rgba(244, 241, 230, 0.45)";
-  g.shadowColor = "rgba(255, 250, 235, 0.6)";
+  g.strokeStyle = "rgba(255, 255, 255, 0.45)";
+  g.shadowColor = "rgba(255, 255, 255, 0.6)";
   g.shadowBlur = 4;
-  for (let strand = 0; strand < 2; strand++) {
-    g.beginPath();
-    for (let i = 0; i <= 40; i++) {
-      const u = i / 40, a = u * Math.PI * 5 + t / 700 + strand * Math.PI;
-      const px = x + Math.sin(a) * 0.34 * T * k, py = y + (0.36 - u * 0.82 * k) * T + Math.cos(a) * 0.05 * T * k;
-      if (i) g.lineTo(px, py); else g.moveTo(px, py);
-    }
-    g.stroke();
+  g.beginPath();
+  for (let i = 0; i <= 56; i++) {
+    const u = i / 56, a = u * Math.PI * 4 + t / 2600;
+    const px = x + Math.sin(a) * 0.34 * T * k, py = y + (0.36 - u * 0.82 * k) * T + Math.cos(a) * 0.05 * T * k;
+    if (i) g.lineTo(px, py); else g.moveTo(px, py);
   }
+  g.stroke();
   g.restore();
 }
 
@@ -640,13 +640,13 @@ export function drawStringPile(g: CanvasRenderingContext2D, x: number, y: number
   const pulse = 0.5 + 0.5 * Math.sin(t / 600);
   const reach = (0.55 + 0.1 * pulse) * T;
   const halo = g.createRadialGradient(X(0), Y(cy), 0, X(0), Y(cy), reach);
-  halo.addColorStop(0, eternal ? `rgb(190 228 255 / ${0.5 + 0.3 * pulse})` : `rgb(255 250 235 / ${0.45 + 0.25 * pulse})`);
-  halo.addColorStop(1, eternal ? "rgb(190 228 255 / 0)" : "rgb(255 250 235 / 0)");
+  halo.addColorStop(0, eternal ? `rgb(150 205 255 / ${0.5 + 0.3 * pulse})` : `rgb(255 255 255 / ${0.45 + 0.25 * pulse})`);
+  halo.addColorStop(1, eternal ? "rgb(150 205 255 / 0)" : "rgb(255 255 255 / 0)");
   g.fillStyle = halo;
   g.beginPath(); g.arc(X(0), Y(cy), reach, 0, Math.PI * 2); g.fill();
   g.fillStyle = COLORS.shadow;
   g.beginPath(); g.ellipse(X(0), Y(foot), r * 1.5 * T, r * 0.5 * T, 0, 0, Math.PI * 2); g.fill();
-  g.fillStyle = eternal ? "#eef8ff" : "#f6f2e4";
+  g.fillStyle = eternal ? "#c9e4ff" : "#ffffff";
   g.beginPath(); g.arc(X(0), Y(cy), r * T, 0, Math.PI * 2); g.fill();
   g.save();
   g.beginPath(); g.arc(X(0), Y(cy), r * T, 0, Math.PI * 2); g.clip();
@@ -654,6 +654,20 @@ export function drawStringPile(g: CanvasRenderingContext2D, x: number, y: number
   for (const k of [-0.55, -0.15, 0.25, 0.6]) { g.beginPath(); g.ellipse(X(0), Y(cy + k * r), r * T, r * 0.55 * T, 0, 0, Math.PI * 2); g.stroke(); }
   for (const k of [-0.45, 0.45]) { g.beginPath(); g.ellipse(X(k * r), Y(cy), r * 0.5 * T, r * T, 0, 0, Math.PI * 2); g.stroke(); }
   g.restore();
+  // A single string winds slowly round the yarn (the String you lost; the eternal lumps enemies leave have none).
+  if (!eternal) {
+    g.save();
+    g.strokeStyle = "rgba(255, 255, 255, 0.5)"; g.lineWidth = Math.max(1, 0.012 * T); g.lineCap = "round"; g.lineJoin = "round";
+    g.shadowColor = "rgba(255, 255, 255, 0.6)"; g.shadowBlur = 3;
+    g.beginPath();
+    for (let i = 0; i <= 48; i++) {
+      const u = i / 48, a = u * Math.PI * 4 + t / 2200;
+      const px = X(Math.sin(a) * r * 1.9), py = Y(cy + r * (1.35 - u * 3) + Math.cos(a) * r * 0.35);
+      if (i) g.lineTo(px, py); else g.moveTo(px, py);
+    }
+    g.stroke();
+    g.restore();
+  }
   // The loose ends, curling on the floor.
   g.strokeStyle = eternal ? "#d6ecfb" : "#ece7d4"; g.lineWidth = Math.max(1, 0.014 * T); g.lineCap = "round";
   g.beginPath(); g.moveTo(X(0.07), Y(foot - 0.03)); g.bezierCurveTo(X(0.2), Y(foot + 0.01), X(0.26), Y(foot - 0.04), X(0.32), Y(foot + 0.01)); g.stroke();

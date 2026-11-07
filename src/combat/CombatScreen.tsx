@@ -23,12 +23,15 @@ import { actionPose, asPose, downPoseOf, flinchPoseOf, handOffOf, idlePoseOf, im
 import { Scene, type SceneFigure } from "../render/Scene";
 import { StringFx, type StringBurst } from "../render/StringFx";
 import type { StringPop } from "../render/StringCounter";
-import { type Dir, useKeys, wrapIndex } from "../ui/input";
+import { type Dir, menuSound, useKeys, wrapIndex } from "../ui/input";
 import { type MenuOption, PauseMenu } from "../ui/Menu";
 import { IGNITE } from "../warden/scenes";
 import type { CandleArm, WardenPoseName } from "../warden/skeleton";
 
 const barValues =(f: { hp: number; fatigue: number; death: number }): BarValues => ({ hp: f.hp, fatigue: f.fatigue, death: f.death });
+
+/** How many strings a boss's String bursts into. */
+const BOSS_STRINGS = 12;
 
 /** How an enemy's look draws it differently (its kind's variant). */
 const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
@@ -121,15 +124,27 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   // String: lots on their way to you from the fallen, what has landed so far (the counter), the "+X" pops under it, who has paid, and the total earned.
   const [bursts, setBursts] = useState<StringBurst[]>([]);
   const [landed, setLanded] = useState(0);
+  /** How many lots have reached you (a won fight ends once they all have). */
+  const [landedLots, setLandedLots] = useState(0);
   const [pops, setPops] = useState<StringPop[]>([]);
   const paid = useRef(new Set<string>());
   const earned = useRef(0);
   const burstIds = useRef(0);
+  /** The revive knot's red string: sent from the numeral once you lie down, and wound round you (then you rise). */
+  const reviveSent = useRef(false);
+  const [reviveCoiled, setReviveCoiled] = useState(false);
   /** A lot of String reaches you: the counter goes up, and "+X" pops up under it. */
+  const popTimers = useRef(new Map<number, number>());
   const stringLanded = (b: StringBurst) => {
+    // (The revive knot's string carries no String: when it has wound round your remains, you rise.)
+    if (b.revive) { setLandedLots(n => n + 1); setReviveCoiled(true); return; }
     setLanded(n => n + b.amount);
-    setPops(p => [...p, { id: b.id, amount: b.amount }]);
-    window.setTimeout(() => setPops(p => p.filter(x => x.id !== b.id)), 1800);
+    setLandedLots(n => n + 1);
+    // (The many strings of a boss add up in one "+X" pop.)
+    const id = b.group ?? b.id;
+    setPops(p => (p.some(x => x.id === id) ? p.map(x => (x.id === id ? { ...x, amount: x.amount + b.amount } : x)) : [...p, { id, amount: b.amount }]));
+    window.clearTimeout(popTimers.current.get(id));
+    popTimers.current.set(id, window.setTimeout(() => setPops(p => p.filter(x => x.id !== id)), 1800));
   };
   const written = typed.beat === beat ? typed.n : 0;
   const setWritten = (n: number | ((w: number) => number)) => setTyped(t => ({ beat, n: typeof n === "number" ? n : n(t.beat === beat ? t.n : 0) }));
@@ -490,7 +505,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    * steps to the line closer to you, and D at the right end steps to the line behind. */
   const moveCursor = (dir: Dir) => {
     const to = moveSelection(rows, sel, dir);
-    if (to) setSelection(to);
+    if (to) { menuSound(dir); setSelection(to); }
   };
 
   const openWheel = (s: Selection = sel) => {
@@ -563,7 +578,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   // The screen only changes at the scene's few moments (the dark falls, he stands, it flares), so
   // it only updates then; at the end, the step itself plays.
   const igniteStart = igniteState?.start;
-  // The music. The Warden's has two halves: the second starts, with no fade in and a moment of silence, as the phase-two scene begins.
+  // The music. The Warden's has two halves: the second starts, after a moment of silence, fading in over a second, as the phase-two scene begins.
   const [phaseTwoMusic, setPhaseTwoMusic] = useState(() => initial.enemies.some(e => e.flags.phase2));
   useEffect(() => { if (igniteStart !== undefined) setPhaseTwoMusic(true); }, [igniteStart]);
   // (Back in phase one, as the model viewer can put him, the first half plays again.)
@@ -650,9 +665,23 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const playForced = useEffectEvent(() => play({ type: "rest" }));
   useEffect(() => {
     if (!playing || !forced || busy || paused) return;
+    // A revive waits for the red string: it comes out of the numeral, winds round your remains, and only then do you rise.
+    if (fight.player.reviving && !lesson) {
+      if (reviveCoiled) {
+        const rise = window.setTimeout(() => { reviveSent.current = false; setReviveCoiled(false); playForced(); }, 250);
+        return () => window.clearTimeout(rise);
+      }
+      if (reviveSent.current) return;
+      const send = window.setTimeout(() => {
+        reviveSent.current = true;
+        setBursts(b => [...b, { id: ++burstIds.current, from: ".revive-count", amount: 0, revive: true }]);
+        playSfx("string");
+      }, FORCED_TURN_MS);
+      return () => window.clearTimeout(send);
+    }
     const timer = window.setTimeout(playForced, FORCED_TURN_MS);
     return () => window.clearTimeout(timer);
-  }, [playing, forced, busy, paused]);
+  }, [playing, forced, busy, paused, fight.player.reviving, reviveCoiled]);
 
   const skipBattle = () => {
     setPaused(false);
@@ -678,6 +707,22 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     const defeat = fight.status === "lost" ? fight.lastTurn.flatMap(st => st.events).find(ev => ev.kind === "defeat") : undefined;
     onDone?.(fight.status === "won", fight.player.charges, fight.player.eternity, { earned: earned.current, killedBy: defeat?.kind === "defeat" ? defeat.by : undefined });
   };
+  // A won fight on the map ends by itself: once the last String has wound round you (or, with none coming, after a moment), the scene fades out.
+  // (E skips the wait.)
+  const finished = useRef(false);
+  const finishOnce = () => { if (finished.current) return; finished.current = true; finish(); };
+  const finishRef = useRef(finishOnce);
+  finishRef.current = finishOnce;
+  const [fading, setFading] = useState(false);
+  const leavesAlone = fight.status === "won" && !!onDone;
+  const settled = leavesAlone && !busy && !waking && !paused;
+  useEffect(() => {
+    if (!settled || bursts.length > landedLots) return; // (the last String is still on its way)
+    const wait = bursts.length ? 250 : 1000;
+    const t1 = window.setTimeout(() => setFading(true), wait);
+    const t2 = window.setTimeout(() => finishRef.current(), wait + 900);
+    return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
+  }, [settled, bursts.length, landedLots]);
 
   /* ---------- the lesson's gate ---------- */
   const goalTarget: Selection | undefined = current?.goal
@@ -728,6 +773,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   useKeys(key => {
     // Escape pauses at any time; the pause menu takes all input until it closes.
     if (paused) {
+      menuSound(key);
       if (key === "pause" || key === "back") setPaused(false);
       else if (key === "up" || key === "down") setPauseIndex(i => wrapIndex(i, key === "up" ? -1 : 1, pauseOptions.length));
       else if (key === "select") pauseOptions[pauseIndex].run();
@@ -740,7 +786,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     }
     if (busy || waking) return; // input waits for the turn to finish playing (or for the guide to arrive)
     if (!playing) {
-      if (onDone) { if (key === "select" || key === "back" || key === "pause") finish(); }
+      if (onDone) { if (key === "select" || key === "back" || key === "pause") { menuSound(key); finishOnce(); } }
       else if (key === "select") onRetry();
       else if (key === "back" || key === "pause") onExit();
       return;
@@ -756,13 +802,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       if (!lessonStand || !lessonAllows(current.goal, key, lessonStand)) return;
     }
     if (!wheelOpen) {
-      if (key === "select") openWheel(sel);
+      if (key === "select") { menuSound(key); openWheel(sel); }
       else if (key !== "back" && key !== "pause") moveCursor(key);
       return;
     }
     if (key === "back") closeWheel();
-    else if (key === "select") commit(chosen);
-    else if (key !== "pause" && wheel[key]) setHighlight(key);
+    else if (key === "select") { if (chosen) menuSound(key); commit(chosen); }
+    else if (key !== "pause" && wheel[key]) { if (key !== highlight) menuSound(key); setHighlight(key); }
   });
 
   /* ---------- what the screen shows ---------- */
@@ -1166,16 +1212,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       view: playerAngle?.view ?? "back",
       straight: playerAngle?.straight,
       sides: playerAngle?.sides,
-      // Staggered while Waxed, you're sealed like the waxed: kneeling, shins bound, head in wax,
-      // your flame burning on it (until it's taken).
-      // Staggered while Waxed (or with your flame taken), you're sealed whole in wax, and stay
-      // that way until you recover: no other look in between.
-      pose: track("player", playerSealed ? "w-idle" : playerPose),
+      // Staggered while Waxed (or with your flame taken), you are sealed whole in wax, and stay that way until you recover:
+      // your own stagger pose (down on one knee), the wax over all of it. No flame burns on your head, except while the Warden
+      // is about to take it (his Usurp Flame scene lights it itself).
+      pose: track("player", playerPose),
       dead: youDead ? "pieces" : undefined,
-      variant: playerSealed ? "waxed" : undefined,
-      // Sealed, your own flame burns on your head (phase two's scene draws on it too).
-      flame: playerSealed,
-      candle: p.waxed && p.staggered && !(usurpNow?.target === "player" && usurpStage === "reveal"),
       encased: playerSealed,
       // Waxed (or waxed by a torch, which is only a look) but still standing: wax caked on you.
       waxCaked: (p.waxed || !!p.coated) && !p.staggered,
@@ -1236,10 +1277,12 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         // His second form: the wax he leaves is burnt black.
         charred: !!e.flags.phase2,
         // The fallen waxed burn as candles once the arena is lit (not the sealed ones); the lit ones, alive, carry theirs on their heads.
-        candle: !!kindOf(e).remains && candlesLit && (e.alive ? !looksDead(e) : e.fate !== "encased"),
+        // (And in the Warden's fight, a waxed that is staggered shows its flame on its head, for him to take; his scene lights it itself.)
+        candle: (!!kindOf(e).remains && candlesLit && (e.alive ? !looksDead(e) : e.fate !== "encased")) || (warden && !!kindOf(e).flame && e.alive && e.staggered && !(usurpNow?.target === e.id)),
         // Its flame taken, or fallen (the waxed): sealed whole in wax.
         // (The parts of a Wax Blob are sealed whole in wax, always.)
-        encased: (!e.alive && e.fate === "encased") || (looksDead(e) && kindOf(e).deathLook === "wax") || !!e.body,
+        // (And the waxed he has raised in phase two: lit, with a flame on their heads, and sealed whole in wax all the same.)
+        encased: (!e.alive && e.fate === "encased") || (looksDead(e) && kindOf(e).deathLook === "wax") || !!e.body || (e.alive && !!kindOf(e).flame && !!shownFlags(e).lit),
         stepKey,
         selected: !busy && sel.kind === "enemy" && sel.id === e.id && e.alive && !looksDead(e),
         disabled: busy || !playing || forced !== null || !e.alive || looksDead(e),
@@ -1269,12 +1312,28 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       const fallen = final.some(x => x.fate === "fallen");
       const held = final.reduce((sum, x) => sum + (x.holds ?? 0), 0);
       if (!fallen && !(final.some(x => x.fate === "encased") && held > 0)) continue;
-      const amount = (fallen ? e.maxHP : 0) + held;
+      const yieldOf = Math.max(...parts.map(x => kindOf(x).stringYield ?? 1));
+      const amount = (fallen ? e.maxHP * yieldOf : 0) + held;
       paid.current.add(key);
       earned.current += amount;
-      fresh.push({ id: ++burstIds.current, from: parts.find(x => x.part === "mid")?.id ?? e.id, amount });
+      const from = parts.find(x => x.part === "mid")?.id ?? e.id;
+      if (yieldOf > 1 && amount > 0) {
+        // A boss's String bursts out as many strings, one after another, and all of it comes in.
+        const group = ++burstIds.current, n = BOSS_STRINGS;
+        for (let i = 0; i < n; i++) {
+          const part = Math.floor(amount / n) + (i < amount % n ? 1 : 0);
+          fresh.push({ id: ++burstIds.current, from, amount: part, epic: true, group, delay: i * 55 + Math.random() * 120 });
+        }
+      } else {
+        fresh.push({ id: ++burstIds.current, from, amount });
+      }
     }
-    if (fresh.length) setBursts(b => [...b, ...fresh]);
+    if (fresh.length) {
+      setBursts(b => [...b, ...fresh]);
+      // Each string sets out with a breath of sound. A boss's burst is one long swell of breath and hum, with a note ringing out for each string.
+      if (fresh.some(b => b.epic)) playSfx("stringBoss");
+      for (const b of fresh) playSfx(b.epic ? "stringBossNote" : "string", (b.delay ?? 0) / 1000);
+    }
   });
 
   // A flame just put out (lit → out) leaves a puff of smoke.
@@ -1330,14 +1389,16 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           highlight={highlight}
           center={wheelCenter}
           anchor={anchor}
-          onHighlight={d => { if (!lesson) setHighlight(d); }}
-          onCommit={commit}
+          onHighlight={d => { if (!lesson) { if (d !== highlight) menuSound(d); setHighlight(d); } }}
+          onCommit={o => { menuSound("select"); commit(o); }}
         />
       )}
 
       {paused && <PauseMenu options={pauseOptions} focus={pauseIndex} onFocus={setPauseIndex} />}
 
-      {!playing && !busy && (
+      {fading && <div className="combat-fadeout" aria-hidden="true" />}
+
+      {!playing && !busy && !leavesAlone && (
         <div className="result" role="dialog" aria-label="Fight over">
           <div className="result-card">
             <h2>
@@ -1346,7 +1407,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
             </h2>
             {onDone ? (
               <div className="setup-buttons">
-                <button className="commit" onClick={finish}>{fight.status === "won" ? "Continue" : "Wake again"}</button>
+                <button className="commit" onClick={finishOnce}>{fight.status === "won" ? "Continue" : "Wake again"}</button>
               </div>
             ) : (
               <div className="setup-buttons">

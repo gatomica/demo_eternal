@@ -22,27 +22,29 @@
 import { useEffect, useRef, useState } from "react";
 import { canEmpower, empowerCost, payment, START_STATS, type Stats } from "./empower";
 import type { Player } from "../core/types";
-import { dirOf, wrapIndex } from "../ui/input";
+import { dirOf, menuSound, wrapIndex } from "../ui/input";
 import { type MenuOption, PauseMenu } from "../ui/Menu";
 import { Dialogue } from "./Dialogue";
-import { drawBlobTop, drawPickup, drawKeeper, drawStringAura, drawStringPile, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
-import { YarnBall } from "../render/StringCounter";
-import { equippedSide, equipSide, gearName, type GearSpec, hasMemories, type Inventory as Bag, loadoutOf, readDreams, receive, setEternal, SLOTS, type Slot, unequip } from "./gear";
+import { drawBlobTop, drawPickup, drawKeeper, drawRemains, drawStringAura, drawStringPile, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
+import { StringCounter } from "../render/StringCounter";
+import { equippedSide, equipSide, gearName, type GearSpec, hasMemories, type Inventory as Bag, loadoutOf, pieceAt, readDreams, receive, setEternal, SLOTS, type Slot, unequip } from "./gear";
 import { GearSprite } from "./GearIcons";
 import { GuideMenu } from "./GuideMenu";
 import { type InvFocus, InventoryScreen, type Place } from "./InventoryScreen";
 import { type GroundItem, PICKUP_REACH, PICKUPS } from "./pickups";
-import { ALERT_RADIUS, CHASE_MEMORY, HOWL_RADIUS, ladderPlan, type Corpse, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, GRACE_MS, inFightArea, livingDef, MAP_DECOR, MAP_FOES, type MapFoe, MAX_IN_FIGHT, memberKey, nodeAt, spotsOf, stepsToNode, TOUCH, wakeEnemies, waypoint3, withCorpses } from "./foes";
+import { ALERT_RADIUS, CHASE_MEMORY, HOWL_RADIUS, ladderPlan, type Corpse, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, GRACE_MS, inFightArea, livingDef, MAP_FOES, type MapFoe, MAX_IN_FIGHT, memberKey, nodeAt, spotsOf, stepsToNode, TOUCH, wakeEnemies, waypoint3, withCorpses } from "./foes";
 import { playMusic } from "../audio/music";
+import { drawProp, propsOn } from "./props";
+import { play as playSfx } from "../audio/sfx";
 import { cry, drip, type Floor, prepareWalk, speak, step, type Stepper } from "../audio/walk";
 import { typeDelay } from "../combat/lesson";
 import { groundAt } from "./ground";
 import { FADE_FAR, FADE_NEAR, KEEPER_REACH, KEEPERS } from "./keepers";
-import { cornerNudge, slide, surfaceNear, type Walker } from "./movement";
+import { slide, surfaceNear, type Walker, walkStep } from "./movement";
 import { createMapRenderer, type Light } from "./render";
 import { sight } from "./sight";
 import { type After, CHAT, FIRST_FLOOR_KEEPER, GIFT, type Knot, knotCharges, type Talk, type TutorialState } from "./tutorial";
-import { ACCEL, BODY_ABOVE_FEET, CAMERA_FOLLOW, FALL_DEATH_ALT, GRAVITY, HALF_W, LADDER_SPEED, RISE, SPEED, STAIRS_SPEED, PLAYER_STRIDE, STEP_TOLERANCE, STRIDE, VISION_RADIUS } from "./tuning";
+import { ACCEL, BODY_ABOVE_FEET, CAMERA_FOLLOW, FALL_DEATH_ALT, FALL_FATAL, GRAVITY, HALF_W, LADDER_SPEED, RISE, SPEED, STAIRS_SPEED, PLAYER_STRIDE, STEP_TOLERANCE, STRIDE, VISION_RADIUS } from "./tuning";
 import { type Dir, LADDER, ladderSpan, LEVELS, STAIRS, WORLD } from "./world";
 
 /** How long what you picked up stays on screen, fading at the end. */
@@ -126,13 +128,20 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   const restedAt = useRef<string | undefined>(journey.rested);
   const nearRef = useRef<string | null>(null);
   const [near, setNear] = useState<string | null>(null);
-  // What you just picked up: its sprite and name pop up in a box where the "E Pick Up" prompt was, then fade.
-  const [got, setGot] = useState<{ gear?: GearSpec; string?: number; eternalString?: number; id: number } | null>(null);
+  // Eternal gear you just picked up: its sprite and name pop up in a box where the "E Pick Up" prompt was, then fade.
+  const [got, setGot] = useState<{ gear: GearSpec; id: number } | null>(null);
   useEffect(() => {
     if (!got) return;
     const t = window.setTimeout(() => setGot(cur => (cur?.id === got.id ? null : cur)), PICKED_UP_MS);
     return () => window.clearTimeout(t);
   }, [got]);
+  // String you just gathered: the counter shows at the top for a moment, with a "+X" below it.
+  const [stringHud, setStringHud] = useState<{ id: number; amount?: number; eternal?: number } | null>(null);
+  useEffect(() => {
+    if (!stringHud) return;
+    const t = window.setTimeout(() => setStringHud(cur => (cur?.id === stringHud.id ? null : cur)), PICKED_UP_MS + 400);
+    return () => window.clearTimeout(t);
+  }, [stringHud]);
   // The knot you carry, if you've been given it. Resting winds it tight again.
   const knotRef = useRef<Knot | undefined>(journey.knot);
   const [, setKnotState] = useState<Knot | undefined>(journey.knot);
@@ -203,12 +212,13 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
     }
     reachRef.current = reachRef.current.filter(x => x !== id);
     setInv(inventory);
-    setGot({ gear: item.gear, id: Date.now() });
+    // (Only eternal gear is announced: an ordinary piece goes to its place, and the inventory shows it.)
+    if (item.gear.eternal) setGot({ gear: item.gear, id: Date.now() });
     latest.current.onSave(snapshot.current());
   };
   /**
    * E by gear on the floor: a memory (eternal) is picked up at once; anything you could wield opens the
-   * inventory on that slot's ground place, to take it into your ordinary place (or swap it for what is there).
+   * inventory on that slot's ground place, to swap it for what is in your ordinary place (an empty one takes it at once, and the inventory opens on it).
    */
   const pickUp = () => {
     const item = floorItems().find(x => x.id === nearPickupRef.current);
@@ -218,7 +228,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       // Eternal string: gathered at once, into the eternal counter.
       lift(item.id);
       eternalRef.current += item.eternalString;
-      setGot({ eternalString: item.eternalString, id: Date.now() });
+      setStringHud({ id: Date.now(), eternal: item.eternalString });
       latest.current.onSave(snapshot.current());
       return;
     }
@@ -226,13 +236,20 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       // A pile of String: gathered at once.
       lift(item.id);
       stringRef.current += item.string;
-      setGot({ string: item.string, id: Date.now() });
+      setStringHud({ id: Date.now(), amount: item.string });
       latest.current.onSave(snapshot.current());
       return;
     }
     if (!item.gear) return;
     if (item.gear.eternal) { takeFromGround(item.id); return; }
-    setScreen({ kind: "inventory", start: { row: Math.max(0, SLOTS.indexOf(item.gear.slot)), place: "ground" } });
+    const row = Math.max(0, SLOTS.indexOf(item.gear.slot));
+    // An empty ordinary place takes it at once (not wielded); the inventory opens on it, to wield it with E.
+    if (!pieceAt(invRef.current, item.gear.slot, "normal")) {
+      takeFromGround(item.id);
+      setScreen({ kind: "inventory", start: { row, place: "normal" } });
+      return;
+    }
+    setScreen({ kind: "inventory", start: { row, place: "ground" } });
   };
   /** E on a place of the inventory: wield it (or unequip it, if you already wield it), or take what lies on the ground. */
   const useInventory = (slot: Slot, place: Place) => {
@@ -273,6 +290,10 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   };
   const reawakenRef = useRef(reawaken);
   reawakenRef.current = reawaken;
+  // A fall of FALL_FATAL storeys or more is the end of you: the camera stays where it was, the death card comes up, and your body goes on falling
+  // (to lie there as remains, if it reaches the ground). E on the card wakes you as after any death.
+  const [doomed, setDoomed] = useState(false);
+  const doomedRef = useRef(false);
   const rest = () => {
     const id = nearRef.current;
     if (!id) return;
@@ -280,6 +301,9 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
     held.current = [];
     leaving.current = true;
     setSleeping(true);
+    // The sleep begins with a long sigh and a wisp of String, together.
+    playSfx("rest");
+    playSfx("string");
     sleepTimers.current = [
       // In the dark: your candle moves here, and the knot, if slack, winds itself tight.
       window.setTimeout(() => {
@@ -369,6 +393,10 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (doomedRef.current) {
+      if (!e.repeat && ["e", "enter", " "].includes(e.key.toLowerCase())) { e.preventDefault(); menuSound("select"); reawakenRef.current(); }
+      return;
+    }
     if (leaving.current) return;
     const key = e.key.toLowerCase();
     // The inventory and the guide's menu read their own keys.
@@ -383,6 +411,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       e.preventDefault();
       if (e.repeat) return;
       const options = pauseOptions();
+      if (dir === "up" || dir === "down") menuSound(dir);
+      else if (key === "e" || key === "enter" || key === " ") menuSound("select");
       if (dir === "up" || dir === "down") setPauseAt(i => wrapIndex(i, dir === "up" ? -1 : 1, options.length));
       else if (key === "e" || key === "enter" || key === " ") options[pauseAt]?.run();
       else if (key === "q") setScreen(null);
@@ -519,6 +549,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
 
     // The stride you last put a foot down on, and the time to the next drip of wax.
     let lastStride = 0, dripIn = 4;
+    // Where the fall you are in began, and whether the body of one who fell to death has reached the ground.
+    let fallStart: number | null = null, bodyDown = false;
 
     const update = (dtMs: number) => {
       const dt = dtMs / 1000;
@@ -554,28 +586,9 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         me.alt = Math.min(span!.top, Math.max(span!.bottom, me.alt - iy * SPEED * LADDER_SPEED * dt));
         me.ground = me.alt;
       } else {
-      // Ease toward the target velocity (diagonals are as fast as straight lines, not faster).
-      const len = Math.hypot(ix, iy) || 1;
+      // Walk (diagonals are as fast as straight lines, not faster): sliding along walls, and gliding along the diagonal ones.
       const onStairs = surfaceNear(Math.floor(me.x), Math.floor(me.y), me.x, me.y, me.alt)?.t === STAIRS;
-      const top = SPEED * (onStairs ? STAIRS_SPEED : 1);
-      const k = 1 - Math.exp(-ACCEL * dt);
-      me.vx += ((ix / len) * top - me.vx) * k;
-      me.vy += ((iy / len) * top - me.vy) * k;
-      if (!ix && Math.abs(me.vx) < 0.01) me.vx = 0;
-      if (!iy && Math.abs(me.vy) < 0.01) me.vy = 0;
-
-      // Move one axis at a time, so you slide along walls instead of sticking to them.
-      const wantX = me.vx * dt, wantY = me.vy * dt;
-      me.x = slide(me, "x", wantX);
-      if (Math.abs(me.x - startX) < Math.abs(wantX) * 0.5) {
-        me.vx = 0;
-        if (ix && !iy) me.y = slide(me, "y", cornerNudge(me, "x", ix, top * dt));
-      }
-      me.y = slide(me, "y", wantY);
-      if (Math.abs(me.y - startY) < Math.abs(wantY) * 0.5) {
-        me.vy = 0;
-        if (iy && !ix) me.x = slide(me, "x", cornerNudge(me, "y", iy, top * dt));
-      }
+      walkStep(me, ix, iy, dt, SPEED * (onStairs ? STAIRS_SPEED : 1));
 
       // Your height follows whatever you're standing on: this is what carries you up and down.
       // Small differences (stairs, ladders) you simply step across; anything bigger, you fall.
@@ -586,10 +599,18 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         if (me.fall === 0 && under.h >= me.alt - STEP_TOLERANCE) {
           me.alt = under.h;
         } else {
+          if (me.fall === 0) fallStart = me.alt;
           me.fall += GRAVITY * dt;
           me.alt -= me.fall * dt;
           if (me.alt <= under.h) { me.alt = under.h; me.fall = 0; }
+          if (fallStart !== null && fallStart - me.alt >= FALL_FATAL && !doomedRef.current) {
+            // Too far to live: from here the map stands still, and only the body falls (see `fallOn`).
+            doomedRef.current = true;
+            held.current = [];
+            setDoomed(true);
+          }
         }
+        if (me.fall === 0) fallStart = null;
         me.ground = under.h;
         if (me.alt <= FALL_DEATH_ALT + 1e-3) reawakenRef.current();
       }
@@ -840,7 +861,9 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       // Close enough: the fight begins, and everyone else chasing you piles in.
       // (The boss never chases or touches: the fight starts when you step onto its arena.)
       const zone = f.def.trigger;
-      const triggered = !!zone && Math.abs(me.alt - zone.z) < 0.4 && me.x >= zone.x0 && me.x <= zone.x1 && me.y >= zone.y0 && me.y <= zone.y1;
+      // (A trigger may leave out its corner tiles: standing in one does not start it, stepping beyond it does.)
+      const inCorner = !!zone?.cut && (me.x < zone.x0 + zone.cut || me.x > zone.x1 - zone.cut) && (me.y < zone.y0 + zone.cut || me.y > zone.y1 - zone.cut);
+      const triggered = !!zone && Math.abs(me.alt - zone.z) < 0.4 && me.x >= zone.x0 && me.x <= zone.x1 && me.y >= zone.y0 && me.y <= zone.y1 && !inCorner;
       if (grace <= 0 && !leaving.current && (triggered || (!zone && sameLevel && dist < TOUCH + (f.half ? f.half - HALF_W : 0) && inFightArea(f, me)))) {
         leaving.current = true;
         held.current = [];
@@ -913,8 +936,10 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
               }
               continue;
             }
+            // (The boss's group, spread over his arena, stands looking toward its middle, where he is.)
+            const facing: Dir = f.def.spread && (dx !== 0 || dy !== 0) ? (Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? "right" : "left") : dy < 0 ? "down" : "up") : f.facing;
             if (!f.def.girth) {
-              MAP_FIGURES[kind](c, px, py, T, f.facing, frame, howl);
+              MAP_FIGURES[kind](c, px, py, T, facing, frame, howl);
               // (Holding String you lost: a faint string winds round it.)
               if (holdsRef.current[key]) drawStringAura(c, px, py, T, 1, performance.now());
               continue;
@@ -940,16 +965,10 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         if (Math.round(c.alt) !== z || !test(c.y) || !onScreen(c.x, c.y, c.alt)) continue;
         list.push({ x: c.x, y: c.y, draw: () => MAP_REMAINS[c.kind](ctx, ox + c.x * T, oy + (c.y - c.alt * RISE - BODY_ABOVE_FEET) * T, T) });
       }
-      // The people sealed in wax, lying where they were left.
-      for (const d of MAP_DECOR) {
-        if (d.at.z !== z || !test(d.at.y) || !onScreen(d.at.x, d.at.y)) continue;
-        list.push({ x: d.at.x, y: d.at.y, layer: true, draw: c => {
-          const px = ox + d.at.x * T, py = oy + (d.at.y - z * RISE - BODY_ABOVE_FEET) * T;
-          c.save();
-          if (d.flip) { c.translate(px, 0); c.scale(-1, 1); c.translate(-px, 0); }
-          MAP_REMAINS[d.kind](c, px, py, T);
-          c.restore();
-        } });
+      // The map's props (people sealed in wax): features, not creatures; each one picture, drawn in its row like everything else.
+      for (const d of propsOn(z)) {
+        if (!test(d.y) || !onScreen(d.x, d.y)) continue;
+        list.push({ x: d.x, y: d.y, draw: () => drawProp(ctx, d, ox, oy, T) });
       }
       for (const k of KEEPERS) {
         const at = k.at;
@@ -997,7 +1016,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       for (const f of foes) if (Math.round(f.alt) === z && near(f.y)) rows.add(Math.floor(f.y));
       for (const p of floorItems()) if (Math.round(p.at.z) === z && near(p.at.y)) rows.add(Math.floor(p.at.y));
       for (const c of Object.values(corpsesRef.current)) if (Math.round(c.alt) === z && near(c.y)) rows.add(Math.floor(c.y));
-      for (const d of MAP_DECOR) if (d.at.z === z && near(d.at.y)) rows.add(Math.floor(d.at.y));
+      for (const d of propsOn(z)) if (near(d.y)) rows.add(Math.floor(d.y));
       for (const k of KEEPERS) if (Math.round(k.at.z) === z && near(k.at.y)) rows.add(Math.floor(k.at.y));
       return [...rows];
     };
@@ -1007,7 +1026,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       foes.some(f => Math.round(f.alt) === z) ||
       floorItems().some(p => Math.round(p.at.z) === z) ||
       Object.values(corpsesRef.current).some(c => Math.round(c.alt) === z) ||
-      MAP_DECOR.some(d => d.at.z === z) ||
+      propsOn(z).length > 0 ||
       KEEPERS.some(k => Math.round(k.at.z) === z && fade[k.id] >= 0.02);
 
     const draw = (dtMs: number) => {
@@ -1029,7 +1048,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         actors: drawFoes,
         actorsOn,
         actorRows,
-        player: { draw: (ctx, px, py, T, solid) => drawWalker(ctx, px, py, T, me.facing, frame, solid, solid ? (me.alt - me.ground) * RISE : 0, look) },
+        player: { draw: (ctx, px, py, T, solid) => (bodyDown ? drawRemains(ctx, px, py, T) : drawWalker(ctx, px, py, T, me.facing, frame, solid, solid ? (me.alt - me.ground) * RISE : 0, look)) },
       }, dtMs);
       if (disturbRef.current) drawDisturbance(disturbRef.current, performance.now());
     };
@@ -1090,12 +1109,29 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       }
     };
 
+    /** After a fatal fall begins: the camera and the map stay as they were, and the body falls on until it reaches the ground. */
+    const fallOn = (dtMs: number) => {
+      if (bodyDown) return;
+      const dt = dtMs / 1000;
+      const under = surfaceNear(Math.floor(me.x), Math.floor(me.y), me.x, me.y, me.alt) ?? { h: FALL_DEATH_ALT, t: 0 };
+      me.fall += GRAVITY * dt;
+      me.alt -= me.fall * dt;
+      me.ground = under.h;
+      if (me.alt <= under.h) {
+        me.alt = under.h;
+        me.fall = 0;
+        bodyDown = true;
+        if (me.alt > FALL_DEATH_ALT + 1) step("player", "land", 1, 0);
+      }
+    };
+
     let raf = 0;
     let last = performance.now();
     const tick = (now: number) => {
       const dt = Math.min(now - last, 100);
       last = now;
-      if (!pausedRef.current && !talkRef.current && !leaving.current) update(dt);
+      if (doomedRef.current) fallOn(dt);
+      else if (!pausedRef.current && !talkRef.current && !leaving.current) update(dt);
       draw(dt);
       raf = requestAnimationFrame(tick);
     };
@@ -1118,25 +1154,44 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       {nearPickup && !got && !paused && !entering && !talk && (
         <div className="explore-prompt"><kbd>E</kbd> Pick Up</div>
       )}
-      {/* What you just picked up, in the prompt's place: its sprite and its name, fading away. */}
+      {/* The eternal gear you just picked up, in the prompt's place: its sprite and its name, fading away. */}
       {got && !paused && (
         <div key={got.id} className="explore-prompt explore-got">
-          {got.gear ? <GearSprite slot={got.gear.slot} tier={got.gear.tier} item={got.gear.item} /> : <YarnBall className="string-ball" eternal={got.eternalString !== undefined} />}
-          <span>{got.gear ? gearName(got.gear) : got.eternalString !== undefined ? `+${got.eternalString} Eternal String` : `+${got.string} String`}</span>
+          <GearSprite slot={got.gear.slot} tier={got.gear.tier} item={got.gear.item} />
+          <span>{gearName(got.gear)}</span>
+        </div>
+      )}
+      {/* The String you just gathered: the counter at the top, with "+X" under it, fading away. */}
+      {stringHud && !paused && (
+        <div key={stringHud.id} className="explore-string">
+          <StringCounter
+            amount={stringRef.current} eternal={eternalRef.current}
+            pops={stringHud.amount !== undefined ? [{ id: stringHud.id, amount: stringHud.amount }] : []}
+            eternalPops={stringHud.eternal !== undefined ? [{ id: stringHud.id, amount: stringHud.eternal }] : []}
+          />
         </div>
       )}
       {near && !nearPickup && !paused && !entering && !talk && (
         <div className="explore-prompt"><kbd>E</kbd> Speak with the guide</div>
       )}
       {sleeping && <div className="explore-sleep" />}
+      {doomed && !sleeping && (
+        <div className="result is-fall" role="dialog" aria-label="You fell">
+          <div className="result-card">
+            <h2>You fade</h2>
+            <div className="setup-buttons"><button className="commit" onClick={() => reawakenRef.current()}>Wake again</button></div>
+          </div>
+        </div>
+      )}
       {talk && <Dialogue speaker="The guide" text={talk.lines[talk.at]} written={written} last={talk.at + 1 >= talk.lines.length} />}
       {entering && <div className="explore-fade" />}
       {screen?.kind === "inventory" && (
-        <InventoryScreen inv={inv} player={barsPlayer()} string={stringRef.current} eternalString={eternalRef.current} ground={groundNear()} start={screen.start} onUse={useInventory} onClose={() => setScreen(null)} />
+        <InventoryScreen inv={inv} player={barsPlayer()} string={stringRef.current} eternalString={eternalRef.current} knot={knotRef.current} ground={groundNear()} start={screen.start} onUse={useInventory} onClose={() => setScreen(null)} />
       )}
       {screen?.kind === "guide" && (
         <GuideMenu
           inv={inv}
+          player={barsPlayer()}
           unwindFirst={screen.unwindFirst}
           empowerFirst={screen.empowerFirst}
           empowerUnlocked={!!tutorialRef.current.empowered}

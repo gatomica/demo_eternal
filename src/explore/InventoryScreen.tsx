@@ -3,10 +3,10 @@
  * letterbox, your bars where they sit in a fight, your figure seen 3/4 from the front (wearing what
  * you wield, so a change shows at once), and beside it a column of slots.
  *
- * Each slot (weapon, armor; passive items would be more rows) is a row of places, picked with W/S
+ * Each slot (weapon, head, armor; passive items would be more rows) is a row of places, picked with W/S
  * and A/D: the eternal place on the left (only once a piece is set there at a safe spot), the ordinary
- * place, and, while gear of that slot lies within reach, the place "on the ground". A place shows only the
- * gear's sprite; the one under the cursor stretches to show its name and its weight. The place you
+ * place (empty, it shows only if nothing else is in the row), and, while gear of that slot lies within reach, the place "on the ground". A place shows only the
+ * gear's sprite; the one under the cursor is shown large in the middle, with its name, type, lore and effects. The place you
  * wield from is highlighted. E on a place: wields it, or unequips it if you already wield it; on the
  * ground place, takes what lies there (a swap with your ordinary piece, if you have one: that one is
  * left on the ground). The map screen does what E does (`onUse`).
@@ -14,10 +14,13 @@
 import { useState } from "react";
 import type { Player } from "../core/types";
 import { PlayerBars } from "../render/HealthBar";
+import { YarnBall } from "../render/StringCounter";
 import { StickFigure } from "../render/StickFigure";
-import { useKeys } from "../ui/input";
-import { equippedSide, type GearSpec, gearName, type Inventory as Bag, loadoutOf, pieceAt, type Slot, SLOTS, weightLabel } from "./gear";
+import { useKeys, menuSound } from "../ui/input";
+import { equippedSide, type GearSpec, gearName, type Inventory as Bag, loadoutOf, pieceAt, type Slot, SLOTS } from "./gear";
 import { GearIcon, GearSprite } from "./GearIcons";
+import { cardOfGear, ItemCard } from "./ItemCard";
+import type { Knot } from "./tutorial";
 
 /** The places of a row, left to right. */
 export type Place = "eternal" | "normal" | "ground";
@@ -29,13 +32,15 @@ export interface InvFocus {
 
 const SLOT_LABEL: Record<Slot, string> = { weapon: "Weapon", armor: "Armor", head: "Head" };
 
-export function InventoryScreen({ inv, player, string, eternalString, ground, start, onUse, onClose }: {
+export function InventoryScreen({ inv, player, string, eternalString, knot, ground, start, onUse, onClose }: {
   inv: Bag;
   /** You as your bars show you: full health between fights, your revives and your Eternity. */
   player: Player;
   /** Your String, and your eternal String. */
   string?: number;
   eternalString?: number;
+  /** The revive knot, once the guide has given it: shown at the bottom, after the slots. */
+  knot?: Knot;
   /** What lies within reach on the ground, for each slot (the nearest). */
   ground: Partial<Record<Slot, GearSpec>>;
   /** Where the cursor starts (on the ground place, when you opened it to pick something up). */
@@ -45,29 +50,39 @@ export function InventoryScreen({ inv, player, string, eternalString, ground, st
 }) {
   const [focus, setFocus] = useState<InvFocus>(start ?? { row: 0, place: equippedSide(inv, "weapon") ?? "normal" });
   // (The eternal place only shows once something is set there at a safe spot; the ground place while something lies within reach.)
-  const placesOf = (slot: Slot): Place[] => [
-    ...(pieceAt(inv, slot, "eternal") ? ["eternal" as const] : []),
-    "normal" as const,
-    ...(ground[slot] ? ["ground" as const] : []),
-  ];
-  // (The ground place goes when what lay there is taken: the cursor steps back onto the ordinary one.)
-  const row = Math.min(focus.row, SLOTS.length - 1);
-  const place = placesOf(SLOTS[row]).includes(focus.place) ? focus.place : "normal";
+  // (An empty ordinary place shows only when the slot has nothing else: no eternal piece set, nothing on the ground.)
+  /** The knot's row comes after the slots (when you have it), with one place. */
+  const rows = SLOTS.length + (knot ? 1 : 0);
+  const placesOf = (slot: Slot): Place[] => {
+    const eternal = !!pieceAt(inv, slot, "eternal"), lying = !!ground[slot];
+    return [
+      ...(eternal ? ["eternal" as const] : []),
+      ...(pieceAt(inv, slot, "normal") || (!eternal && !lying) ? ["normal" as const] : []),
+      ...(lying ? ["ground" as const] : []),
+    ];
+  };
+  // (The ground place goes when what lay there is taken: the cursor steps back onto the first place left.)
+  const row = Math.min(focus.row, rows - 1);
+  const onKnot = row === SLOTS.length;
+  const placesAt = (r: number): Place[] => (r === SLOTS.length ? ["normal"] : placesOf(SLOTS[r]));
+  const place = placesAt(row).includes(focus.place) ? focus.place : placesAt(row)[0];
 
   useKeys(key => {
+    menuSound(key);
     if (key === "back" || key === "pause") onClose();
     else if (key === "up" || key === "down") {
-      const next = Math.max(0, Math.min(SLOTS.length - 1, row + (key === "up" ? -1 : 1)));
-      const places = placesOf(SLOTS[next]);
-      setFocus({ row: next, place: places.includes(place) ? place : "normal" });
+      const next = Math.max(0, Math.min(rows - 1, row + (key === "up" ? -1 : 1)));
+      const places = placesAt(next);
+      setFocus({ row: next, place: places.includes(place) ? place : places[0] });
     } else if (key === "left" || key === "right") {
-      const places = placesOf(SLOTS[row]);
+      const places = placesAt(row);
       const i = Math.max(0, Math.min(places.length - 1, places.indexOf(place) + (key === "left" ? -1 : 1)));
       setFocus({ row, place: places[i] });
-    } else if (key === "select") onUse(SLOTS[row], place);
+    } else if (key === "select" && !onKnot) onUse(SLOTS[row], place);
   });
 
   const look = loadoutOf(inv);
+  const shown = onKnot ? undefined : place === "ground" ? ground[SLOTS[row]] : pieceAt(inv, SLOTS[row], place);
   return (
     <div className="inv-screen is-cinematic" role="dialog" aria-label="Inventory">
       <div className="letterbox letterbox-top" aria-hidden="true" />
@@ -77,23 +92,25 @@ export function InventoryScreen({ inv, player, string, eternalString, ground, st
         <StickFigure view="front" foe={false} pose="stand" weapon={look.weapon} armor={look.armor} weaponItem={look.weaponItem} armorItem={look.armorItem} headItem={look.headItem} title="You" />
       </div>
       <PlayerBars player={player} string={string} eternalString={eternalString} />
+      {/* The piece under the cursor, between you and the slots. */}
+      <div className="class-middle">
+        {onKnot && knot ? <KnotCard knot={knot} /> : <ItemCard key={`${row}-${place}`} slot={SLOTS[row]} info={shown ? cardOfGear(shown) : undefined} empty="Empty" />}
+      </div>
       <div className="inv-stage">
         <div className="inv-column">
           {SLOTS.map((slot, r) => {
             const wielded = equippedSide(inv, slot);
             return (
               <div key={slot} className="inv-row" role="group" aria-label={SLOT_LABEL[slot]}>
-                <span className="inv-row-label">{SLOT_LABEL[slot]}</span>
                 {placesOf(slot).map(p => {
                   const piece = p === "ground" ? ground[slot] : pieceAt(inv, slot, p);
                   const focused = r === row && p === place;
-                  const weight = piece && weightLabel(piece);
                   // (Bare-handed, or with no armor, no place is highlighted.)
                   const worn = !!piece && p !== "ground" && wielded === p && "id" in piece && inv[slot] === piece.id;
                   return (
                     <button
                       key={p}
-                      className={`inv-place is-${p} ${worn ? "is-equipped" : ""} ${focused ? "is-focused" : ""} ${focused && piece ? "is-open" : ""}`}
+                      className={`inv-place is-${p} ${worn ? "is-equipped" : ""} ${focused ? "is-focused" : ""}`}
                       onMouseEnter={() => setFocus({ row: r, place: p })}
                       onClick={() => onUse(slot, p)}
                       aria-label={`${SLOT_LABEL[slot]}, ${p === "ground" ? "on the ground" : p}: ${piece ? gearName(piece) : "empty"}${worn ? " (wielded)" : ""}`}
@@ -101,23 +118,42 @@ export function InventoryScreen({ inv, player, string, eternalString, ground, st
                       <span className="inv-place-icon">
                         {piece ? <GearSprite slot={slot} tier={piece.tier} item={piece.item} tilted /> : <GearIcon slot={slot} />}
                       </span>
-                      {focused && piece && (
-                        <span className="inv-place-text">
-                          <span className="inv-place-name">{gearName(piece)}</span>
-                          {weight && <span className="inv-place-weight">{weight}</span>}
-                        </span>
-                      )}
                     </button>
                   );
                 })}
               </div>
             );
           })}
+          {/* The revive knot, at the very bottom: a ball of yarn like String, but red. */}
+          {knot && (
+            <div className="inv-row is-knot-row" role="group" aria-label="Knot">
+              <button
+                className={`inv-place is-knot ${knot === "wound" ? "is-equipped" : ""} ${onKnot ? "is-focused" : ""}`}
+                onMouseEnter={() => setFocus({ row: SLOTS.length, place: "normal" })}
+                aria-label={`Knot: ${knot === "wound" ? "wound" : "unwound"}`}
+              >
+                <span className={`inv-place-icon ${knot === "wound" ? "" : "is-slack"}`}><YarnBall className="knot-ball" red /></span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
       <div className="inv-keys">
-        <kbd>W</kbd><kbd>S</kbd> slot · <kbd>A</kbd><kbd>D</kbd> place · <kbd>E</kbd> {place === "ground" ? "take" : "wield / unequip"} · <kbd>Q</kbd> close
+        <kbd>W</kbd><kbd>S</kbd> slot · <kbd>A</kbd><kbd>D</kbd> place · {!onKnot && <><kbd>E</kbd> {place === "ground" ? "take" : "wield / unequip"} · </>}<kbd>Q</kbd> close
       </div>
+    </div>
+  );
+}
+
+/** The card of the revive knot: the ball of yarn large, its name, what it is, and what it does. */
+function KnotCard({ knot }: { knot: Knot }) {
+  return (
+    <div className="item-card">
+      <span className={`inv-place-icon item-card-icon ${knot === "wound" ? "" : "is-slack"}`}><YarnBall className="knot-ball" red /></span>
+      <div className="item-card-name">Knot</div>
+      <div className="item-card-type">{knot === "wound" ? "Revive, wound" : "Revive, unwound"}</div>
+      <p className="item-card-lore">Tangled past all undoing. Look for its ends and you won't find them: no beginning, no end.</p>
+      <p className="item-card-effect">{knot === "wound" ? "Should you fade, it unwinds in your place and you rise again. Only once." : "Hanging slack. Rest with the guide to wind it again."}</p>
     </div>
   );
 }

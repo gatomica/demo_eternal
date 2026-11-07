@@ -60,7 +60,8 @@ export const SIDES: Side[] = ["eternal", "normal"];
 /** Nothing at all: where you begin. */
 export const EMPTY_INVENTORY: Inventory = { bag: [], weapon: null, armor: null, made: 0 };
 
-export const SLOTS: Slot[] = ["weapon", "armor", "head"];
+/** The slots, top to bottom in the menus. */
+export const SLOTS: Slot[] = ["weapon", "head", "armor"];
 
 /** "Waxed Torch", "Heavy armor"...; an eternal piece whose dreams are unread: "Memory of Brick Hammer". */
 export function gearName(g: GearSpec): string {

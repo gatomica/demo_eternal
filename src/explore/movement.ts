@@ -1,8 +1,8 @@
 /**
  * movement.ts — walking: bumping into walls, sliding along them, stepping up and dropping down.
  */
-import { CORNER_ASSIST, HALF_D, HALF_W, STEP_TOLERANCE } from "./tuning";
-import { barsAt, boxOnDiagFloor, boxTouchesDiagFloor, type Dir, DIAG, FLOOR, isHoleDiag, isRamp, LADDER, onDiagFloor, LEVELS, rampAt, rampHeight, slopeAt, slopeRise, tileAt, WALL } from "./world";
+import { ACCEL, CORNER_ASSIST, HALF_D, HALF_W, STEP_TOLERANCE } from "./tuning";
+import { barsAt, boxDiagDepth, boxOnDiagFloor, boxTouchesDiagFloor, type Dir, DIAG, diagSide, FLOOR, isHoleDiag, isRamp, LADDER, onDiagFloor, LEVELS, rampAt, rampHeight, slopeAt, slopeRise, tileAt, WALL } from "./world";
 
 /* ============================================================
  * Standing and moving: surfaces near your height
@@ -79,6 +79,23 @@ const overlaps = (x: number, y: number, tx: number, ty: number, hw: number, hd: 
 const hasDiagonal = (tx: number, ty: number) => Array.from({ length: LEVELS }, (_, z) => tileAt(z, tx, ty)).includes(DIAG);
 
 /**
+ * Whether moving your footprint from (fromX, fromY) to (x, y) gets it no deeper into the wall half of the diagonal tile (tx, ty) than it already is
+ * (clear of it stays clear). False unless the footprint really is in a diagonal wall there at your height.
+ */
+function noDeeperInDiagonals(tx: number, ty: number, x: number, y: number, fromX: number, fromY: number, hw: number, hd: number, alt: number) {
+  let any = false;
+  for (let z = 0; z < LEVELS; z++) {
+    if (tileAt(z, tx, ty) !== DIAG || z > alt + 1e-3 || alt - z > 1 - 1e-3 || isHoleDiag(z, tx, ty)) continue;
+    const before = boxDiagDepth(z, tx, ty, fromX - hw, fromY - hd, fromX + hw, fromY + hd);
+    if (before >= -1e-6) continue; // (not in it: the usual rules say what it may do)
+    any = true;
+    const after = boxDiagDepth(z, tx, ty, x - hw, y - hd, x + hw, y + hd);
+    if (after < before - 1e-6) return false;
+  }
+  return any;
+}
+
+/**
  * Whether moving your footprint from (fromX, fromY) to (x, y), at height `alt`, would push it
  * into anything you can't stand on. Tiles you already overlap never block the edges of your
  * footprint: after dropping off the side of some stairs, say, you can always walk away from
@@ -98,8 +115,9 @@ function blocked(x: number, y: number, alt: number, fromX: number, fromY: number
   const x0 = Math.floor(x - hw), x1 = Math.floor(x + hw - 1e-6);
   const y0 = Math.floor(y - hd), y1 = Math.floor(y + hd - 1e-6);
   for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
-    // (A diagonal wall always counts: you can stand beside it, never in it.)
-    if (overlaps(fromX, fromY, tx, ty, hw, hd) && !hasDiagonal(tx, ty)) continue;
+    // (A diagonal wall always counts: you can stand beside it, never in it. But a footprint that has come to be in one, dropped there from above,
+    // may always move so as to get no deeper into it: out of it, or along it.)
+    if (overlaps(fromX, fromY, tx, ty, hw, hd) && (!hasDiagonal(tx, ty) || noDeeperInDiagonals(tx, ty, x, y, fromX, fromY, hw, hd, alt))) continue;
     if (!surfaceNear(tx, ty, x, y, alt, true, hw, hd)) return true;
   }
   return false;
@@ -141,4 +159,123 @@ export function cornerNudge(me: Walker, axis: "x" | "y", dir: number, step: numb
     return Math.sign(off) * Math.min(Math.abs(off), step);
   }
   return 0;
+}
+
+/* ============================================================
+ * Diagonal walls: gliding along them, and getting out of them
+ * ============================================================ */
+
+/** Which way is out of the wall of each kind of diagonal tile (a unit vector toward its floor half), by `diagSide`. */
+const DIAG_OUT: [number, number][] = [[-Math.SQRT1_2, -Math.SQRT1_2], [Math.SQRT1_2, -Math.SQRT1_2], [-Math.SQRT1_2, Math.SQRT1_2], [Math.SQRT1_2, Math.SQRT1_2]];
+
+/**
+ * The diagonal walls a walker at (x, y) is touching, or within `margin` tiles of, that refuse a footprint at `at`: for each, the way out of it
+ * (a unit vector) and how deep the footprint is in it (negative: inside). Only walls at your height count; the open rims of holes are no walls.
+ */
+function diagonalWallsNear(me: Walker, margin: number, at: [number, number] = [me.x, me.y]): { out: [number, number]; depth: number; tx: number; ty: number; z: number }[] {
+  const [hw, hd] = halves(me);
+  const found: { out: [number, number]; depth: number; tx: number; ty: number; z: number }[] = [];
+  const x0 = me.x - hw - margin, x1 = me.x + hw + margin, y0 = me.y - hd - margin, y1 = me.y + hd + margin;
+  for (let ty = Math.floor(y0); ty <= Math.floor(y1); ty++) for (let tx = Math.floor(x0); tx <= Math.floor(x1); tx++) {
+    for (let z = 0; z < LEVELS; z++) {
+      if (tileAt(z, tx, ty) !== DIAG || z > me.alt + 1e-3 || me.alt - z > 1 - 1e-3 || isHoleDiag(z, tx, ty)) continue;
+      const depth = boxDiagDepth(z, tx, ty, me.x - hw, me.y - hd, me.x + hw, me.y + hd);
+      if (boxDiagDepth(z, tx, ty, x0, y0, x1, y1) >= 0) continue;
+      // (Only if the tile really refuses a footprint at `at`: a floor above it, as at the head of a stair, can cover the wall half.)
+      if (surfaceNear(tx, ty, at[0], at[1], me.alt, true, hw, hd)) continue;
+      found.push({ out: DIAG_OUT[diagSide(z, tx, ty)], depth, tx, ty, z });
+    }
+  }
+  return found;
+}
+
+/** Whether the walker's footprint, moved to (x, y), would push into anything it can't stand on. */
+const blockedAt = (me: Walker, x: number, y: number) => {
+  const [hw, hd, round] = halves(me);
+  return blocked(x, y, me.alt, me.x, me.y, hw, hd, round);
+};
+
+/**
+ * Moves the walker by (dx, dy) in one go, as far as it can (a straight line, stopping at the first thing in the way): along a diagonal wall that
+ * is the wall's own direction, which two moves along the axes cannot be.
+ */
+function moveAlong(me: Walker, dx: number, dy: number) {
+  if (!blockedAt(me, me.x + dx, me.y + dy)) { me.x += dx; me.y += dy; return; }
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 10; i++) {
+    const mid = (lo + hi) / 2;
+    if (blockedAt(me, me.x + dx * mid, me.y + dy * mid)) hi = mid; else lo = mid;
+  }
+  me.x += dx * lo;
+  me.y += dy * lo;
+}
+
+/**
+ * Gets a walker out of the wall half of a diagonal tile it has come to stand in (dropped beside it from above, say): pushed straight out, a little at a
+ * time. Otherwise every step is refused, for the footprint stays in the wall however it moves.
+ */
+export function unstick(me: Walker) {
+  for (let pass = 0; pass < 3; pass++) {
+    const inside = diagonalWallsNear(me, 0).filter(w => w.depth < -1e-4).sort((a, b) => a.depth - b.depth)[0];
+    if (!inside) return;
+    // (Depth changes by the square root of two for each tile moved along the way out.)
+    const push = Math.min(0.12, -inside.depth * Math.SQRT1_2 + 1e-3);
+    const nx = me.x + inside.out[0] * push, ny = me.y + inside.out[1] * push;
+    // (The way out may lead into another wall: then wait, or try the way along.)
+    if (!blockedAt(me, nx, ny)) { me.x = nx; me.y = ny; continue; }
+    const along: [number, number] = [-inside.out[1], inside.out[0]];
+    let moved = false;
+    for (const sign of [1, -1]) {
+      const ax = me.x + (inside.out[0] * 0.5 + along[0] * sign * 0.5) * push, ay = me.y + (inside.out[1] * 0.5 + along[1] * sign * 0.5) * push;
+      if (!blockedAt(me, ax, ay)) { me.x = ax; me.y = ay; moved = true; break; }
+    }
+    // Wedged between two walls: pushed out anyway, as long as the feet land on something (a wall's edge is no place to be stuck for good).
+    if (!moved && surfaceNear(Math.floor(nx), Math.floor(ny), nx, ny, me.alt)) { me.x = nx; me.y = ny; }
+  }
+}
+
+/**
+ * One step of walking: eases toward the speed the held keys ask for (`ix`, `iy`: -1, 0 or 1; diagonals are as fast as straight lines), then moves,
+ * one axis at a time so you slide along straight walls. What a diagonal wall stops, you glide along instead: the part of your motion along the wall
+ * is kept, and your speed along it with it.
+ */
+export function walkStep(me: Walker, ix: number, iy: number, dt: number, top: number) {
+  unstick(me);
+  const startX = me.x, startY = me.y;
+  const len = Math.hypot(ix, iy) || 1;
+  const k = 1 - Math.exp(-ACCEL * dt);
+  me.vx += ((ix / len) * top - me.vx) * k;
+  me.vy += ((iy / len) * top - me.vy) * k;
+  if (!ix && Math.abs(me.vx) < 0.01) me.vx = 0;
+  if (!iy && Math.abs(me.vy) < 0.01) me.vy = 0;
+  const vx = me.vx, vy = me.vy;
+
+  // Move one axis at a time, so you slide along walls instead of sticking to them.
+  const wantX = vx * dt, wantY = vy * dt;
+  me.x = slide(me, "x", wantX);
+  if (Math.abs(me.x - startX) < Math.abs(wantX) * 0.5) {
+    me.vx = 0;
+    if (ix && !iy) me.y = slide(me, "y", cornerNudge(me, "x", ix, top * dt));
+  }
+  me.y = slide(me, "y", wantY);
+  if (Math.abs(me.y - startY) < Math.abs(wantY) * 0.5) {
+    me.vy = 0;
+    if (iy && !ix) me.x = slide(me, "x", cornerNudge(me, "y", iy, top * dt));
+  }
+
+  // What was lost to a diagonal wall: the part of it along the wall is walked on, in a line.
+  const lostX = wantX - (me.x - startX), lostY = wantY - (me.y - startY);
+  if (Math.hypot(lostX, lostY) < 1e-6) return;
+  const walls = diagonalWallsNear(me, 0.06, [startX + wantX, startY + wantY]).filter(w => lostX * w.out[0] + lostY * w.out[1] < -1e-6);
+  if (!walls.length) return;
+  // (With two walls at once, a corner, the one it is deepest in is the one to follow.)
+  const wall = walls.sort((a, b) => a.depth - b.depth)[0];
+  const tx = -wall.out[1], ty = wall.out[0];
+  const along = lostX * tx + lostY * ty;
+  if (Math.abs(along) < 1e-6) return;
+  moveAlong(me, along * tx, along * ty);
+  // Your speed into the wall is gone; your speed along it stays.
+  const sv = vx * tx + vy * ty;
+  me.vx = sv * tx;
+  me.vy = sv * ty;
 }

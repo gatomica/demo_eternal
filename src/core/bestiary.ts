@@ -113,6 +113,8 @@ export interface EnemyKind {
   deathLook?: "pieces" | "wax" | "cloak" | "guide";
   /** The pose it lies in when its `deathLook` is "wax". */
   deathPose?: string;
+  /** How many times its max health in String it leaves when it falls for good (default 1): a boss's. */
+  stringYield?: number;
   /** Its fight takes place in its arena (see warden/arena.tsx). */
   arena?: boolean;
   /**
@@ -133,7 +135,7 @@ export interface EnemyKind {
   aim?: (self: Enemy, state: CombatState, action: string, rng: Rng) => string | undefined;
   /** Actions that play on their own, with nothing of yours to attack or dodge (the model viewer lets them run alone). */
   fixedActions?: string[];
-  /** Actions that, aimed at you, keep you down (your forced Rest waits) until the very end of the turn. */
+  /** Actions that, aimed at you, keep you down: that turn's forced Rest does not end your stagger (you get up with the next one). */
   holdsTargetDown?: string[];
   /** What its direct hits do besides the damage (its action's tags say which rules apply). */
   onDirectHit?: (hit: DirectHit) => void;

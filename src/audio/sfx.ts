@@ -11,7 +11,7 @@
 type ToneModule = typeof import("tone");
 import type { CombatEvent } from "../core/types";
 
-export type Sfx = "hit" | "clang" | "dodge" | "rest" | "stagger" | "fall" | "flame";
+export type Sfx = "hit" | "clang" | "dodge" | "rest" | "stagger" | "fall" | "flame" | "tic" | "tac" | "string" | "stringBoss" | "stringBossNote";
 
 const MUTE_KEY = "sfx-muted";
 
@@ -32,12 +32,39 @@ export const onMute = (fn: () => void) => { muteListeners.push(fn); };
 export function setMuted(v: boolean) {
   muted = v;
   muteListeners.forEach(fn => fn());
-  if (tone) tone.getDestination().mute = v;
+  applyLevel();
   try {
     localStorage.setItem(MUTE_KEY, v ? "1" : "0");
   } catch {
     // Storage blocked: the choice just lasts until the page closes.
   }
+}
+
+const VOLUME_KEY = "sfx-volume";
+/** The sounds' slider, 0 to 1 (kept between visits). */
+let volume = (() => {
+  try {
+    const v = parseFloat(localStorage.getItem(VOLUME_KEY) ?? "");
+    return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1;
+  } catch {
+    return 1;
+  }
+})();
+export const sfxVolume = () => volume;
+
+/** Sets the sounds' volume (0 to 1), at once. */
+export function setSfxVolume(v: number) {
+  volume = Math.min(1, Math.max(0, v));
+  applyLevel();
+  try { localStorage.setItem(VOLUME_KEY, String(volume)); } catch { /* Storage blocked: it lasts until the page closes. */ }
+}
+
+/** The speakers' level: the slider (squared, like the music's) on top of the sounds' own -4 dB, and the mute. */
+function applyLevel() {
+  if (!tone) return;
+  const dest = tone.getDestination();
+  dest.volume.value = -4 + 20 * Math.log10(Math.max(volume * volume, 1e-4));
+  dest.mute = muted || volume === 0;
 }
 
 let master: InstanceType<ToneModule["Gain"]> | null = null;
@@ -59,9 +86,7 @@ export function masterBus(Tone: ToneModule) {
 
 /** Every synth, built once on first use and wired to the speakers. */
 function build(Tone: ToneModule) {
-  const dest = Tone.getDestination();
-  dest.volume.value = -4;
-  dest.mute = muted;
+  applyLevel();
   const out = masterBus(Tone);
   // A good deal of room around the metal and the breath.
   const room = new Tone.Reverb({ decay: 2.2, wet: 0.36 }).connect(out);
@@ -145,7 +170,44 @@ function build(Tone: ToneModule) {
   const body = new Tone.MembraneSynth({ pitchDecay: 0.12, octaves: 3, envelope: { attack: 0.001, decay: 0.55, sustain: 0, release: 0.1 } }).connect(out);
   body.volume.value = 2;
 
-  return { room, ringRoom, puff, bassGain, sub, roar, roarBand, crackles, crackleBand, whump, thump, slap, tear, tearBand, rip, ripBand, wetBed, ticks, tickBand, metal, air, airBand, sigh, sighBand, sighHigh, hum, body };
+  // The menus' sounds. Tic (changing option): a very faint, dry click. Tac (choosing): a firmer knock.
+  // (Straight to the speakers: `out` has the world's echo and muffling on it, which these don't want.)
+  const dry = Tone.getDestination();
+  const tic = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.0005, decay: 0.02, sustain: 0, release: 0.005 } })
+    .connect(new Tone.Filter({ type: "bandpass", frequency: 3400, Q: 1.4 }).connect(dry));
+  tic.volume.value = -20;
+  const tacKnock = new Tone.MembraneSynth({ pitchDecay: 0.012, octaves: 2.5, envelope: { attack: 0.0005, decay: 0.07, sustain: 0, release: 0.02 } }).connect(dry);
+  tacKnock.volume.value = -9;
+  const tacClick = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.0005, decay: 0.025, sustain: 0, release: 0.005 } })
+    .connect(new Tone.Filter({ type: "bandpass", frequency: 2200, Q: 1 }).connect(dry));
+  tacClick.volume.value = -14;
+
+  // String flying through the air: a wisp of breath rising through a band of noise, and a faint high shimmer over it, both ethereal in the room.
+  // Several strings may fly at once, so the wisps take turns among a few voices of their own (each with its own filter): one filter swept by
+  // two overlapping wisps, or one voice cut short by the next, would only garble them.
+  const wisps = Array.from({ length: 4 }, () => {
+    const band = new Tone.Filter({ type: "bandpass", frequency: 1800, Q: 2.5 }).connect(room);
+    const noise = new Tone.NoiseSynth({ noise: { type: "pink" }, envelope: { attack: 0.3, decay: 1.2, sustain: 0, release: 0.5 } }).connect(band);
+    noise.volume.value = -24;
+    return { noise, band };
+  });
+  const shimmer = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sine" }, envelope: { attack: 0.25, decay: 1.4, sustain: 0, release: 0.8 } }).connect(room);
+  shimmer.volume.value = -27;
+  // A boss's String (stringBoss, once for the whole burst) is one long swell of breath and a low rising hum drowned in a long echo, and over it
+  // each of its strings (stringBossNote) is a hushed, wavering note ringing out in the same echo.
+  const bossRoom = new Tone.Reverb({ decay: 6.5, wet: 0.85 }).connect(out);
+  const breathBand = new Tone.Filter({ type: "bandpass", frequency: 700, Q: 1.1 }).connect(bossRoom);
+  const breath = new Tone.NoiseSynth({ noise: { type: "pink" }, envelope: { attack: 0.9, decay: 2.4, sustain: 0, release: 1.2 } }).connect(breathBand);
+  breath.volume.value = -17;
+  const hissBand = new Tone.Filter({ type: "highpass", frequency: 3200, Q: 0.5 }).connect(bossRoom);
+  const hiss = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 1.1, decay: 2.2, sustain: 0, release: 1.0 } }).connect(hissBand);
+  hiss.volume.value = -34;
+  const swell = new Tone.Synth({ oscillator: { type: "sine" }, envelope: { attack: 1.3, decay: 2.6, sustain: 0, release: 1.0 } }).connect(bossRoom);
+  swell.volume.value = -20;
+  const choir = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "triangle" }, envelope: { attack: 0.35, decay: 2.2, sustain: 0, release: 1.3 } }).connect(bossRoom);
+  choir.volume.value = -27;
+
+  return { wisps, shimmer, bossRoom, breath, breathBand, hiss, swell, choir, tic, tacKnock, tacClick, room, ringRoom, puff, bassGain, sub, roar, roarBand, crackles, crackleBand, whump, thump, slap, tear, tearBand, rip, ripBand, wetBed, ticks, tickBand, metal, air, airBand, sigh, sighBand, sighHigh, hum, body };
 }
 
 let tone: ToneModule | null = null;
@@ -162,7 +224,7 @@ function load(): Promise<void> {
     tone = T;
     T.getContext().lookAhead = 0.01; // play the moment a sound is asked for, so it lands with the picture
     bank = build(T);
-    await Promise.all([bank.room.ready, bank.ringRoom.ready]);
+    await Promise.all([bank.room.ready, bank.ringRoom.ready, bank.bossRoom.ready]);
   });
   return ready;
 }
@@ -274,6 +336,9 @@ function hit(b: NonNullable<typeof bank>, t: number, v: number) {
   }
 }
 
+/** Which of the wisps' voices goes next. */
+let wispNext = 0;
+
 /** A narrow range of pitches (multiples of the usual) for every other sound to pick from. */
 const VARIETY = [0.94, 1, 1.06];
 const lastVariety = new Map<Sfx, number>();
@@ -339,13 +404,48 @@ function trigger(name: Sfx, delay: number, v: number) {
       case "fall":
         b.body.triggerAttackRelease(27.5 * varied("fall"), 0.5, when(b.body, t), v);
         break;
+      case "string": {
+        // A wisp rising through the air as it flies (on the next voice in turn), and a high note shimmering over it.
+        const w = b.wisps[wispNext++ % b.wisps.length], p = varied("string"), at = when(w.noise, t);
+        w.band.frequency.setValueAtTime(900 * p, at);
+        w.band.frequency.exponentialRampToValueAtTime(3400 * p, at + 1.4);
+        w.noise.triggerAttackRelease(1.4, at, 0.8 * v);
+        const notes = [784, 988, 1175, 1568];
+        b.shimmer.triggerAttackRelease(notes[Math.floor(Math.random() * notes.length)] * p, 1.2, t + 0.05, 0.7 * v);
+        break;
+      }
+      case "stringBoss": {
+        // The burst as a whole: a slow swell of breath rising through the dark with a thin hiss on top, and a low hum climbing under it.
+        const p = varied("stringBoss"), at = when(b.breath, t);
+        b.breathBand.frequency.setValueAtTime(320 * p, at);
+        b.breathBand.frequency.exponentialRampToValueAtTime(1500 * p, at + 3);
+        b.breath.triggerAttackRelease(3, at, v);
+        b.hiss.triggerAttackRelease(2.6, when(b.hiss, t + 0.1), v);
+        b.swell.triggerAttackRelease(55 * p, 3, when(b.swell, t), 0.9 * v);
+        b.swell.frequency.exponentialRampToValueAtTime(110 * p, at + 2.8);
+        break;
+      }
+      case "stringBossNote": {
+        // One of the boss's strings: a hushed note, ringing out in the long echo (a different one each time, from a minor pentatonic).
+        const notes = [196, 233, 262, 311, 349, 392, 466, 523];
+        const note = notes[Math.floor(Math.random() * notes.length)] * varied("stringBossNote");
+        b.choir.triggerAttackRelease(note, 1.8, t, 0.75 * v);
+        break;
+      }
+      case "tic":
+        b.tic.triggerAttackRelease(0.02, when(b.tic, t), v);
+        break;
+      case "tac":
+        b.tacKnock.triggerAttackRelease(190, 0.08, when(b.tacKnock, t), v);
+        b.tacClick.triggerAttackRelease(0.025, when(b.tacClick, t), v);
+        break;
     }
   } catch {
     // A sound that can't be scheduled just doesn't play.
   }
 }
 
-const ALL: Sfx[] = ["hit", "clang", "dodge", "rest", "stagger", "fall", "flame"];
+const ALL: Sfx[] = ["hit", "clang", "dodge", "rest", "stagger", "fall", "flame", "tic", "tac", "string", "stringBoss", "stringBossNote"];
 
 let warmed = false;
 

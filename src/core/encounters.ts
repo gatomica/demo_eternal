@@ -61,11 +61,12 @@ export const ENCOUNTERS: Encounter[] = [
     label: "Penitent Warden",
     charges: 1,
     enemies: [
+      // The three waxed start on the front line, he on the back one. In the opening scene he takes the flame of the middle one (Waxed C, the
+      // offering) and steps into its place: the fight begins with the three left (Waxed A, him, Waxed B) all on the front line.
       { kind: "waxed", name: "Waxed A", line: "front" },
+      { kind: "waxed", name: "Waxed C", line: "front", offering: true },
       { kind: "warden", name: "Penitent Warden" },
       { kind: "waxed", name: "Waxed B", line: "front" },
-      // The opening scene: he takes this one's flame before the fight begins.
-      { kind: "waxed", name: "Waxed C", offering: true },
     ],
   },
 ];

@@ -8,7 +8,7 @@ import { parsePattern } from "../patterns";
 
 export const SLEEPWALKER: EnemyKind = {
   name: "Depraved Sleepwalker",
-  maxHP: 10,
+  maxHP: 8,
   weapon: "light", // the Jagged Chisel (its effect and all)
   armor: "none", // none for now; some may wear armor later
   // On the map it gets up again when you rest by a keeper.
@@ -58,4 +58,4 @@ export const SLEEPWALKER_HAMMER = armedSleepwalker("Hammer Sleepwalker", "heavy"
  * The patrol wardens: sleepwalkers who walk the wardens' rounds, carrying the Waxed Torch and
  * wearing the Penitent Warden's pointed hood, though no wax beak and no cloak. Otherwise a sleepwalker.
  */
-export const PATROL_WARDEN = armedSleepwalker("Patrol Warden", "normal", { hood: true, maxHP: 12 });
+export const PATROL_WARDEN = armedSleepwalker("Patrol Warden", "normal", { hood: true, maxHP: 10 });

@@ -6,6 +6,7 @@ import type { ClassId } from "./explore/items";
 import { Journeying } from "./screens/Journeying";
 import { MainMenu, type Screen } from "./screens/MainMenu";
 import { MapViewer } from "./screens/MapViewer";
+import { MusicViewer } from "./screens/MusicViewer";
 import { ModelViewer } from "./screens/ModelViewer";
 import { TestCombat } from "./screens/TestCombat";
 
@@ -26,11 +27,11 @@ export default function App() {
       {screen === "menu" && <MainMenu onStart={setScreen} />}
       {screen === "test" && <TestCombat onExit={() => setScreen("menu")} />}
       {screen === "explore" && <Journeying onExit={() => setScreen("menu")} />}
-      {screen === "explore-skip" && <Journeying skip onExit={() => setScreen("menu")} />}
       {screen === "class" && <ClassSelect onPick={id => { setClassId(id); setScreen("explore-new"); }} onBack={() => setScreen("menu")} />}
       {screen === "explore-new" && <Journeying fresh classId={classId} onExit={() => setScreen("menu")} />}
       {screen === "viewer" && <ModelViewer onExit={() => setScreen("menu")} />}
       {screen === "map" && <MapViewer onExit={() => setScreen("menu")} />}
+      {screen === "music" && <MusicViewer onExit={() => setScreen("menu")} />}
     </div>
   );
 }

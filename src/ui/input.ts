@@ -3,6 +3,7 @@
  * convenience. Arrow keys, Enter and Escape mirror WASD, E and Q.
  */
 import { useEffect, useRef } from "react";
+import { play } from "../audio/sfx";
 
 export type Dir = "up" | "left" | "down" | "right";
 
@@ -44,6 +45,12 @@ export function useKeys(handler: (key: Key) => void) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+}
+
+/** The menus' sounds for a key: a faint tic for changing option (WASD), a tac for choosing (E). Call it from a menu's key handler. */
+export function menuSound(key: Key) {
+  if (key === "select") play("tac");
+  else if (key === "up" || key === "down" || key === "left" || key === "right") play("tic");
 }
 
 /** Index `i` moved `by` places through a list of `n`, wrapping around at either end. */

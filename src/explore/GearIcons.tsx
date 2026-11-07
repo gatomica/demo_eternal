@@ -5,7 +5,7 @@
  */
 import type { ArmorItem, ArmorTier, HeadItem, WeaponItem, WeaponTier } from "../core/types";
 import type { Slot } from "./gear";
-import { HeadGear, StickFigure, Weapon } from "../render/StickFigure";
+import { HeadGear, HoodInside, StickFigure, Weapon } from "../render/StickFigure";
 
 /** A flat sword in a 48 × 48 square: one color, a straight blade and a bar for a guard. A dagger is shorter, a maul a hammer. */
 function FlatWeapon({ tier }: { tier: WeaponTier }) {
@@ -49,15 +49,15 @@ export function GearIcon({ slot }: { slot: Slot }) {
 
 /**
  * The real sprite of a piece of gear: the weapon as a figure holds it (`tilted` slants it to fill a
- * square place), the armor as the player wears it, cropped to the torso.
+ * square place), the armor and head gear as the player wears them seen from the front, with no body (no head, no hands).
  */
 export function GearSprite({ slot, tier, tilted, item }: { slot: Slot; tier: WeaponTier | ArmorTier; tilted?: boolean; /** One of the starting classes' own pieces: its look. */ item?: string }) {
   if (slot === "head") {
-    // A head with its gear on, seen as the player wears it.
+    // The head gear alone, seen from the front as the player wears it: no head under it.
     return (
       <svg viewBox="26 2 48 44" className="gear-sprite is-head" aria-hidden="true">
-        <circle cx={50} cy={22} r={7.5} className="fig-head" />
-        {item ? <HeadGear item={item as HeadItem} x={50} y={22} /> : <path d="M41 22 A9 9 0 0 1 59 22 Z" className="fig-armor-fill" />}
+        {item === "hood" && <HoodInside x={50} y={22} />}
+        {item ? <HeadGear item={item as HeadItem} x={50} y={22} front /> : <path d="M41 22 A9 9 0 0 1 59 22 Z" className="fig-armor-fill" />}
       </svg>
     );
   }
@@ -72,7 +72,7 @@ export function GearSprite({ slot, tier, tilted, item }: { slot: Slot; tier: Wea
   }
   return (
     <div className="gear-sprite is-armor" aria-hidden="true">
-      <StickFigure view="back" pose="idle" weapon="baseline" armor={tier as ArmorTier} armorItem={item as ArmorItem | undefined} />
+      <StickFigure view="front" foe={false} pose="stand" weapon="baseline" armor={tier as ArmorTier} armorItem={item as ArmorItem | undefined} gearOnly />
     </div>
   );
 }

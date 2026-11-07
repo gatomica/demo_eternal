@@ -6,9 +6,10 @@
 import { useState } from "react";
 import { GearIcon, GearSprite } from "../explore/GearIcons";
 import { SLOTS, type Slot } from "../explore/gear";
+import { cardOfItem, ItemCard } from "../explore/ItemCard";
 import { CLASSES, type ClassId, ITEMS, lookOfClass } from "../explore/items";
 import { StickFigure } from "../render/StickFigure";
-import { useKeys, wrapIndex } from "../ui/input";
+import { useKeys, wrapIndex, menuSound } from "../ui/input";
 
 const LABEL: Record<Slot, string> = { weapon: "Weapon", armor: "Armor", head: "Head" };
 
@@ -19,6 +20,7 @@ export function ClassPreview({ classId, onClose, onConfirm }: { classId: ClassId
   const [asking, setAsking] = useState(false);
   const [answer, setAnswer] = useState(0);
   useKeys(key => {
+    menuSound(key);
     if (asking) {
       if (key === "left" || key === "right" || key === "up" || key === "down") setAnswer(a => 1 - a);
       else if (key === "select") { if (answer === 0) onConfirm(); else setAsking(false); }
@@ -31,7 +33,6 @@ export function ClassPreview({ classId, onClose, onConfirm }: { classId: ClassId
   });
   const itemOf = (slot: Slot) => (slot === "weapon" ? c.weapon : slot === "armor" ? c.armor : c.head);
   const held = itemOf(SLOTS[row]);
-  const info = held ? ITEMS[held] : undefined;
   return (
     <div className="inv-screen is-cinematic" role="dialog" aria-label={`${c.name}'s gear`}>
       <div className="letterbox letterbox-top" aria-hidden="true" />
@@ -41,13 +42,7 @@ export function ClassPreview({ classId, onClose, onConfirm }: { classId: ClassId
       </div>
       {/* What is in the slot under the cursor, between the character and the slots. */}
       <div className="class-middle">
-        {info ? (
-          <div className="guide-lore">
-            <div className="guide-lore-name">{info.name}</div>
-            <p className="guide-lore-text">{info.lore}</p>
-            {info.slot === "weapon" && <p className="guide-lore-effect">{info.effect}</p>}
-          </div>
-        ) : <p className="guide-says">Nothing: the {LABEL[SLOTS[row]].toLowerCase()} slot is empty.</p>}
+        <ItemCard key={row} slot={SLOTS[row]} info={held ? cardOfItem(held) : undefined} empty="Nothing" />
       </div>
       <div className="inv-stage">
         <div className="inv-column">
@@ -55,7 +50,6 @@ export function ClassPreview({ classId, onClose, onConfirm }: { classId: ClassId
             const item = itemOf(slot), it = item ? ITEMS[item] : undefined;
             return (
               <div key={slot} className="inv-row" role="group" aria-label={LABEL[slot]}>
-                <span className="inv-row-label">{LABEL[slot]}</span>
                 <button className={`inv-place is-eternal ${r === row ? "is-focused" : ""} ${it ? "is-equipped" : ""}`} onMouseEnter={() => setRow(r)} aria-label={`${LABEL[slot]}: ${it ? it.name : "empty"}`}>
                   <span className="inv-place-icon">{it ? <GearSprite slot={slot} tier={it.tier} item={item} tilted /> : <GearIcon slot={slot} />}</span>
                 </button>

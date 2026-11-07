@@ -77,7 +77,9 @@ function setSealed(r: TurnReport, on: boolean) {
 
 export const WARDEN: EnemyKind = {
   name: "Penitent Warden",
-  maxHP: 20,
+  maxHP: 15,
+  // A boss: ten times the String of any other (150), in a burst of many strings.
+  stringYield: 10,
   weapon: "normal",
   // (His flail: not one of the demo's weapons, so no eternal effect.)
   ownWeapon: true,
@@ -101,9 +103,9 @@ export const WARDEN: EnemyKind = {
       Wind Up Flail: rest
       Clutch Arm:   rest, *Unsealed, *!Flaming
     stances:
-      Usurp Flame / Recover / Second Phase > Idle                    > Usurp Flame, Stride, Wind Up Flail
+      Usurp Flame / Wax Punch / Recover / Second Phase > Idle          > Usurp Flame, Stride, Wind Up Flail
       Chain Guard / Clutch Arm         > Wax Shoulder In         > Usurp Flame, Fan Flames, Wax Guard, Wind Up Flail
-      Fan Flames / Wax Guard           > Wax Arm Back            > Usurp Flame, Stride, Wax Punch, Flame Blast
+      Fan Flames / Wax Guard           > Wax Arm Back            > Usurp Flame, Wax Punch, Stride, Flame Blast
       Flame Blast / Recover            > Arm Over Chest          > Usurp Flame, Fan Flames, Wax Guard, Clutch Arm, Stride
       Stride                           > Flail Clutched          > Usurp Flame, Flail Swing, Chain Guard
       Flail Swing / Wind Up Flail      > Flail Spinning Behind   > Usurp Flame, Rising Flail, Wax Guard, Stride, Fan Flames
@@ -165,7 +167,7 @@ export const WARDEN: EnemyKind = {
   // He picks after the waxed, to see which of them is about to Clutch Flame.
   decidesLast: true,
   fixedActions: ["Usurp Flame"],
-  // Usurp Flame on you: you stay down, sealed, until he has your flame.
+  // Usurp Flame on you: his taking your flame does not get you up; you stay down, sealed in wax, until the next forced Rest.
   holdsTargetDown: ["Usurp Flame"],
   conditions: {
     sealed: self => !!self.flags.sealed,
@@ -267,8 +269,8 @@ export const WARDEN: EnemyKind = {
   },
   /**
    * The fight's opening scene: he takes the flame an offering waxed cradles (Usurp Flame),
-   * showing the mechanic before the fight begins. He starts Sealed, his flame out; the scene
-   * leaves him Unsealed, the waxed encased for good, and every first intent chosen afresh (his
+   * showing the mechanic before the fight begins. The three waxed start on the front line, he on the back one, Sealed, his flame out; the
+   * scene leaves him Unsealed, on the front line in the waxed's place, the waxed encased for good, and every first intent chosen afresh (his
    * comes from "Usurp Flame >": Idle).
    */
   opening: ({ self, state, setups, describe, chooseIntents, rng }) => {
@@ -284,6 +286,8 @@ export const WARDEN: EnemyKind = {
     const o = after.enemies.find(e => e.id === offering.id)!;
     w.flags.sealed = false;
     w.last = { name: "Usurp Flame", outcome: "done" };
+    // The fight begins with all that are left on the front line: he has stepped into the offering's place.
+    w.line = "front";
     o.alive = false;
     o.fate = "encased";
     o.hp = 0;
@@ -294,6 +298,8 @@ export const WARDEN: EnemyKind = {
     // Before: the same (so the others hold the stances they'll fight from), but his flame out
     // and the waxed holding its own out to him.
     const from = structuredClone(after);
+    // (Before it, he is on the back line, as he starts, and the waxed on the front.)
+    from.enemies.find(e => e.id === self.id)!.line = "back";
     const w0 = from.enemies.find(e => e.id === self.id)!;
     const o0: Enemy = from.enemies.find(e => e.id === offering.id)!;
     w0.flags.sealed = true;

@@ -15,9 +15,9 @@ import type { ArmorTier, Fighter, Player, Tier, WeaponTier } from "./types";
 /** `name`: the weapon of that weight in this demo (its eternal version is "Eternal <name>"). */
 export const WEAPONS: Record<WeaponTier, { weight: number; cost: number; damage: number; block: number; speed: number; label: string; name: string }> = {
   baseline: { weight: 0, cost: 1, damage: 1, block: 0, speed: 0, label: "None", name: "Bare hands" },
-  light:  { weight: 2, cost: 1, damage: 2, block: 2, speed: 1, label: "Light", name: "Jagged Chisel" },
-  normal: { weight: 3, cost: 3, damage: 3, block: 3, speed: 2, label: "Normal", name: "Waxed Torch" },
-  heavy:  { weight: 4, cost: 5, damage: 4, block: 4, speed: 3, label: "Heavy", name: "Brick Hammer" },
+  light:  { weight: 0.5, cost: 1, damage: 2, block: 0.5, speed: 1, label: "Light", name: "Jagged Chisel" },
+  normal: { weight: 1, cost: 3, damage: 3, block: 1, speed: 2, label: "Normal", name: "Waxed Torch" },
+  heavy:  { weight: 1.5, cost: 5, damage: 4, block: 1.5, speed: 3, label: "Heavy", name: "Brick Hammer" },
 };
 
 /**
@@ -38,15 +38,15 @@ export const ITEM_SHARE = 1 / 2;
 export const ETERNITY_PRICE: Record<EternalEffect, number> = { chisel: 2, torch: 1, hammer: 1, shortsword: 1, axe: 2, sickle: 2 };
 
 /**
- * resist: Resistance, in sixteenths ("none" is the base 1/16).
- * weight: how much it burdens you, in sixteenths. Together with your weapon's, it sets how
+ * resist: Resistance, in sixteenths (none has none: only a Block gives a base, and gear adds a little to it).
+ * weight: how much it burdens you, in sixteenths (the same as its resist). Together with your weapon's, it sets how
  * tiring a dodge is (see dodgeFatigue).
  */
 export const ARMOR: Record<ArmorTier, { resist: number; weight: number; label: string }> = {
-  none:   { resist: 1, weight: 0, label: "None" },
-  light:  { resist: 2, weight: 2, label: "Light" },
-  normal: { resist: 3, weight: 3, label: "Normal" },
-  heavy:  { resist: 4, weight: 4, label: "Heavy" },
+  none:   { resist: 0, weight: 0, label: "None" },
+  light:  { resist: 0.5, weight: 0.5, label: "Light" },
+  normal: { resist: 1, weight: 1, label: "Normal" },
+  heavy:  { resist: 1.5, weight: 1.5, label: "Heavy" },
 };
 
 /** Head gear counts for this share of the resistance and weight of armor of its tier (and adds to what the body armor gives). */

@@ -6,13 +6,14 @@
 import { useState } from "react";
 import { CLASSES, type ClassId, lookOfClass } from "../explore/items";
 import { StickFigure } from "../render/StickFigure";
-import { useKeys, wrapIndex } from "../ui/input";
+import { useKeys, wrapIndex, menuSound } from "../ui/input";
 import { ClassPreview } from "./ClassPreview";
 
 export function ClassSelect({ onPick, onBack }: { onPick: (id: ClassId) => void; onBack: () => void }) {
   const [at, setAt] = useState(0);
   const [preview, setPreview] = useState(false);
   useKeys(key => {
+    menuSound(key);
     if (preview) return; // (the preview reads its own keys)
     if (key === "left" || key === "up") setAt(i => wrapIndex(i, -1, CLASSES.length));
     else if (key === "right" || key === "down") setAt(i => wrapIndex(i, 1, CLASSES.length));

@@ -12,9 +12,9 @@ import { StringCounter, type StringPop } from "./StringCounter";
 /**
  * Bars grow with max health. A fighter with this much max health fills the whole bar track
  * (the --bar-track width in index.css); anything less gets a proportionally shorter bar.
- * 120 leaves room above the late-game 100 for passives and buffs.
+ * (60: a bar is twice as long per point as it was at 120.)
  */
-const BAR_FULL_HP = 120;
+const BAR_FULL_HP = 60;
 
 /** What a Rest would give back (see `restRecovery`), shown on the bar before you take it. */
 export interface Recovery {
@@ -60,7 +60,7 @@ function Segments({ v, maxHP, preview = 0, recover }: { v: BarValues; maxHP: num
  * `mirrored` anchors the bar on the right and fills it right to left, for enemies.
  * A stagger bursts into shards.
  */
-export function HealthBar({ fighter, before, className, mirrored, preview, recover }: {
+export function HealthBar({ fighter, before, className, mirrored, preview, recover, gain = 0 }: {
   fighter: Fighter;
   before?: BarValues;
   /** Fatigue about to be paid (an action you are hovering): shown flickering on the bar, before it is committed. */
@@ -69,8 +69,10 @@ export function HealthBar({ fighter, before, className, mirrored, preview, recov
   recover?: Recovery;
   className?: string;
   mirrored?: boolean;
+  /** Max health about to be added (raising a stat): the bar is drawn that much longer, the new part flickering at its end. */
+  gain?: number;
 }) {
-  const { maxHP } = fighter;
+  const maxHP = fighter.maxHP + gain;
   const now: BarValues = { hp: fighter.hp, fatigue: fighter.fatigue, death: fighter.death };
   const sig = `${now.hp}|${now.fatigue}|${now.death}`;
   const startSig = before ? `${before.hp}|${before.fatigue}|${before.death}` : sig;
@@ -100,12 +102,15 @@ export function HealthBar({ fighter, before, className, mirrored, preview, recov
     <div
       className={`bar ${mirrored ? "is-mirrored" : ""} ${fighter.staggered ? "is-staggered" : ""} ${className ?? ""}`}
       role="img"
-      aria-label={`${fighter.name}: health ${Math.round(now.hp)} of ${maxHP}, Fatigue ${Math.round(now.fatigue)}${fighter.staggered ? ", staggered" : ""}`}
+      aria-label={`${fighter.name}: health ${Math.round(now.hp)} of ${fighter.maxHP}, Fatigue ${Math.round(now.fatigue)}${fighter.staggered ? ", staggered" : ""}`}
       style={{ width: `calc(var(--bar-track) * ${Math.min(maxHP, BAR_FULL_HP) / BAR_FULL_HP})` }}
     >
       {/* The trail only shows health that was just lost, in a light red, sliding away. */}
       <span className="bar-layer bar-trail"><i className="bar-lost" style={{ width: barPct(trail.hp, maxHP) }} /></span>
-      <span className="bar-layer bar-now"><Segments v={now} maxHP={maxHP} preview={preview} recover={recover} /></span>
+      <span className="bar-layer bar-now">
+        <Segments v={now} maxHP={maxHP} preview={preview} recover={recover} />
+        {gain > 0 && <i className="bar-gain" style={{ width: barPct(gain, maxHP) }} />}
+      </span>
       {flash > 0 && <span key={`flash-${flash}`} className="bar-flash" />}
       {shatter > 0 && <Shards key={`shatter-${shatter}`} count={8} small />}
     </div>
@@ -134,17 +139,18 @@ function roman(n: number): string {
  * health bar, the Eternity bar under it, and your revives left as a red Roman numeral beside it
  * (nothing once they're gone). Your String counter sits at the top right, on the same row.
  */
-export function PlayerBars({ player, preview, recover, string, stringPops, eternalString }: { player: Player; preview?: number; recover?: Recovery; string?: number; stringPops?: StringPop[]; eternalString?: number }) {
+export function PlayerBars({ player, preview, recover, string, stringPops, eternalString, gain }: { player: Player; preview?: number; recover?: Recovery; string?: number; stringPops?: StringPop[]; eternalString?: number; /** Max health and max Eternity about to be raised: shown on the bars before they are paid for. */ gain?: { health?: number; eternity?: number } }) {
   return (
     <>
       {/* (A fixed slot, so nothing else on screen can push it around.) */}
       <div className="bar-slot bar-slot-player">
-        {player.charges > 0 && (
-          <span className="revive-count" aria-label={`${player.charges} revives left`}>{roman(player.charges)}</span>
+        {/* (A revive being spent still shows until it lands: the red string leaves the numeral, then the numeral drops.) */}
+        {player.charges + (player.reviving ? 1 : 0) > 0 && (
+          <span className="revive-count" aria-label={`${player.charges} revives left`}>{roman(player.charges + (player.reviving ? 1 : 0))}</span>
         )}
         <div className="bar-stack">
-          <HealthBar fighter={player} preview={preview} recover={recover} />
-          <EternityBar player={player} />
+          <HealthBar fighter={player} preview={preview} recover={recover} gain={gain?.health} />
+          <EternityBar player={player} gain={gain?.eternity} />
         </div>
       </div>
       {/* Your String, at the top right on the same row, wherever your bars are. */}
@@ -162,8 +168,9 @@ export function PlayerBars({ player, preview, recover, string, stringPops, etern
  * many points (it holds as much as your max Eternity, raised separately from your health). Eternal weapons' effects drain it; it only fills again when you reawaken.
  * Like the health bar, a change cuts at once with a flash, and a trail of the old value slides after.
  */
-export function EternityBar({ player }: { player: Player }) {
-  const { eternity, maxEternity } = player;
+export function EternityBar({ player, gain = 0 }: { player: Player; /** Max Eternity about to be added: the bar is drawn that much longer, the new part flickering at its end. */ gain?: number }) {
+  const { eternity } = player;
+  const maxEternity = player.maxEternity + gain;
   const [trail, setTrail] = useState(eternity);
   const [flash, setFlash] = useState(0);
   const last = useRef(eternity);
@@ -177,11 +184,12 @@ export function EternityBar({ player }: { player: Player }) {
     <div
       className="bar-eternity"
       role="img"
-      aria-label={`Eternity ${Math.round(eternity)} of ${maxEternity}`}
+      aria-label={`Eternity ${Math.round(eternity)} of ${player.maxEternity}`}
       style={{ width: `calc(var(--bar-track) * ${Math.min(maxEternity, BAR_FULL_HP) / BAR_FULL_HP})` }}
     >
       <i className="bar-eternity-trail" style={{ width: pct(trail) }} />
       <i className="bar-eternity-now" style={{ width: pct(eternity) }} />
+      {gain > 0 && <i className="bar-eternity-gain" style={{ width: pct(gain) }} />}
       {flash > 0 && <span key={`flash-${flash}`} className="bar-flash" />}
     </div>
   );

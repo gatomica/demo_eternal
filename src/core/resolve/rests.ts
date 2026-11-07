@@ -29,14 +29,14 @@ export function settleRests(t: Turn) {
     e.reviving = false;
     t.emit({ kind: "revive", who: e.id });
   }
-  // Something about to be done to you that keeps you down (Usurp Flame taking your flame, aimed
-  // at no ally): you stay down, sealed, until it's done; you only get back up at the very end of
-  // the turn.
+  // Something being done to you that keeps you down (Usurp Flame taking your flame, aimed at no ally):
+  // that turn's forced Rest does not end your stagger. You stay down, sealed in wax, and get up with
+  // the next forced Rest.
   const heldDown = t.alive.some(e => !!e.intent.action && !!kindOf(e).holdsTargetDown?.includes(e.intent.action) && !e.intent.target && !t.out.has(e.id));
   for (const [id, wasForced] of t.resting) {
     const f = t.byId(id)!;
     if (t.fallen.has(id)) continue;
-    if (wasForced && f === p && heldDown && p.staggered) { t.recoverLast = true; continue; }
+    if (wasForced && f === p && heldDown && p.staggered) continue;
     if (wasForced) {
       // The forced Rest always ends the break, hit or not, with Fatigue back to 0.
       f.staggered = false;

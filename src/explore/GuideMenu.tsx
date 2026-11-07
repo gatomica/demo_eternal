@@ -15,39 +15,33 @@
  */
 import { useState } from "react";
 import { ENEMY_KINDS } from "../core/bestiary";
+import type { Player } from "../core/types";
+import { PlayerBars } from "../render/HealthBar";
 import { StickFigure } from "../render/StickFigure";
 import { StringCounter, YarnBall } from "../render/StringCounter";
 import { canEmpower, empowerCost, payment, type Stats } from "./empower";
-import { useKeys, wrapIndex } from "../ui/input";
+import { useKeys, wrapIndex, menuSound } from "../ui/input";
 import { type Gear, gearName, hasMemories, type Inventory as Bag, memoriesFor, pieceAt, type Slot, SLOTS } from "./gear";
 import { GearIcon, GearSprite } from "./GearIcons";
-import { ITEMS } from "./items";
-import { EFFECT, LORE } from "./lore";
+import { cardOfGear, ItemCard } from "./ItemCard";
 
 type Page = "main" | "unwind" | "empower";
 
-const SLOT_LABEL: Record<Slot, string> = { weapon: "Weapon", armor: "Armor", head: "Head" };
 
-/** What a piece is, in the middle box: its name, and once read, its lore and effect (armor has none yet). */
+/** What a piece is, in the middle box: the item card (its lore and effect once read; armor has no effect yet). */
 function Lore({ piece, justRead }: { piece: Gear; justRead: boolean }) {
-  // (A starting class's own piece has its own lore and effect; any other, its tier's.)
-  const info = piece.item ? ITEMS[piece.item] : undefined;
-  const lore = info?.lore ?? (piece.slot === "weapon" ? LORE[piece.tier] : undefined);
-  const effect = info && info.slot === "weapon" ? info.effect : piece.slot === "weapon" && !info ? EFFECT[piece.tier] : undefined;
   return (
-    <div className="guide-lore">
+    <div className="guide-lore-box">
       {justRead && <p className="guide-says">"It dreams still. Listen."</p>}
-      <div className="guide-lore-name">{gearName(piece)}</div>
-      {!piece.read && <p className="guide-lore-text">Its dreams are unread. Press E, and the guide will unwind them.</p>}
-      {piece.read && lore && <p className="guide-lore-text">{lore}</p>}
-      {piece.read && effect && <p className="guide-lore-effect">{effect}</p>}
-      {piece.read && !lore && !effect && <p className="guide-lore-text">Its dreams are faint.</p>}
+      <ItemCard info={cardOfGear(piece)} note={piece.read ? undefined : "Its dreams are unread. Press E, and the guide will unwind them."} />
     </div>
   );
 }
 
-export function GuideMenu({ inv, unwindFirst = false, empowerFirst = false, empowerUnlocked = false, onVisitUnwind, string, eternalString, stats, onEmpower, onTalk, onRest, onRead, onSet, onClose }: {
+export function GuideMenu({ inv, player, unwindFirst = false, empowerFirst = false, empowerUnlocked = false, onVisitUnwind, string, eternalString, stats, onEmpower, onTalk, onRest, onRead, onSet, onClose }: {
   inv: Bag;
+  /** You as your bars show you (for Empower Self's preview of the bars growing). */
+  player: Player;
   /** The first time you speak with the guide after finding a memory: the menu opens on Unwind Memories. */
   unwindFirst?: boolean;
   /** The first time you have String enough to raise a stat: the menu opens on Empower Self. */
@@ -98,6 +92,7 @@ export function GuideMenu({ inv, unwindFirst = false, empowerFirst = false, empo
   };
 
   useKeys(key => {
+    menuSound(key);
     if (key === "back" || key === "pause") {
       if (page === "main") onClose();
       else { setPage("main"); setAt(0); }
@@ -166,7 +161,6 @@ export function GuideMenu({ inv, unwindFirst = false, empowerFirst = false, empo
                 const set = pieceAt(inv, slot, "eternal");
                 return (
                   <div key={slot} className={`guide-set-row ${r === row ? "is-focused" : ""}`} onMouseEnter={() => setAt(r)}>
-                    <span className="inv-row-label">{SLOT_LABEL[slot]}</span>
                     {pieces.length === 0 && <span className="inv-place is-eternal"><span className="inv-place-icon"><GearIcon slot={slot} /></span></span>}
                     {pieces.map((g, i) => (
                       <button
@@ -191,6 +185,8 @@ export function GuideMenu({ inv, unwindFirst = false, empowerFirst = false, empo
           {page === "unwind" && (hovered ? <Lore piece={hovered} justRead={hovered.id === justRead} /> : <p className="guide-says">"Bring me memories, and I will unwind them for you."</p>)}
         </div>
       </div>
+      {/* Your bars as usual, with the point you are about to raise flickering on the end of the one you have chosen. */}
+      {page === "empower" && <PlayerBars player={player} gain={at === 0 ? { health: 1 } : { eternity: 1 }} />}
       {page === "empower" && <StringCounter amount={string} eternal={eternalString} spend={payment(empowerCost(stats[at === 0 ? "maxHP" : "maxEternity"]), string, eternalString) ?? undefined} />}
       <div className="inv-keys">
         <kbd>W</kbd><kbd>S</kbd> choose{page === "unwind" ? <> · <kbd>A</kbd><kbd>D</kbd> piece</> : null} · <kbd>E</kbd> {page === "empower" ? "empower" : page === "unwind" ? (hovered && !hovered.read ? "unwind" : "set") : "pick"} · <kbd>Q</kbd> {page === "main" ? "leave" : "back"}

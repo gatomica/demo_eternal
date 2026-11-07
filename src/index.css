@@ -56,7 +56,14 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   gap: 32px;
   padding: 16px;
 }
-.menu-title { margin: 0; font-size: clamp(1.8rem, 6vw, 3rem); font-weight: 600; letter-spacing: 0.04em; }
+.menu { position: relative; }
+/* The title is fixed in place; the prompt or the menu hangs below it, from a fixed line. */
+.menu-title { position: absolute; top: 22%; left: 0; right: 0; text-align: center; }
+.menu-below { position: absolute; top: 46%; left: 0; right: 0; display: grid; justify-items: center; gap: 32px; }
+.menu-title { margin: 0; font-size: clamp(2.6rem, 11vw, 6.5rem); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+.menu-title-screen { cursor: pointer; }
+.menu-prompt { margin: 0; font-size: 0.9rem; letter-spacing: 0.08em; color: var(--muted); animation: prompt-fade 2.8s ease-in-out infinite; }
+@keyframes prompt-fade { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
 .menu-options { display: grid; gap: 12px; width: min(280px, 80vw); }
 .menu-button {
   padding: 14px 20px;
@@ -85,6 +92,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .explore-got .gear-sprite.is-weapon { width: 64px; height: 26px; }
 @keyframes explore-got { 0% { opacity: 0; transform: translate(-50%, 6px) scale(0.92); } 10% { opacity: 1; transform: translate(-50%, 0) scale(1); } 70% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, 0); } }
 @media (prefers-reduced-motion: reduce) { .explore-got { animation: explore-got-fade 2.2s linear forwards; } }
+.explore-string { animation: explore-string 2.6s ease-out forwards; }
+@keyframes explore-string { 0% { opacity: 0; } 8% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes explore-got-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 /* The guide speaking, along the bottom of the map. */
 .dialogue {
@@ -130,12 +139,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Your String: top right, on the health bar's row, a ball of yarn to the right of the number. */
 .string-slot { position: absolute; z-index: 10; top: var(--bar-inset-top); right: var(--bar-inset-x); height: var(--bar-h); display: flex; align-items: center; justify-content: flex-end; gap: 22px; font-variant-numeric: tabular-nums; pointer-events: none; }
 .string-group { position: relative; display: flex; align-items: center; gap: 8px; }
-.string-group.is-eternal .string-count { color: #cfe6f7; text-shadow: 0 0 8px rgb(190 228 255 / 0.35); }
-.string-group.is-eternal .string-ball { filter: drop-shadow(0 0 5px rgb(190 228 255 / 0.5)); }
-.string-count { font-size: 1.2rem; letter-spacing: 0.03em; color: var(--text); text-shadow: 0 0 8px rgb(255 250 235 / 0.25); }
-.string-ball { width: 24px; height: 24px; filter: drop-shadow(0 0 5px rgb(255 250 235 / 0.35)); }
+.string-group.is-eternal .string-count { color: #b0d6fa; text-shadow: 0 0 8px rgb(150 205 255 / 0.35); }
+.string-group.is-eternal .string-ball { filter: drop-shadow(0 0 5px rgb(150 205 255 / 0.5)); }
+.string-count { font-size: 1.2rem; letter-spacing: 0.03em; color: var(--text); text-shadow: 0 0 8px rgb(255 255 255 / 0.25); }
+.string-ball { width: 24px; height: 24px; filter: drop-shadow(0 0 5px rgb(255 255 255 / 0.35)); }
 /* "+X" under the counter as String lands: pops in, floats down a little, fades. */
-.string-pop { position: absolute; right: 32px; top: 100%; white-space: nowrap; margin-top: 6px; font-size: 1rem; color: #f4f1e6; text-shadow: 0 0 8px rgb(255 250 235 / 0.5); animation: string-pop 1.7s ease-out forwards; }
+.string-pop { position: absolute; right: 32px; top: 100%; white-space: nowrap; margin-top: 6px; font-size: 1rem; color: #ffffff; text-shadow: 0 0 8px rgb(255 255 255 / 0.5); animation: string-pop 1.7s ease-out forwards; }
 /* "-X" under a counter: what Empower Self would spend of that String (the eternal String last). */
 .string-spend { position: absolute; right: 32px; top: 100%; white-space: nowrap; margin-top: 6px; font-size: 1rem; color: #e9b7a8; }
 @keyframes string-pop { 0% { opacity: 0; transform: translateY(-4px) scale(0.8); } 14% { opacity: 1; transform: translateY(2px) scale(1.12); } 70% { opacity: 1; } 100% { opacity: 0; transform: translateY(14px); } }
@@ -151,9 +160,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .empower-cost .string-ball { width: 20px; height: 20px; }
 /* The faint string round an enemy that holds some of what you lost. */
 .string-aura { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; opacity: 0.55; }
-.string-aura path { fill: none; stroke: #f2efe4; stroke-width: 0.9; stroke-linecap: round; stroke-dasharray: 5 3; animation: string-flow 3.2s linear infinite; filter: drop-shadow(0 0 2px rgb(255 250 235 / 0.7)); }
-@keyframes string-flow { to { stroke-dashoffset: -32; } }
-@media (prefers-reduced-motion: reduce) { .string-aura path { animation: none; } }
+.string-aura path { fill: none; stroke: #ffffff; stroke-width: 0.9; stroke-linecap: round; filter: drop-shadow(0 0 2px rgb(255 255 255 / 0.7)); }
 /* While a turn plays, the target's bar sits bottom right: the same distance from the bottom edge as yours is from the top, and from the right as yours is from the left. */
 .bar-slot-target { bottom: var(--bar-inset-top); right: var(--bar-inset-x); justify-items: end; text-align: right; }
 .hud-target { display: grid; gap: 6px; justify-items: end; width: 100%; }
@@ -304,6 +311,9 @@ kbd {
 .picker.is-focused { border-color: var(--line); background: var(--panel); }
 .menu-button.is-focused { border-color: var(--accent); }
 
+/* A won fight leaves the way the last string winds in: the scene fades to black. */
+.combat-fadeout { position: absolute; inset: 0; z-index: 30; background: #000; pointer-events: none; animation: combat-fadeout 0.9s ease-in forwards; }
+@keyframes combat-fadeout { from { opacity: 0; } to { opacity: 1; } }
 .result { position: absolute; inset: 0; z-index: 20; display: grid; place-items: center; background: rgb(0 0 0 / 0.55); }
 .result-card { display: grid; gap: 12px; padding: 24px 28px; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel); text-align: center; }
 .result-card h2, .result-card p { margin: 0; }
@@ -313,7 +323,7 @@ kbd {
 .menu-button.is-quiet { opacity: 0.4; font-size: 0.75rem; padding: 4px 10px; justify-self: center; width: auto; }
 .menu-button.is-quiet:hover, .menu-button.is-quiet.is-focused { opacity: 0.9; }
 .pause-menu { display: grid; gap: 10px; width: min(280px, 80vw); }
-.volume-slider { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; padding: 6px 4px 0; font-size: 0.85rem; opacity: 0.85; }
+.volume-slider { display: grid; grid-template-columns: auto 1fr 3.4rem; align-items: center; gap: 12px; padding: 6px 4px 0; font-size: 0.85rem; opacity: 0.85; }
 .menu-volume { width: min(280px, 80vw); }
 .volume-slider input { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
@@ -336,6 +346,9 @@ kbd {
 @keyframes bar-recover { from { opacity: 0.9; } to { opacity: 0.1; } }
 .bar-heal { background: var(--flesh); animation: bar-preview 0.8s ease-in-out infinite alternate; }
 .bar-death { background: var(--void); }
+/* Max health about to be raised: the bar's new end, flickering. */
+.bar-layer > i.bar-gain { position: absolute; right: 0; top: 0; background: var(--flesh); animation: bar-preview 0.8s ease-in-out infinite alternate; }
+.bar-eternity > i.bar-eternity-gain { left: auto; right: 0; background: #dcf1ff; animation: bar-preview 0.8s ease-in-out infinite alternate; }
 .bar-flash { position: absolute; inset: -1px; border-radius: 3px; background: #fff; pointer-events: none; animation: bar-flash 0.3s ease-out forwards; }
 @keyframes bar-flash { from { opacity: 0.85; } to { opacity: 0; } }
 /* Your Eternity, a thin pale blue bar tucked right under your health bar. */
@@ -688,7 +701,6 @@ kbd {
 .inv-column { display: grid; gap: 16px; }
 /* A slot: its name, then its places (eternal, ordinary, and on the ground while something lies within reach). */
 .inv-row { display: flex; align-items: center; gap: 12px; }
-.inv-row-label { width: 4.5rem; color: var(--accent); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; }
 .inv-place {
   position: relative; display: flex; align-items: center; gap: 10px; height: 78px; min-width: 78px; padding: 8px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); text-align: left;
@@ -696,19 +708,16 @@ kbd {
 }
 .inv-place-icon { flex: none; width: 60px; height: 60px; display: block; }
 .inv-place-icon .gear-sprite.is-weapon, .inv-place-icon .gear-sprite.is-armor, .inv-place-icon .gear-sprite.is-head { width: 100%; height: 100%; }
-/* The place under the cursor stretches sideways to show its name and its weight. */
-.inv-place.is-open { padding-right: 16px; }
-.inv-place-text { display: grid; gap: 2px; white-space: nowrap; animation: inv-open 0.14s ease-out both; }
-@keyframes inv-open { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
-.inv-place-name { font-size: 0.98rem; }
-.inv-place-weight { font-size: 0.78rem; opacity: 0.65; }
 /* What you wield, and the place under the cursor: white; in the eternal place, the light blue of Eternity. */
 .inv-place { --place-hi: #f3f1f8; }
 .inv-place.is-eternal { --place-hi: #bfe4ff; }
 .inv-place.is-equipped { background: color-mix(in srgb, var(--place-hi) 42%, var(--panel)); border-color: var(--place-hi); }
-.inv-place.is-equipped .inv-place-name { color: #fff; }
 .inv-place.is-focused { outline: 2px solid var(--place-hi); outline-offset: 2px; }
 /* The ground place is dashed, as if lying loose. */
+.inv-row.is-knot-row { margin-top: 10px; }
+.inv-place.is-knot { --place-hi: #f0a79e; }
+.knot-ball { width: 100%; height: 100%; display: block; filter: drop-shadow(0 0 5px rgb(255 120 105 / 0.45)); }
+.inv-place-icon.is-slack { opacity: 0.45; }
 .inv-place.is-ground { border-style: dashed; background: transparent; }
 /* The keys, on the bottom strip. */
 .inv-keys { position: absolute; left: 0; right: 0; bottom: 0; height: var(--strip-h); z-index: 10; display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 0.85rem; opacity: 0.75; white-space: pre; }
@@ -736,6 +745,15 @@ kbd {
 .guide-set-row { display: flex; align-items: center; gap: 10px; padding: 4px; border-radius: 8px; }
 .guide-set-row.is-focused { background: rgb(255 255 255 / 0.04); }
 /* What a read piece is: its name, its lore, and its effect. */
+/* The item card in the middle of an item menu: the item large, then its name, type, lore and effects. */
+.item-card { display: grid; justify-items: center; gap: 8px; text-align: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: rgb(21 20 27 / 0.9); animation: card-in 0.14s ease-out both; }
+@keyframes card-in { from { opacity: 0; } to { opacity: 1; } }
+.inv-place-icon.item-card-icon { width: 140px; height: 140px; }
+.item-card-name { font-size: 1.1rem; font-weight: 600; }
+.item-card-type { margin-top: -4px; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.item-card-lore { margin: 0; font-size: 0.92rem; line-height: 1.45; opacity: 0.9; }
+.item-card-effect { margin: 0; font-size: 0.85rem; line-height: 1.4; color: #dcf1ff; }
+.item-card.is-empty { opacity: 0.6; }
 .guide-lore { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: rgb(21 20 27 / 0.9); }
 .guide-lore-name { font-weight: 600; }
 .guide-lore-text { margin: 0; font-size: 0.92rem; line-height: 1.45; opacity: 0.9; }
@@ -818,3 +836,21 @@ kbd {
 .class-confirm p { margin: 0; font-size: 1.05rem; }
 .class-confirm-buttons { display: flex; gap: 12px; }
 .class-confirm-buttons .menu-button { width: auto; min-width: 110px; }
+
+.volume-speaker { display: grid; place-items: center; padding: 4px; border-radius: 6px; color: inherit; background: none; border: 0; cursor: pointer; }
+.volume-speaker:hover { color: var(--accent); }
+.volume-slider input.is-muted { opacity: 0.4; }
+
+/* ---------- The music viewer (developer tools) ---------- */
+.music-viewer { height: 100%; display: grid; place-content: center; justify-items: center; gap: 18px; padding: 16px; }
+.music-viewer h2 { margin: 0; font-weight: 600; letter-spacing: 0.06em; }
+.music-options { display: grid; gap: 8px; width: min(420px, 90vw); }
+.music-options .menu-button { padding: 10px 16px; font-size: 1rem; }
+.music-status { margin: 0; font-size: 0.9rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.music-status b { color: var(--text); font-weight: 600; }
+.volume-name { font-size: 0.8rem; opacity: 0.8; white-space: nowrap; }
+/* The death card of a fatal fall: over the top of the scene, so the body can still be seen falling. */
+.result.is-fall { background: rgb(0 0 0 / 0.25); place-items: start center; padding-top: 14vh; }
+/* The developer tools' options, in a column at the right of the start menu (the game's own stay in the middle). */
+.menu-dev { position: absolute; right: 5vw; top: 50%; transform: translateY(-50%); display: grid; gap: 8px; width: min(230px, 28vw); }
+.menu-dev .menu-button { padding: 10px 14px; font-size: 0.95rem; }

@@ -58,6 +58,9 @@ export const STEP_TOLERANCE = 0.35;
 /** How quickly falls speed up, in storeys per second squared. */
 export const GRAVITY = 10;
 
+/** A fall of this many storeys or more kills you (the camera stays where it was, and the body falls on). */
+export const FALL_FATAL = 5;
+
 /** The height of a plane under the whole map (level -10): whoever falls through the cracks of the geometry lands on it, and that is the end of them (they wake by the keeper they last rested by). */
 export const FALL_DEATH_ALT = -10;
 

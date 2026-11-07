@@ -7,7 +7,7 @@ import { ENCOUNTERS } from "../core/encounters";
 import type { ArmorItem, HeadItem, WeaponItem } from "../core/types";
 import { ITEMS, loadoutOfItems, type Picks } from "../explore/items";
 import { StickFigure } from "../render/StickFigure";
-import { cycle, useKeys } from "./input";
+import { cycle, useKeys, menuSound } from "./input";
 import { Picker } from "./Picker";
 
 const WEAPON_KEYS = ["none", "shortsword", "axe", "sickle"] as const;
@@ -49,6 +49,7 @@ export function SetupScreen<S extends Picks & { encounterId?: string }>({ setup,
   const [row, setRow] = useState(0);
 
   useKeys(key => {
+    menuSound(key);
     if (key === "up") setRow(r => Math.max(0, r - 1));
     else if (key === "down") setRow(r => Math.min(rows.length - 1, r + 1));
     else if (key === "left" || key === "right") {

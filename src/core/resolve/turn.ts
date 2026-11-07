@@ -60,8 +60,6 @@ export interface Turn {
   interrupted: Set<string>;
   /** Enemies that fell with a revive left: their protected turn is next. */
   fellReviving: Set<string>;
-  /** Your forced Rest waits until the very end of the turn (your flame is being taken). */
-  recoverLast: boolean;
   /** Who last did you damage this turn (an enemy id): whose blow it was, should you fall. */
   hurtBy?: string;
   /** How your attack this turn swings (from the stance you start it in). */
@@ -110,7 +108,6 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
     wasStaggered: new Set(fighters.filter(f => f.staggered).map(f => f.id)),
     hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(),
     cancelled: new Set(), attacked: new Map(), interrupted: new Set(), fellReviving: new Set(),
-    recoverLast: false,
     swing: act?.type === "attack" ? swingFor(p.stance, alive.find(e => e.id === act.target)) : undefined,
     steps: [],
     events: [],

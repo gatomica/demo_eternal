@@ -523,6 +523,17 @@ export function boxOnDiagFloor(z: number, tx: number, ty: number, x0: number, y0
   return Math.min(diagDepth(side, ax, ay), diagDepth(side, bx, ay), diagDepth(side, ax, by), diagDepth(side, bx, by)) >= -1e-6;
 }
 
+/**
+ * How far into the wall half of the diagonal tile (tx, ty) on level z the box [x0, x1] x [y0, y1] reaches at worst: negative inside the wall, 0 on the
+ * diagonal, positive clear of it (1 if the box is outside the tile).
+ */
+export function boxDiagDepth(z: number, tx: number, ty: number, x0: number, y0: number, x1: number, y1: number) {
+  const side = WORLD.levels[z].diags[ty * WORLD.w + tx];
+  const ax = Math.max(x0, tx) - tx, bx = Math.min(x1, tx + 1) - tx, ay = Math.max(y0, ty) - ty, by = Math.min(y1, ty + 1) - ty;
+  if (bx < ax || by < ay) return 1;
+  return Math.min(diagDepth(side, ax, ay), diagDepth(side, bx, ay), diagDepth(side, ax, by), diagDepth(side, bx, by));
+}
+
 /** Whether any of the box [x0, x1] x [y0, y1] inside the diagonal tile (tx, ty) on level z is on its floor half. */
 export function boxTouchesDiagFloor(z: number, tx: number, ty: number, x0: number, y0: number, x1: number, y1: number) {
   const side = WORLD.levels[z].diags[ty * WORLD.w + tx];

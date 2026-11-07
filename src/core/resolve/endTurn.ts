@@ -4,7 +4,7 @@
  */
 import { kindOf } from "../bestiary";
 import { stanceAfter } from "../stance";
-import { backOnFeet, fatigueGone } from "./statuses";
+import { fatigueGone } from "./statuses";
 import type { Turn } from "./turn";
 
 export function endTurn(t: Turn) {
@@ -98,14 +98,6 @@ export function endTurn(t: Turn) {
     });
   }
   t.endStep();
-  if (t.recoverLast) {
-    // The forced Rest ends the break, as always: the wax sealing you breaks away with it.
-    p.staggered = false;
-    p.fatigue = 0;
-    backOnFeet(p);
-    t.emit({ kind: "rest", who: p.id, result: "recovered", forced: true });
-    t.endStep();
-  }
 
   if (s.enemies.every(e => !e.alive) && s.status === "playing") s.status = "won";
 }
