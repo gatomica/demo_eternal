@@ -207,6 +207,10 @@ export const WARDEN: EnemyKind = {
     if (hit.self.flags.flaming) hit.burn(hit.damage * FLAMING_BONUS);
     if (!hit.self.flags.phase2) hit.wax();
   },
+  // The wax does not need a clean hit: his flail leaves it on a target that blocks it too, as long as it is not covered already.
+  onBlocked: hit => {
+    if (hit.tags.includes("waxing") && !hit.self.flags.phase2 && !hit.target.waxed) hit.wax();
+  },
   afterTurn: r => {
     const { self, state, action, outcome } = r;
     if (outcome === "done") {
@@ -261,11 +265,8 @@ export const WARDEN: EnemyKind = {
         r.event({ kind: "encased", who: ally.id });
       }
     }
-    if (r.fell && !self.flags.phase2) self.flags.phase2Pending = true;
-    if (self.flags.phase2Pending && outcome === "recover" && !self.staggered && !self.reviving) {
-      self.flags.phase2Pending = false;
-      enterPhaseTwo(r);
-    }
+    // The way into phase two opens only when he falls with his revive: it happens as his revive lands, at the end of the turn he fell.
+    if (r.fell && !self.flags.phase2) enterPhaseTwo(r);
   },
   /**
    * The fight's opening scene: he takes the flame an offering waxed cradles (Usurp Flame),

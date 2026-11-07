@@ -30,7 +30,7 @@ export interface DirectHit {
   tags: string[];
   /** Burns the target for this much more damage. */
   burn: (amount: number) => void;
-  /** Leaves the target Waxed (on wax already there, it also tires: 1/8 of the damage). */
+  /** Leaves the target Waxed (on wax already there, a direct hit also tires it: 1/8 of the damage). */
   wax: () => void;
 }
 
@@ -65,6 +65,8 @@ export interface EnemyKind {
   ownWeapon?: boolean;
   /** It drops nothing when it falls (the Warden, for now). */
   noDrops?: boolean;
+  /** It always counts as Waxed (the waxed, the Wax Blob's parts): it never has the status put on it, nor takes it off, and nothing that needs a target without it (the Waxed Torch) works on it. */
+  alwaysWaxed?: boolean;
   /** Drawn wearing the Penitent Warden's pointed hood (a patrol warden), on the map too. */
   hood?: boolean;
   /** Drawn with a special look (see render/looks.ts). */
@@ -139,6 +141,8 @@ export interface EnemyKind {
   holdsTargetDown?: string[];
   /** What its direct hits do besides the damage (its action's tags say which rules apply). */
   onDirectHit?: (hit: DirectHit) => void;
+  /** Its (melee) blow was blocked: what that still does (the Warden's flail still leaves its wax). */
+  onBlocked?: (hit: Pick<DirectHit, "self" | "target" | "tags" | "wax">) => void;
   /** Its own rules at the end of each turn: statuses, phases, effects of its actions. */
   afterTurn?: (r: TurnReport) => void;
   /** A scene played before the first turn of a fight it's in, if the setup calls for one. */

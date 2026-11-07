@@ -69,9 +69,9 @@ export function Journeying({ fresh = false, skip = false, classId = "soldier", o
   const fall = (backTo: Journey, earned = 0, killer?: string, lostAt?: { x: number; y: number; alt: number }) => {
     // (The map wakes exactly as it does when you rest: see `wakeEnemies`. Falling also costs your ordinary gear.)
     const woke = wakeEnemies({ corpses: withCorpses(backTo.corpses ?? {}, backTo.defeated), defeated: backTo.defeated, ground: backTo.ground });
-    // All your String is lost (what you carried and what this fight gave you). Half of it is left on the enemy that killed you,
-    // to be had when it is defeated; with no enemy to blame, half lies where you last stood, to gather.
-    const half = Math.floor(((backTo.string ?? 0) + earned) / 2);
+    // All your String is lost (what you carried and what this fight gave you), none of it gone for good: all of it is left on the enemy that killed you,
+    // to be had when it is defeated, or, with no enemy to blame, lies where you last stood, to gather.
+    const half = Math.floor((backTo.string ?? 0) + earned);
     const held = { ...backTo.held };
     let ground = woke.ground;
     if (half > 0 && killer) held[killer] = (held[killer] ?? 0) + half;
@@ -116,6 +116,7 @@ export function Journeying({ fresh = false, skip = false, classId = "soldier", o
         onRetry={() => setFight(f => f && { ...f, id: f.id + 1, wake: false, ...(f.lesson ? lessonFight(f.backTo) : fightFor(f.foes, f.backTo)) })}
         onExit={() => leave(backTo)}
         string={backTo.string ?? 0}
+        knotOwned={backTo.knot !== undefined}
         eternalString={backTo.eternalString ?? 0}
         onDone={(won, charges, eternity, result) => {
           if (fight.lesson) {

@@ -3,7 +3,7 @@
  */
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import type { Fighter, Player } from "../core/types";
-import { StringCounter, type StringPop } from "./StringCounter";
+import { KnotMark, StringCounter, type StringPop } from "./StringCounter";
 
 /* ============================================================
  * Health bar
@@ -60,7 +60,9 @@ function Segments({ v, maxHP, preview = 0, recover }: { v: BarValues; maxHP: num
  * `mirrored` anchors the bar on the right and fills it right to left, for enemies.
  * A stagger bursts into shards.
  */
-export function HealthBar({ fighter, before, className, mirrored, preview, recover, gain = 0 }: {
+export function HealthBar({ fighter, before, className, mirrored, preview, recover, gain = 0, eternalFlash }: {
+  /** An eternal effect touched this bar (extra Fatigue or damage given, Fatigue saved): it flashes pale blue (a new key flashes again). */
+  eternalFlash?: string;
   fighter: Fighter;
   before?: BarValues;
   /** Fatigue about to be paid (an action you are hovering): shown flickering on the bar, before it is committed. */
@@ -112,6 +114,7 @@ export function HealthBar({ fighter, before, className, mirrored, preview, recov
         {gain > 0 && <i className="bar-gain" style={{ width: barPct(gain, maxHP) }} />}
       </span>
       {flash > 0 && <span key={`flash-${flash}`} className="bar-flash" />}
+      {eternalFlash && <span key={`eternal-${eternalFlash}`} className="bar-flash is-eternal" />}
       {shatter > 0 && <Shards key={`shatter-${shatter}`} count={8} small />}
     </div>
   );
@@ -139,18 +142,22 @@ function roman(n: number): string {
  * health bar, the Eternity bar under it, and your revives left as a red Roman numeral beside it
  * (nothing once they're gone). Your String counter sits at the top right, on the same row.
  */
-export function PlayerBars({ player, preview, recover, string, stringPops, eternalString, gain }: { player: Player; preview?: number; recover?: Recovery; string?: number; stringPops?: StringPop[]; eternalString?: number; /** Max health and max Eternity about to be raised: shown on the bars before they are paid for. */ gain?: { health?: number; eternity?: number } }) {
+export function PlayerBars({ player, preview, recover, string, stringPops, eternalString, gain, eternalFlash, knot }: { player: Player; /** You have the revive knot (its symbol shows even when it is spent). */ knot?: boolean; /** Eternal effects this beat: which of your bars they touched (a new key flashes it again). */ eternalFlash?: { health?: string; eternity?: string }; preview?: number; recover?: Recovery; string?: number; stringPops?: StringPop[]; eternalString?: number; /** Max health and max Eternity about to be raised: shown on the bars before they are paid for. */ gain?: { health?: number; eternity?: number } }) {
   return (
     <>
       {/* (A fixed slot, so nothing else on screen can push it around.) */}
       <div className="bar-slot bar-slot-player">
-        {/* (A revive being spent still shows until it lands: the red string leaves the numeral, then the numeral drops.) */}
-        {player.charges + (player.reviving ? 1 : 0) > 0 && (
-          <span className="revive-count" aria-label={`${player.charges} revives left`}>{roman(player.charges + (player.reviving ? 1 : 0))}</span>
+        {/* The knot: its symbol, with the number of revives you have left in red over its white middle (the middle goes black when none is left).
+            Only once you have a knot (or a revive from elsewhere). */}
+        {(knot || player.charges > 0) && (
+          <span className={`revive-count ${player.charges > 0 ? "" : "is-empty"}`} aria-label={`${player.charges} revives left`}>
+            <KnotMark className="revive-knot" empty={player.charges <= 0} />
+            {player.charges > 0 && <span className={`revive-num ${roman(player.charges).length > 2 ? "is-long" : ""}`}>{roman(player.charges)}</span>}
+          </span>
         )}
         <div className="bar-stack">
-          <HealthBar fighter={player} preview={preview} recover={recover} gain={gain?.health} />
-          <EternityBar player={player} gain={gain?.eternity} />
+          <HealthBar fighter={player} preview={preview} recover={recover} gain={gain?.health} eternalFlash={eternalFlash?.health} />
+          <EternityBar player={player} gain={gain?.eternity} flash={eternalFlash?.eternity} />
         </div>
       </div>
       {/* Your String, at the top right on the same row, wherever your bars are. */}
@@ -168,7 +175,7 @@ export function PlayerBars({ player, preview, recover, string, stringPops, etern
  * many points (it holds as much as your max Eternity, raised separately from your health). Eternal weapons' effects drain it; it only fills again when you reawaken.
  * Like the health bar, a change cuts at once with a flash, and a trail of the old value slides after.
  */
-export function EternityBar({ player, gain = 0 }: { player: Player; /** Max Eternity about to be added: the bar is drawn that much longer, the new part flickering at its end. */ gain?: number }) {
+export function EternityBar({ player, gain = 0, flash: spent }: { player: Player; /** Eternity was just spent: the bar flashes pale blue (a new key flashes again). */ flash?: string; /** Max Eternity about to be added: the bar is drawn that much longer, the new part flickering at its end. */ gain?: number }) {
   const { eternity } = player;
   const maxEternity = player.maxEternity + gain;
   const [trail, setTrail] = useState(eternity);
@@ -191,6 +198,7 @@ export function EternityBar({ player, gain = 0 }: { player: Player; /** Max Eter
       <i className="bar-eternity-now" style={{ width: pct(eternity) }} />
       {gain > 0 && <i className="bar-eternity-gain" style={{ width: pct(gain) }} />}
       {flash > 0 && <span key={`flash-${flash}`} className="bar-flash" />}
+      {spent && <span key={`spent-${spent}`} className="bar-flash is-eternal" />}
     </div>
   );
 }

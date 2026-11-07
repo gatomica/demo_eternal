@@ -104,7 +104,10 @@ export function phaseAt(steps: Step[], index: number, elapsed: number): Playback
   return phase === "impact" && afterAttacks && elapsed < MIN_ATTACK_PHASE_MS ? "approach" : phase;
 }
 
-export const phaseFor = (st: Step | undefined): Playback["phase"] => (phaseTwoOf(st) ? "ignite" : usurpOf(st) ? "usurp" : isAttackStep(st) ? "approach" : "impact");
+/** The step where you rise again with a revive, if it is this one: it waits in its first beat (the red string winds round your remains) before it plays. */
+export const youReviveIn = (st: Step | undefined) => !!st?.events.some(ev => ev.kind === "revive" && ev.who === "player");
+
+export const phaseFor = (st: Step | undefined): Playback["phase"] => (phaseTwoOf(st) ? "ignite" : usurpOf(st) ? "usurp" : isAttackStep(st) || youReviveIn(st) ? "approach" : "impact");
 
 /** How long the arena shows before a fight's opening scene starts, in ms. */
 export const OPENING_LEAD_IN = 1200;
@@ -171,6 +174,8 @@ interface TurnIndex {
   maneuver: Map<string, number>;
   /** Its Rest was broken by a blow. */
   interrupted: Set<string>;
+  /** The step where it rises again with a revive, at the end of the turn it fell. */
+  revived: Map<string, number>;
   /** The step where it takes a flame (Usurp Flame). */
   usurp: Map<string, number>;
   /** The first step where it's back on its feet: its forced Rest recovers, or its revive lands. */
@@ -184,7 +189,7 @@ interface TurnIndex {
 export function indexTurn(steps: Step[]): TurnIndex {
   const ix: TurnIndex = {
     strike: new Map(), rest: new Map(), fall: new Map(), raised: new Map(), targeted: new Map(), dodge: new Map(), hit: new Map(), maneuver: new Map(),
-    interrupted: new Set(), usurp: new Map(), backUp: new Map(), phaseTwoBy: new Map(), phaseTwo: -1,
+    interrupted: new Set(), revived: new Map(), usurp: new Map(), backUp: new Map(), phaseTwoBy: new Map(), phaseTwo: -1,
   };
   const first = (m: Map<string, number>, id: string, i: number) => { if (!m.has(id)) m.set(id, i); };
   steps.forEach((st, i) => {
@@ -204,7 +209,7 @@ export function indexTurn(steps: Step[]): TurnIndex {
         if (ev.result === "rested") first(ix.rest, ev.who, i);
         if (ev.result === "interrupted") ix.interrupted.add(ev.who);
         if (ev.result === "recovered") first(ix.backUp, ev.who, i);
-      } else if (ev.kind === "revive") first(ix.backUp, ev.who, i);
+      } else if (ev.kind === "revive") { first(ix.backUp, ev.who, i); first(ix.revived, ev.who, i); }
       else if (ev.kind === "fall") first(ix.fall, ev.who, i);
       else if (ev.kind === "raised") first(ix.raised, ev.who, i);
     }

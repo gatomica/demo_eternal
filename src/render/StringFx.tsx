@@ -1,11 +1,12 @@
 /**
  * StringFx.tsx — String leaving a fallen enemy for you. A line of string spirals out of its remains, wanders about erratically,
  * coils tight, and darts into you; only then does the counter go up (`onLand`). A boss's String is many of them, bursting out
- * of it in every direction before they all come in. It is a canvas laid over the fight, drawn on its own
+ * of it in every direction before they all come in. It is a canvas laid over the fight's field (under your own figure), drawn on its own
  * clock: whatever else is playing, it neither waits for it nor stops it. It reads where the remains and you are on screen each frame
  * (the camera moves), from the figures' `data-fig` boxes.
  */
 import { type RefObject, useEffect, useRef } from "react";
+import { strokeSmooth } from "./smoothTrail";
 
 /** One lot of String on its way: from the figure `from` to you, `amount` of it. */
 export interface StringBurst {
@@ -35,6 +36,11 @@ interface Live {
   end2?: { x: number; y: number };
   /** How much of the string still shows (it fades as it coils). */
   fade: number;
+  /** Where the head was and how fast it was going (px/s) as of the last frame, so the coil can take up where the wandering left off. */
+  last?: { x: number; y: number; t: number };
+  vel?: { x: number; y: number };
+  /** The coil round you, fixed as it begins: the angle and distance it comes in at, which way it turns, and how fast it is already turning. */
+  coil?: { th0: number; r0: number; sign: 1 | -1; speed: number };
 }
 
 const ease = (k: number) => k * k * (3 - 2 * k);
@@ -60,6 +66,9 @@ export function StringFx({ bursts, root, onLand }: { bursts: StringBurst[]; root
       cv.width = Math.round(base.width * dpr);
       cv.height = Math.round(base.height * dpr);
     }
+    // Just under your figure's layer, so the string winds round you from behind (whatever stands nearer than you still covers it).
+    const mine = host.querySelector<HTMLElement>('[data-fig="player"]');
+    if (mine) cv.style.zIndex = String((parseInt(mine.style.zIndex, 10) || 1000) - 1);
     const g = cv.getContext("2d")!;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, base.width, base.height);
@@ -109,13 +118,31 @@ export function StringFx({ bursts, root, onLand }: { bursts: StringBurst[]; root
         s.end2 = { x, y };
       } else {
         // Coiling round you: round and round, ever tighter and faster, fading as it winds in, until it is gone into you.
-        const k = Math.min(1, (t - T2) / (T3 - T2)), r = ud * lerp(0.95, 0.12, ease(k)), ang = Math.PI * 2 * (2 + 5 * k * k) + s.a[0];
-        const b = ease(Math.min(1, k / 0.25));
-        x = lerp(s.end2?.x ?? dst.x, dst.x + Math.cos(ang) * r, b);
-        y = lerp(s.end2?.y ?? dst.y, dst.y + Math.sin(ang) * r * 0.75 - ud * 0.1, b);
+        // It takes up where the wandering left off: it comes in at the angle it is at, turns the way it was already heading (so it never swings
+        // back against its own direction), and starts out as fast as it was going.
+        const k = Math.min(1, (t - T2) / (T3 - T2));
+        if (!s.coil) {
+          const e = s.end2 ?? dst, rx = e.x - dst.x, ry = (e.y - dst.y) / 0.75;
+          const r0 = Math.max(ud * 0.2, Math.hypot(rx, ry));
+          const v = s.vel ?? { x: 0, y: 0 };
+          // (The way round that continues its course: the sign of how its velocity turns about the centre.)
+          const along = (-ry * v.x + rx * (v.y / 0.75)) / r0;
+          s.coil = { th0: Math.atan2(ry, rx), r0, sign: along >= 0 ? 1 : -1, speed: Math.min(3, Math.max(0.25, (Math.abs(along) / r0) * (T3 - T2) / (Math.PI * 2))) };
+        }
+        const c = s.coil;
+        // (Turns made so far: the speed it came in at, building up to five turns in all.)
+        const turns = c.speed * k + (5 - c.speed) * k * k, ang = c.th0 + c.sign * Math.PI * 2 * turns, r = lerp(c.r0, ud * 0.12, ease(k));
+        x = dst.x + Math.cos(ang) * r;
+        y = dst.y + Math.sin(ang) * r * 0.75 - ud * 0.1 * ease(Math.min(1, k / 0.25));
         s.fade = 1 - ease(k);
         if (k >= 1 && !s.landed) { s.landed = true; land.current(s.burst); }
       }
+      // How fast the head is going, a little smoothed.
+      if (s.last && now > s.last.t) {
+        const dtv = (now - s.last.t) / 1000, nv = { x: (x - s.last.x) / dtv, y: (y - s.last.y) / dtv };
+        s.vel = s.vel ? { x: lerp(s.vel.x, nv.x, 0.4), y: lerp(s.vel.y, nv.y, 0.4) } : nv;
+      }
+      s.last = { x, y, t: now };
       if (t < T3) s.trail.push({ x, y });
       // Once it has wound in, what is left of the string follows it.
       else for (let i = 0; i < 3 && s.trail.length; i++) s.trail.shift();
@@ -126,12 +153,8 @@ export function StringFx({ bursts, root, onLand }: { bursts: StringBurst[]; root
       g.lineCap = "round"; g.lineJoin = "round";
       const [cr, cg, cb] = rv ? [224, 52, 44] : [255, 255, 255];
       g.shadowColor = `rgba(${rv ? "255, 70, 60" : "255, 255, 255"}, ${0.75 * s.fade})`; g.shadowBlur = 8;
-      for (let i = 1; i < s.trail.length; i++) {
-        const k = i / s.trail.length;
-        g.strokeStyle = `rgba(${cr}, ${cg}, ${cb}, ${(0.15 + 0.8 * k) * s.fade})`;
-        g.lineWidth = (0.6 + 2.2 * k) * bold;
-        g.beginPath(); g.moveTo(s.trail[i - 1].x, s.trail[i - 1].y); g.lineTo(s.trail[i].x, s.trail[i].y); g.stroke();
-      }
+      // (Smoothed through its points, so it bends in curves rather than turning at corners.)
+      strokeSmooth(g, s.trail, k => ({ color: `rgba(${cr}, ${cg}, ${cb}, ${(0.15 + 0.8 * k) * s.fade})`, width: (0.6 + 2.2 * k) * bold }));
       g.shadowBlur = 0;
     }
     live.current = live.current.filter(s => s.trail.length > 0 || s.t0 + (s.burst.delay ?? 0) + T3 * 1000 > now);

@@ -121,10 +121,13 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   // The Bronze Shortsword: attacking again right after an attack costs you less Fatigue, for Eternity.
   if (attacker === p && p.weaponItem === "shortsword" && p.eternal && !t.s.config.dummy && p.lastAction === "attack" && isWeaponBlow(attacker, weight)) {
     const saved = Math.min(cost, dmg * ITEM_SHARE);
-    if (saved > 0) {
+    // Only the Fatigue it really spares counts: what would have gone past a full bar anyway (into the stagger) is no saving, and costs no Eternity.
+    const room = fatigueRoom(attacker);
+    const spared = Math.min(cost, room) - Math.min(cost - saved, room);
+    if (spared > 1e-9) {
       cost -= saved;
-      const paid = spendEternity(p, saved * ETERNITY_PRICE.shortsword);
-      t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: "shortsword", damage: 0, fatigue: saved, ...paid });
+      const paid = spendEternity(p, spared * ETERNITY_PRICE.shortsword);
+      t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: "shortsword", damage: 0, fatigue: spared, ...paid });
     }
   }
   t.tire(attacker, cost);
@@ -159,6 +162,9 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   const self = attacker !== p ? (attacker as Enemy) : undefined;
   t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, grit, fire: !!self?.intent.tags?.includes("fire"), swing });
   eternalEffect(t, attacker, target, blocking ? "blocked" : "hit", ranged, weight, dmg);
+  // A blocked melee blow can still leave something (the Warden's flail leaves its wax).
+  const onBlocked = self && blocking && !ranged ? kindOf(self).onBlocked : undefined;
+  if (onBlocked) onBlocked({ self: self!, target, tags: self!.intent.tags ?? [], wax: () => waxOn(t, target, 0, false) });
   // A direct hit may do more, by the attacker's own rules (the Warden's flail waxes, or burns).
   const onHit = self && kindOf(self).onDirectHit;
   if (!blocking && self && onHit) {
@@ -173,6 +179,16 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
     });
   }
 }
+
+/** How much more Fatigue a fighter's bar can take before it staggers: none once staggered, and what goes past a full bar is lost. */
+const fatigueRoom = (f: Fighter) => (f.staggered ? 0 : Math.max(0, f.hp - f.fatigue));
+
+/** How much more Health a fighter can lose to an effect: none where the fight takes no Health (the guide's training spares enemies, and your last point), and none past zero. */
+const damageRoom = (t: Turn, f: Fighter) => {
+  const { sparring } = t.s.config;
+  if (sparring && f !== t.p) return 0;
+  return Math.max(0, f.hp - (sparring ? 1 : 0));
+};
 
 /**
  * A blow of the fighter's weapon itself: not bare hands, and not an action with a weight or damage of
@@ -199,28 +215,33 @@ function eternalEffect(t: Turn, attacker: Fighter, target: Fighter, result: "hit
   const effect = item ?? ETERNAL_EFFECT[weight as keyof typeof ETERNAL_EFFECT];
   const amount = dmg * (item ? ITEM_SHARE : ETERNAL_SHARE);
   let damage = 0, fatigue = 0;
-  if (effect === "axe" && result === "hit" && t.p.lastAction === "rest") {
-    // The Barbarian's Axe: a direct hit after a turn of rest bites deeper.
-    damage = amount;
+  /** What the effect is paid by, where that is not simply the damage or Fatigue it ended up doing (the Torch's wax). */
+  let waxedFor = 0;
+  // The effects that bite deeper (damage): which one applies here, if any.
+  const bites = (effect === "axe" && result === "hit" && t.p.lastAction === "rest") // the Barbarian's Axe: a direct hit after a turn of rest
+    || (effect === "sickle" && result === "hit" && t.wasStaggered.has(target.id)) // the Nomadic Sickle: a direct hit on a staggered enemy
+    || (effect === "chisel" && result === "hit" && attacker.lastTarget === target.id); // the Jagged Chisel: into whoever it also attacked last turn
+  if (bites) {
+    // (Only the Health that is really left to take counts: what goes past it, or what the fight takes no Health for, is no effect, and costs nothing.)
+    damage = Math.min(amount, damageRoom(t, target));
+    if (damage <= 1e-9) return;
     hurt(t, target);
-    loseHealth(t, target, amount);
-  } else if (effect === "sickle" && result === "hit" && t.wasStaggered.has(target.id)) {
-    // The Nomadic Sickle: a direct hit on a staggered enemy bites deeper.
-    damage = amount;
-    hurt(t, target);
-    loseHealth(t, target, amount);
-  } else if (effect === "chisel" && result === "hit" && attacker.lastTarget === target.id) {
-    damage = amount;
-    hurt(t, target);
-    loseHealth(t, target, amount);
-  } else if (effect === "torch" && result === "hit") {
-    fatigue = amount;
-    t.tire(target, amount);
+    loseHealth(t, target, damage);
+  } else if (effect === "torch" && !(result === "blocked" && ranged)) {
+    // The Waxed Torch waxes whatever is not waxed yet, whether the blow lands or is blocked, and tires it more with it. A target already
+    // staggered has nothing left to tire, so it is no effect (nothing happens, nothing is paid). But one that this very blow (or its extra
+    // Fatigue) is about to stagger is waxed all the same, and goes down sealed in wax.
+    if (target.waxed || target.staggered) return;
+    fatigue = Math.min(amount, fatigueRoom(target));
+    t.tire(target, fatigue);
+    target.waxed = true;
     target.coated = true;
+    waxedFor = amount;
   } else if (effect === "hammer" && result === "blocked" && !ranged) {
-    fatigue = amount;
-    t.tire(target, amount);
+    fatigue = Math.min(amount, fatigueRoom(target));
+    if (fatigue <= 1e-9) return;
+    t.tire(target, fatigue);
   } else return;
-  const paid = attacker === t.p ? spendEternity(attacker as Player, amount * ETERNITY_PRICE[effect]) : { spent: 0, death: 0 };
+  const paid = attacker === t.p ? spendEternity(attacker as Player, (waxedFor || damage || fatigue) * ETERNITY_PRICE[effect]) : { spent: 0, death: 0 };
   t.emit({ kind: "eternal", attacker: attacker.id, target: target.id, effect, damage, fatigue, ...paid });
 }

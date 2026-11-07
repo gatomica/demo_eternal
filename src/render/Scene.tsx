@@ -6,7 +6,7 @@ import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState 
 import type { Variant } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
 import { type Cam, darkAt, ease, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, focusOf, NEAR, planningCamera, project, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec } from "./camera";
-import { ClangBurst, FlameHit, HaloBurst, ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
+import { ClangBurst, EternityHalo, FlameHit, HaloBurst, ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
 import type { Pt } from "./geom";
 import { Blood, Shards } from "./HealthBar";
 import { lookOf } from "./looks";
@@ -78,7 +78,7 @@ export interface SceneFigure {
   onPick: () => void;
   /** Drawn right below it (its health bar, while it is the target). */
   bar?: ReactNode;
-  /** It holds String you lost: a faint string spirals round it. */
+  /** It holds String you lost: a faint string coils round it, fading in and out of sight. */
   holdsString?: boolean;
 }
 
@@ -315,12 +315,13 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
             filter: (f.body && blobs.find(b => b.body === f.body)?.filter) || `brightness(${Math.max(0.68, Math.min(1, 1.12 - box.depth * 0.06)) * lightAt(at)})`,
           }}
         >
+          {f.holdsString && !f.dead && <StringAura layer="back" spread={f.body ? 2.4 : 1} />}
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
             {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}
           </div>
-          {f.holdsString && !f.dead && <StringAura />}
+          {f.holdsString && !f.dead && <StringAura layer="front" spread={f.body ? 2.4 : 1} />}
         </button>
         {f.bar && (
           <div className="figure-bar" style={{ left: box.x + box.w / 2, top: box.y + (box.h * 114) / 120 + 8 }}>
@@ -433,6 +434,13 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         if (!a || !b) return null;
         // Flames licking a unit a fire attack has hit.
         if (pr.kind === "flamehit") return <FlameHit key={pr.key} cx={b.x + b.w / 2} cy={b.y + b.h * 0.6} size={b.h} />;
+        // An eternal effect taking hold: a small halo where the blow met a Block, where it hit, or on the one who used it.
+        if (pr.kind === "eternity" || pr.kind === "eternityDeath") {
+          const cx0 = a.x + a.w / 2;
+          const blockX = thrower && b ? cx0 + Math.sign(b.x + b.w / 2 - cx0) * a.w * 0.45 : cx0;
+          const at = pr.where === "block" ? [blockX, a.y + a.h * 0.42] : pr.where === "self" ? [cx0, a.y + a.h * 0.5] : [cx0, a.y + a.h * 0.45];
+          return <EternityHalo key={pr.key} cx={at[0]} cy={at[1]} diameter={a.h * 0.34} death={pr.kind === "eternityDeath"} />;
+        }
         // From the thrower's chest height to the target's, and on through it.
         const sx = a.x + a.w / 2, sy = a.y + a.h * 0.42;
         const tx = b.x + b.w / 2, ty = b.y + b.h * 0.45;

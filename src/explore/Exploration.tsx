@@ -26,7 +26,7 @@ import { dirOf, menuSound, wrapIndex } from "../ui/input";
 import { type MenuOption, PauseMenu } from "../ui/Menu";
 import { Dialogue } from "./Dialogue";
 import { drawBlobTop, drawPickup, drawKeeper, drawRemains, drawStringAura, drawStringPile, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
-import { StringCounter } from "../render/StringCounter";
+import { StringCounter, YarnBall } from "../render/StringCounter";
 import { equippedSide, equipSide, gearName, type GearSpec, hasMemories, type Inventory as Bag, loadoutOf, pieceAt, readDreams, receive, setEternal, SLOTS, type Slot, unequip } from "./gear";
 import { GearSprite } from "./GearIcons";
 import { GuideMenu } from "./GuideMenu";
@@ -53,6 +53,12 @@ const PICKED_UP_MS = 2200;
 /** Resting is a sleep: how long the screen is dark in all, and when, in the dark, it happens. */
 const SLEEP_MS = 2400;
 const SLEEP_MID_MS = 1100;
+/** A steady number in [0, 1) for a map enemy's key, so each enemy's String coil fades in and out on a clock of its own. */
+const seedOf = (key: string) => {
+  let h = 0;
+  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return (h % 997) / 997;
+};
 
 /** Your progress on the map, kept while you're away fighting. */
 export interface Journey {
@@ -128,8 +134,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   const restedAt = useRef<string | undefined>(journey.rested);
   const nearRef = useRef<string | null>(null);
   const [near, setNear] = useState<string | null>(null);
-  // Eternal gear you just picked up: its sprite and name pop up in a box where the "E Pick Up" prompt was, then fade.
-  const [got, setGot] = useState<{ gear: GearSpec; id: number } | null>(null);
+  // Eternal gear you just picked up (or the knot the guide just gave you): its sprite and name pop up in a box where the "E Pick Up" prompt was, then fade.
+  const [got, setGot] = useState<{ gear?: GearSpec; knot?: boolean; id: number } | null>(null);
   useEffect(() => {
     if (!got) return;
     const t = window.setTimeout(() => setGot(cur => (cur?.id === got.id ? null : cur)), PICKED_UP_MS);
@@ -345,6 +351,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
     if (after !== "knot") return;
     tutorialRef.current = { ...tutorialRef.current, done: true };
     setKnot("wound");
+    setGot({ knot: true, id: Date.now() });
     latest.current.onSave(snapshot.current());
   };
 
@@ -551,10 +558,12 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
     let lastStride = 0, dripIn = 4;
     // Where the fall you are in began, and whether the body of one who fell to death has reached the ground.
     let fallStart: number | null = null, bodyDown = false;
+    /** The way the held keys pointed as the fall began: in the air you cannot steer, so you keep going that way (or stay put) until you land. */
+    let airDir: { ix: number; iy: number } | null = null;
 
     const update = (dtMs: number) => {
       const dt = dtMs / 1000;
-      const { ix, iy } = input();
+      const { ix, iy } = me.fall > 0 && airDir ? airDir : input();
 
       // Facing: a single direction faces it; on a diagonal, keep facing whichever of the two
       // you already were, otherwise the most recently pressed. On a ladder you face the wall.
@@ -599,7 +608,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         if (me.fall === 0 && under.h >= me.alt - STEP_TOLERANCE) {
           me.alt = under.h;
         } else {
-          if (me.fall === 0) fallStart = me.alt;
+          if (me.fall === 0) { fallStart = me.alt; airDir = { ix, iy }; }
           me.fall += GRAVITY * dt;
           me.alt -= me.fall * dt;
           if (me.alt <= under.h) { me.alt = under.h; me.fall = 0; }
@@ -610,7 +619,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
             setDoomed(true);
           }
         }
-        if (me.fall === 0) fallStart = null;
+        if (me.fall === 0) { fallStart = null; airDir = null; }
         me.ground = under.h;
         if (me.alt <= FALL_DEATH_ALT + 1e-3) reawakenRef.current();
       }
@@ -619,7 +628,12 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       }
 
       // Remember the last solid place you stood on.
-      if (me.fall === 0 && !me.climbing && me.alt > FALL_DEATH_ALT + 1) safeRef.current = { x: me.x, y: me.y, alt: me.alt };
+      // (The middle of the tile you stand on, when it is as solid there: not the very rim you may be hanging over as you step off the ledge.)
+      if (me.fall === 0 && !me.climbing && me.alt > FALL_DEATH_ALT + 1) {
+        const tx = Math.floor(me.x), ty = Math.floor(me.y);
+        const mid = surfaceNear(tx, ty, tx + 0.5, ty + 0.5, me.alt, true);
+        safeRef.current = mid && Math.abs(mid.h - me.alt) < 1e-3 ? { x: tx + 0.5, y: ty + 0.5, alt: me.alt } : { x: me.x, y: me.y, alt: me.alt };
+      }
 
       // The music follows where you are: the lower labyrinth and its shaft, or the dungeon proper (Floor A's outer wheel, on level 6, and up).
       playMusic(me.alt >= 6 ? "quella" : "temple");
@@ -931,34 +945,37 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
             // A multi-target body is a heap seen from above, reaching with its arms toward what it is after.
             if (f.def.fight.some(m => m.body)) {
               if (kind === "blobMid") {
+                if (holding) drawStringAura(c, px, py, T, 1.9, performance.now(), "back", seedOf(key));
                 drawBlobTop(c, px, py, T, f.aimX, f.aimY, f.reach, performance.now());
-                if (holding) drawStringAura(c, px, py, T, 1.9, performance.now());
+                if (holding) drawStringAura(c, px, py, T, 1.9, performance.now(), "front", seedOf(key));
               }
               continue;
             }
             // (The boss's group, spread over his arena, stands looking toward its middle, where he is.)
             const facing: Dir = f.def.spread && (dx !== 0 || dy !== 0) ? (Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? "right" : "left") : dy < 0 ? "down" : "up") : f.facing;
             if (!f.def.girth) {
+              // (Holding String you lost: a faint string coils round it, the back of the coil behind it and the front over it.)
+              if (holdsRef.current[key]) drawStringAura(c, px, py, T, 1, performance.now(), "back", seedOf(key));
               MAP_FIGURES[kind](c, px, py, T, facing, frame, howl);
-              // (Holding String you lost: a faint string winds round it.)
-              if (holdsRef.current[key]) drawStringAura(c, px, py, T, 1, performance.now());
+              if (holdsRef.current[key]) drawStringAura(c, px, py, T, 1, performance.now(), "front", seedOf(key));
               continue;
             }
             // A big one is drawn bigger, standing on the same spot.
             const feet = py + BODY_ABOVE_FEET * T, s = Math.max(1, f.def.girth * 1.9);
+            if (holdsRef.current[key]) drawStringAura(c, px, py, T, s, performance.now(), "back", seedOf(key));
             c.save();
             c.translate(px, feet);
             c.scale(s, s);
             c.translate(-px, -feet);
             MAP_FIGURES[kind](c, px, py, T, f.facing, frame, howl);
             c.restore();
-            if (holdsRef.current[key]) drawStringAura(c, px, py, T, s, performance.now());
+            if (holdsRef.current[key]) drawStringAura(c, px, py, T, s, performance.now(), "front", seedOf(key));
           }
         } });
       }
       for (const p of floorItems()) {
         if (Math.round(p.at.z) !== z || !test(p.at.y) || !onScreen(p.at.x, p.at.y, p.at.z)) continue;
-        list.push({ x: p.at.x, y: p.at.y, over: true, draw: () => (p.string !== undefined || p.eternalString !== undefined ? drawStringPile : drawPickup)(ctx, ox + p.at.x * T, oy + (p.at.y - p.at.z * RISE - BODY_ABOVE_FEET) * T, T, performance.now(), p.eternalString !== undefined || !!p.gear?.eternal) });
+        list.push({ x: p.at.x, y: p.at.y, over: true, draw: () => (p.string !== undefined || p.eternalString !== undefined ? drawStringPile : drawPickup)(ctx, ox + p.at.x * T, oy + (p.at.y - p.at.z * RISE - BODY_ABOVE_FEET) * T, T, performance.now(), p.eternalString !== undefined || !!p.gear?.eternal, seedOf(p.id)) });
       }
       // Whoever lies beaten, where it fell.
       for (const c of Object.values(corpsesRef.current)) {
@@ -1157,8 +1174,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       {/* The eternal gear you just picked up, in the prompt's place: its sprite and its name, fading away. */}
       {got && !paused && (
         <div key={got.id} className="explore-prompt explore-got">
-          <GearSprite slot={got.gear.slot} tier={got.gear.tier} item={got.gear.item} />
-          <span>{gearName(got.gear)}</span>
+          {got.gear ? <GearSprite slot={got.gear.slot} tier={got.gear.tier} item={got.gear.item} /> : <YarnBall className="explore-got-knot" red />}
+          <span>{got.gear ? gearName(got.gear) : "Knot"}</span>
         </div>
       )}
       {/* The String you just gathered: the counter at the top, with "+X" under it, fading away. */}

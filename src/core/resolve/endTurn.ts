@@ -4,7 +4,7 @@
  */
 import { kindOf } from "../bestiary";
 import { stanceAfter } from "../stance";
-import { fatigueGone } from "./statuses";
+import { backOnFeet, fatigueGone } from "./statuses";
 import type { Turn } from "./turn";
 
 export function endTurn(t: Turn) {
@@ -12,14 +12,16 @@ export function endTurn(t: Turn) {
   for (const e of alive) {
     if (!e.alive) continue; // (gone with a boss that fell for good, say)
     if (t.fallen.has(e.id) && e.revives > 0) {
-      // A boss with a revive left: its protected turn is next, then it rises at full health.
+      // A boss with a revive left rises at once, at the end of the turn it fell: full health, fresh, like a boss (no turn spent lying there).
       e.revives -= 1;
-      e.reviving = true;
-      e.hp = 0;
+      e.hp = e.maxHP;
       e.fatigue = 0;
       e.death = 0;
       e.staggered = false;
+      e.reviving = false;
+      backOnFeet(e);
       t.fellReviving.add(e.id);
+      t.emit({ kind: "revive", who: e.id });
     } else if (t.fallen.has(e.id)) {
       e.alive = false;
       e.fate = "fallen";
@@ -33,15 +35,18 @@ export function endTurn(t: Turn) {
   }
 
   p.reviving = false;
+  let revivedNow = false;
   if (p.hp <= 0) {
     if (p.charges > 0) {
-      // A charge is spent now, but the health only comes back at the end of next turn.
+      // A charge is spent, and you are up again at once, at the end of the turn you fell: back to full health, fresh (no turn spent lying there).
       p.charges -= 1;
-      p.reviving = true;
-      p.hp = 0;
+      p.hp = p.maxHP;
       p.fatigue = 0;
       p.death = 0;
       p.staggered = false;
+      backOnFeet(p);
+      revivedNow = true;
+      t.emit({ kind: "revive", who: p.id });
     } else {
       p.hp = 0;
       s.status = "lost";
@@ -53,7 +58,7 @@ export function endTurn(t: Turn) {
   }
   // Your stance for the next turn: what you did decides it, unless it did not happen (you were put down first), and a stagger or a fall
   // leaves you in idle (to kneel, and to stand up again).
-  if (p.hp <= 0 || p.staggered || p.reviving || t.reviving) { p.stance = "idle"; p.lastAction = undefined; }
+  if (p.hp <= 0 || p.staggered || revivedNow) { p.stance = "idle"; p.lastAction = undefined; }
   else if (t.act && !t.out.has(p.id) && !t.cancelled.has(p.id)) {
     p.stance = stanceAfter(t.act, t.swing);
     // (A Rest broken by a blow was no rest.)

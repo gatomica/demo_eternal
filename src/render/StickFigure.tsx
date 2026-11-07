@@ -156,13 +156,13 @@ export function Weapon({ tier, item }: { tier: WeaponTier; item?: WeaponItem }) 
 }
 
 /**
- * A weapon in the hand. `flash`: you just spent Eternity on its effect: it flashes pale blue, the
- * colour of Eternity, once (a new key plays the flash again).
+ * A weapon in the hand. `flash`: an eternal effect just happened: it flashes pale blue, the colour of Eternity, or dark red when it was
+ * paid in Death (a key starting "death|"), once (a new key plays the flash again).
  */
 export function HeldWeapon({ tier, flash, item }: { tier: WeaponTier; flash?: string; item?: WeaponItem }) {
   return (
     <>
-      {flash && tier !== "baseline" && <g key={flash} className="fig-eternal-flash" aria-hidden="true"><Weapon tier={tier} item={item} /></g>}
+      {flash && tier !== "baseline" && <g key={flash} className={`fig-eternal-flash ${flash.startsWith("death|") ? "is-death" : ""}`} aria-hidden="true"><Weapon tier={tier} item={item} /></g>}
       <Weapon tier={tier} item={item} />
     </>
   );

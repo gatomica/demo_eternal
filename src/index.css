@@ -90,6 +90,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* What you just picked up, in the prompt's place: its sprite and name, popping up and then fading away. */
 .explore-got { display: flex; align-items: center; gap: 12px; padding: 8px 18px 8px 10px; animation: explore-got 2.2s ease-out forwards; }
 .explore-got .gear-sprite.is-weapon { width: 64px; height: 26px; }
+.explore-got-knot { width: 40px; height: 40px; display: block; filter: drop-shadow(0 0 5px rgb(255 120 105 / 0.45)); }
 @keyframes explore-got { 0% { opacity: 0; transform: translate(-50%, 6px) scale(0.92); } 10% { opacity: 1; transform: translate(-50%, 0) scale(1); } 70% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, 0); } }
 @media (prefers-reduced-motion: reduce) { .explore-got { animation: explore-got-fade 2.2s linear forwards; } }
 .explore-string { animation: explore-string 2.6s ease-out forwards; }
@@ -148,8 +149,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* "-X" under a counter: what Empower Self would spend of that String (the eternal String last). */
 .string-spend { position: absolute; right: 32px; top: 100%; white-space: nowrap; margin-top: 6px; font-size: 1rem; color: #e9b7a8; }
 @keyframes string-pop { 0% { opacity: 0; transform: translateY(-4px) scale(0.8); } 14% { opacity: 1; transform: translateY(2px) scale(1.12); } 70% { opacity: 1; } 100% { opacity: 0; transform: translateY(14px); } }
-/* String on its way from a fallen enemy to you: a canvas over the whole fight. */
-.string-fx { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 20; pointer-events: none; }
+/* String on its way from a fallen enemy to you: a canvas over the whole fight's stage. It sits just under your own figure (its z-index is set from it, see StringFx), so the string winds round you from behind. */
+.string-fx { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 900; pointer-events: none; }
 /* Empower Self: a row per stat, its change and what it costs. */
 .empower-row { display: flex; align-items: center; gap: 20px; min-width: 300px; padding: 9px 14px; border: 1px solid transparent; border-radius: 6px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .empower-row.is-focused { border-color: var(--line); background: rgb(255 255 255 / 0.06); }
@@ -158,26 +159,36 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .empower-value { font-variant-numeric: tabular-nums; }
 .empower-cost { display: flex; align-items: center; gap: 6px; margin-left: auto; font-variant-numeric: tabular-nums; }
 .empower-cost .string-ball { width: 20px; height: 20px; }
-/* The faint string round an enemy that holds some of what you lost. */
-.string-aura { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; opacity: 0.55; }
-.string-aura path { fill: none; stroke: #ffffff; stroke-width: 0.9; stroke-linecap: round; filter: drop-shadow(0 0 2px rgb(255 255 255 / 0.7)); }
+/* The single string of the String you lost, now and then spinning round an enemy that holds it (drawn on a canvas); its back half is behind the figure. */
+.string-aura { position: absolute; pointer-events: none; }
+.string-aura.is-back { z-index: -1; }
 /* While a turn plays, the target's bar sits bottom right: the same distance from the bottom edge as yours is from the top, and from the right as yours is from the left. */
 .bar-slot-target { bottom: var(--bar-inset-top); right: var(--bar-inset-x); justify-items: end; text-align: right; }
 .hud-target { display: grid; gap: 6px; justify-items: end; width: 100%; }
 /* While you plan, it hangs right below the enemy in the scene (see Scene's `bar`), the same size as in the strip. */
 .figure-bar { position: absolute; transform: translateX(-50%); z-index: 1900; pointer-events: none; }
-/* Revives left: a red Roman numeral just left of your bar, vertically centered on it. */
+/* The knot beside your bar: its symbol, a red ball of yarn white towards the middle, with the revives you have left as a red Roman numeral over it
+   (a black middle and no numeral when none is left). Centered on the health bar's height (not the Eternity bar under it). */
 .revive-count {
   position: absolute;
-  right: calc(100% + 12px);
-  top: 50%;
+  right: calc(100% + 3px);
+  top: calc(var(--bar-h) / 2);
   transform: translateY(-50%);
-  color: var(--danger);
-  font: 700 calc(var(--bar-h) * 1.25) / 1 "Cinzel", "Trajan Pro", Georgia, "Times New Roman", serif;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  text-shadow: 0 1px 3px #000;
+  width: calc(var(--bar-h) * 2.4);
+  height: calc(var(--bar-h) * 2.4);
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 1px 3px #000);
 }
+.revive-knot { grid-area: 1 / 1; width: 100%; height: 100%; display: block; }
+.revive-num {
+  grid-area: 1 / 1;
+  color: var(--danger);
+  font: 700 calc(var(--bar-h) * 1.05) / 1 "Cinzel", "Trajan Pro", Georgia, "Times New Roman", serif;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.revive-num.is-long { font-size: calc(var(--bar-h) * 0.7); }
 
 .hud-button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 
@@ -714,8 +725,6 @@ kbd {
 .inv-place.is-equipped { background: color-mix(in srgb, var(--place-hi) 42%, var(--panel)); border-color: var(--place-hi); }
 .inv-place.is-focused { outline: 2px solid var(--place-hi); outline-offset: 2px; }
 /* The ground place is dashed, as if lying loose. */
-.inv-row.is-knot-row { margin-top: 10px; }
-.inv-place.is-knot { --place-hi: #f0a79e; }
 .knot-ball { width: 100%; height: 100%; display: block; filter: drop-shadow(0 0 5px rgb(255 120 105 / 0.45)); }
 .inv-place-icon.is-slack { opacity: 0.45; }
 .inv-place.is-ground { border-style: dashed; background: transparent; }
@@ -854,3 +863,13 @@ kbd {
 /* The developer tools' options, in a column at the right of the start menu (the game's own stay in the middle). */
 .menu-dev { position: absolute; right: 5vw; top: 50%; transform: translateY(-50%); display: grid; gap: 8px; width: min(230px, 28vw); }
 .menu-dev .menu-button { padding: 10px 14px; font-size: 0.95rem; }
+
+/* A small halo where an eternal effect takes hold: light blue, or dark red when it was paid in Death. */
+.eternity-halo { position: absolute; z-index: 2002; transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none; opacity: 0; border: 1.5px solid rgb(196 232 255 / 0.9); background: radial-gradient(circle, rgb(226 245 255 / 0.85) 0, rgb(150 212 255 / 0.5) 38%, rgb(150 212 255 / 0) 70%); box-shadow: 0 0 10px rgb(170 220 255 / 0.7); animation: eternity-halo 0.95s ease-out forwards; }
+.eternity-halo.is-death { border-color: rgb(150 20 26 / 0.95); background: radial-gradient(circle, rgb(120 10 16 / 0.85) 0, rgb(92 8 14 / 0.55) 38%, rgb(92 8 14 / 0) 70%); box-shadow: 0 0 10px rgb(120 10 16 / 0.8); }
+@keyframes eternity-halo { 0% { opacity: 0; transform: translate(-50%, -50%) scale(0.35); } 22% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.2); } }
+@media (prefers-reduced-motion: reduce) { .eternity-halo { animation-duration: 0.3s; } }
+/* The bar an eternal effect touches flashes pale blue. */
+.bar-flash.is-eternal { background: #bfe6ff; box-shadow: 0 0 8px rgb(170 224 255 / 0.9); animation-duration: 0.7s; }
+/* Paid in Death, the weapon's flash is dark red instead. */
+.fig-eternal-flash.is-death * { fill: #7a0c12; stroke: #a5121a; }

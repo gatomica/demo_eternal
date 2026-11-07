@@ -70,7 +70,7 @@ export function createCombat(
       script: setup.script ?? [],
       intent: { type: "block", dir: "advance", forced: false }, // replaced below
       last: null,
-      waxed: false,
+      waxed: !!kind.alwaysWaxed,
       flags: { ...kind.flags },
       revives: kind.revives ?? 0,
       reviving: false,

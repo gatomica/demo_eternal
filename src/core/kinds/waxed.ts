@@ -33,6 +33,8 @@ export const WAXED: EnemyKind = {
   weapon: "baseline",
   armor: "none",
   variant: "waxed",
+  // Wax is what it is: it always has the Waxed status (the Wax Blob's parts and the armed waxed share it).
+  alwaysWaxed: true,
   // Lit: its flame burns on its head (the Warden's phase two lights it, and raises it staggered if it has fallen).
   flags: { lit: false },
   statuses: [{ key: "lit", off: "Unlit", on: "Lit" }],

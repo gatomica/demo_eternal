@@ -53,7 +53,7 @@ export function MainMenu({ onStart }: { onStart: (screen: Screen) => void }) {
   // (One layout for both: the title never moves, whatever shows below it.)
   return (
     <main className={`menu ${title ? "menu-title-screen" : ""}`} onClick={title ? leaveTitle : undefined}>
-      <h1 className="menu-title">DREAMWOUND</h1>
+      <h1 className="menu-title">DEMO</h1>
       <div className="menu-below">
         {title ? (
           <p className="menu-prompt">Click or press E to start</p>

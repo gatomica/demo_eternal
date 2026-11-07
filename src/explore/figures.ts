@@ -1,6 +1,7 @@
 /**
  * figures.ts — the map's figures: you, the enemies and the hooded keepers.
  */
+import { drawLostString } from "../render/lostString";
 import { ENEMY_KINDS, type KindId } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, HeadItem, WeaponItem, WeaponTier } from "../core/types";
 import { paintSealed } from "./props";
@@ -612,29 +613,16 @@ export function drawPickup(g: CanvasRenderingContext2D, x: number, y: number, T:
 }
 
 /**
- * A faint string winding round a figure standing at (x, y) (the point `drawWalker` takes), `k` times its size: the String it holds
- * (what you lost when it killed you). A single string, coiling slowly round it.
+ * The String an enemy holds (what you lost when it killed you), at a figure standing at (x, y) (the point `drawWalker` takes), `k` times its
+ * size: a single string that now and then slips out from behind it, slowly spins once round it and is gone (see `drawLostString`). Drawn in two
+ * goes: the `back` half before the figure is drawn, the `front` half after.
  */
-export function drawStringAura(g: CanvasRenderingContext2D, x: number, y: number, T: number, k: number, t: number) {
-  g.save();
-  g.lineCap = "round";
-  g.lineJoin = "round";
-  g.lineWidth = Math.max(1, 0.022 * T);
-  g.strokeStyle = "rgba(255, 255, 255, 0.45)";
-  g.shadowColor = "rgba(255, 255, 255, 0.6)";
-  g.shadowBlur = 4;
-  g.beginPath();
-  for (let i = 0; i <= 56; i++) {
-    const u = i / 56, a = u * Math.PI * 4 + t / 2600;
-    const px = x + Math.sin(a) * 0.34 * T * k, py = y + (0.36 - u * 0.82 * k) * T + Math.cos(a) * 0.05 * T * k;
-    if (i) g.lineTo(px, py); else g.moveTo(px, py);
-  }
-  g.stroke();
-  g.restore();
+export function drawStringAura(g: CanvasRenderingContext2D, x: number, y: number, T: number, k: number, t: number, layer: "back" | "front", seed = 0) {
+  drawLostString(g, x, y - 0.05 * T * k, 0.42 * T * k, 0.1 * T * k, 0.6 * T * k, Math.max(1, 0.022 * T), t, layer, seed);
 }
 
-/** A pile of String on the floor, left by your death: a bigger ball of yarn than the gear's, warm white, glowing and pulsing, its ends curling on the ground. */
-export function drawStringPile(g: CanvasRenderingContext2D, x: number, y: number, T: number, t: number, eternal = false) {
+/** A pile of String on the floor, left by your death: a bigger ball of yarn than the gear's, warm white, glowing and pulsing, its ends curling on the ground, and now and then its single string slipping out and spinning round it (`seed` puts it on a clock of its own). */
+export function drawStringPile(g: CanvasRenderingContext2D, x: number, y: number, T: number, t: number, eternal = false, seed = 0) {
   const X = (u: number) => x + u * T, Y = (v: number) => y + v * T;
   const foot = 0.33, r = 0.1, cy = foot - r;
   const pulse = 0.5 + 0.5 * Math.sin(t / 600);
@@ -646,6 +634,7 @@ export function drawStringPile(g: CanvasRenderingContext2D, x: number, y: number
   g.beginPath(); g.arc(X(0), Y(cy), reach, 0, Math.PI * 2); g.fill();
   g.fillStyle = COLORS.shadow;
   g.beginPath(); g.ellipse(X(0), Y(foot), r * 1.5 * T, r * 0.5 * T, 0, 0, Math.PI * 2); g.fill();
+  if (!eternal) drawLostString(g, X(0), Y(cy), r * 2.1 * T, r * 0.7 * T, r * 1.6 * T, Math.max(1, 0.012 * T), t, "back", seed);
   g.fillStyle = eternal ? "#c9e4ff" : "#ffffff";
   g.beginPath(); g.arc(X(0), Y(cy), r * T, 0, Math.PI * 2); g.fill();
   g.save();
@@ -654,20 +643,8 @@ export function drawStringPile(g: CanvasRenderingContext2D, x: number, y: number
   for (const k of [-0.55, -0.15, 0.25, 0.6]) { g.beginPath(); g.ellipse(X(0), Y(cy + k * r), r * T, r * 0.55 * T, 0, 0, Math.PI * 2); g.stroke(); }
   for (const k of [-0.45, 0.45]) { g.beginPath(); g.ellipse(X(k * r), Y(cy), r * 0.5 * T, r * T, 0, 0, Math.PI * 2); g.stroke(); }
   g.restore();
-  // A single string winds slowly round the yarn (the String you lost; the eternal lumps enemies leave have none).
-  if (!eternal) {
-    g.save();
-    g.strokeStyle = "rgba(255, 255, 255, 0.5)"; g.lineWidth = Math.max(1, 0.012 * T); g.lineCap = "round"; g.lineJoin = "round";
-    g.shadowColor = "rgba(255, 255, 255, 0.6)"; g.shadowBlur = 3;
-    g.beginPath();
-    for (let i = 0; i <= 48; i++) {
-      const u = i / 48, a = u * Math.PI * 4 + t / 2200;
-      const px = X(Math.sin(a) * r * 1.9), py = Y(cy + r * (1.35 - u * 3) + Math.cos(a) * r * 0.35);
-      if (i) g.lineTo(px, py); else g.moveTo(px, py);
-    }
-    g.stroke();
-    g.restore();
-  }
+  // (The String you lost: its single string now and then slips out from behind the yarn and spins once round it. The eternal lumps enemies leave have none.)
+  if (!eternal) drawLostString(g, X(0), Y(cy), r * 2.1 * T, r * 0.7 * T, r * 1.6 * T, Math.max(1, 0.012 * T), t, "front", seed);
   // The loose ends, curling on the floor.
   g.strokeStyle = eternal ? "#d6ecfb" : "#ece7d4"; g.lineWidth = Math.max(1, 0.014 * T); g.lineCap = "round";
   g.beginPath(); g.moveTo(X(0.07), Y(foot - 0.03)); g.bezierCurveTo(X(0.2), Y(foot + 0.01), X(0.26), Y(foot - 0.04), X(0.32), Y(foot + 0.01)); g.stroke();

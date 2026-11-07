@@ -11,7 +11,7 @@
 type ToneModule = typeof import("tone");
 import type { CombatEvent } from "../core/types";
 
-export type Sfx = "hit" | "clang" | "dodge" | "rest" | "stagger" | "fall" | "flame" | "tic" | "tac" | "string" | "stringBoss" | "stringBossNote";
+export type Sfx = "hit" | "clang" | "dodge" | "rest" | "stagger" | "fall" | "flame" | "tic" | "tac" | "string" | "stringBoss" | "stringBossNote" | "eternity" | "eternityDeath";
 
 const MUTE_KEY = "sfx-muted";
 
@@ -252,7 +252,9 @@ export const prepare = () => {
 /** Each synth plays one note at a time and refuses a start time that isn't later than its last; nudge ours. */
 const lastStart = new Map<object, number>();
 function when(synth: object, t: number) {
-  const at = Math.max(t, (lastStart.get(synth) ?? 0) + 0.02);
+  // (Tone moves a start that is already past up to the audio clock's present; two such starts in one instant would be the same time, which a
+  // synth refuses, so we stay ahead of the clock ourselves and keep each start strictly after the last.)
+  const at = Math.max(t, (tone?.getContext().currentTime ?? 0) + 0.005, (lastStart.get(synth) ?? 0) + 0.02);
   lastStart.set(synth, at);
   return at;
 }
@@ -432,6 +434,27 @@ function trigger(name: Sfx, delay: number, v: number) {
         b.choir.triggerAttackRelease(note, 1.8, t, 0.75 * v);
         break;
       }
+      case "eternity": {
+        // An eternal effect taking hold: a short, bright wisp rising through the air, with a high chime over it, close kin of the String's.
+        const w = b.wisps[wispNext++ % b.wisps.length], p = varied("eternity"), at = when(w.noise, t);
+        w.band.frequency.setValueAtTime(1300 * p, at);
+        w.band.frequency.exponentialRampToValueAtTime(4200 * p, at + 0.8);
+        w.noise.triggerAttackRelease(0.8, at, 0.75 * v);
+        const notes = [1175, 1568, 1760, 2093];
+        b.shimmer.triggerAttackRelease(notes[Math.floor(Math.random() * notes.length)] * p, 0.9, t + 0.03, 0.65 * v);
+        break;
+      }
+      case "eternityDeath": {
+        // The same, paid in Death: the wisp sinks instead of rising, low and dull, with a dark note ringing under it in the long echo.
+        const w = b.wisps[wispNext++ % b.wisps.length], p = varied("eternityDeath"), at = when(w.noise, t);
+        w.band.frequency.setValueAtTime(900 * p, at);
+        w.band.frequency.exponentialRampToValueAtTime(330 * p, at + 0.9);
+        w.noise.triggerAttackRelease(0.9, at, 0.85 * v);
+        const notes = [147, 175, 196, 233];
+        b.choir.triggerAttackRelease(notes[Math.floor(Math.random() * notes.length)] * p, 1.4, t + 0.02, 0.7 * v);
+        b.shimmer.triggerAttackRelease(392 * p, 0.8, t + 0.03, 0.3 * v);
+        break;
+      }
       case "tic":
         b.tic.triggerAttackRelease(0.02, when(b.tic, t), v);
         break;
@@ -440,12 +463,14 @@ function trigger(name: Sfx, delay: number, v: number) {
         b.tacClick.triggerAttackRelease(0.025, when(b.tacClick, t), v);
         break;
     }
-  } catch {
-    // A sound that can't be scheduled just doesn't play.
+  } catch (err) {
+    // A sound that can't be scheduled doesn't play; say so in the console instead of vanishing without a trace. (It is not retried: part of it
+    // may already have sounded, and a second go would play that part twice.)
+    console.warn(`[sfx] "${name}" could not be scheduled:`, err);
   }
 }
 
-const ALL: Sfx[] = ["hit", "clang", "dodge", "rest", "stagger", "fall", "flame", "tic", "tac", "string", "stringBoss", "stringBossNote"];
+const ALL: Sfx[] = ["hit", "clang", "dodge", "rest", "stagger", "fall", "flame", "tic", "tac", "string", "stringBoss", "stringBossNote", "eternity", "eternityDeath"];
 
 let warmed = false;
 
@@ -495,4 +520,9 @@ export function sfxFor(ev: CombatEvent): { name: Sfx; delay: number } | null {
     default:
       return null;
   }
+}
+
+/** The sound an eternal effect makes as it takes hold, over the effect's own: a wisp like the String's, lower and darker when it was paid in Death. */
+export function eternalSfx(ev: Extract<CombatEvent, { kind: "eternal" }>): { name: Sfx; delay: number } {
+  return { name: ev.death > 0 ? "eternityDeath" : "eternity", delay: 0.1 };
 }

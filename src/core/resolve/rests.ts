@@ -1,5 +1,5 @@
 /**
- * rests.ts — a turn's second phase: revives land, and Rests settle. A damaging hit breaks a
+ * rests.ts — a turn's second phase: Rests settle. A damaging hit breaks a
  * voluntary Rest; the forced Rest after a stagger always ends the stagger.
  */
 import { kindOf } from "../bestiary";
@@ -10,25 +10,6 @@ import type { Turn } from "./turn";
 
 export function settleRests(t: Turn) {
   const { p } = t;
-  if (t.reviving) {
-    // The revive lands at the end of the protected turn: back to full health, fresh, like a boss.
-    p.hp = p.maxHP;
-    p.fatigue = 0;
-    p.death = 0;
-    p.staggered = false;
-    backOnFeet(p);
-    t.emit({ kind: "revive", who: p.id });
-  }
-  for (const e of t.alive) {
-    if (!t.foeReviving.has(e.id)) continue;
-    // A boss rises again at full health.
-    e.hp = e.maxHP;
-    e.fatigue = 0;
-    e.death = 0;
-    e.staggered = false;
-    e.reviving = false;
-    t.emit({ kind: "revive", who: e.id });
-  }
   // Something being done to you that keeps you down (Usurp Flame taking your flame, aimed at no ally):
   // that turn's forced Rest does not end your stagger. You stay down, sealed in wax, and get up with
   // the next forced Rest.

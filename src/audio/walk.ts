@@ -85,7 +85,9 @@ export const prepareWalk = () => { void load(); };
 /** Each synth plays one note at a time and refuses a start no later than its last: nudge ours. */
 const lastStart = new Map<object, number>();
 function when(synth: object, t: number) {
-  const at = Math.max(t, (lastStart.get(synth) ?? 0) + 0.015);
+  // (Stay ahead of the audio clock too: Tone moves a start that is already past up to the clock's present, and two of those in one instant would be
+  // the same time, which a synth refuses.)
+  const at = Math.max(t, (tone?.getContext().currentTime ?? 0) + 0.005, (lastStart.get(synth) ?? 0) + 0.015);
   lastStart.set(synth, at);
   return at;
 }

@@ -10,11 +10,13 @@ export interface Projectile {
   from: string;
   to: string;
   /** `clang`: a melee blow caught by a Block, so a starburst flashes where the blocker (`from`) meets the attacker (`to`). */
-  kind: "fan" | "blast" | "wax" | "impact" | "halo" | "clang" | "flamehit";
+  kind: "fan" | "blast" | "wax" | "impact" | "halo" | "clang" | "flamehit" | "eternity" | "eternityDeath";
   /** Changes every beat, so the flight replays. */
   key: string;
   /** A flaming flail's impact: its shockwave burns instead of white spikes. */
   fiery?: boolean;
+  /** `eternity`, `eternityDeath`: where the effect shows, on `from`: where its blow met a Block, where it hit, or on the one who used it (`self`). */
+  where?: "block" | "hit" | "self";
   /** Where on the thrower it comes from, in figure units (100 × 120, facing right), e.g. its hand. */
   origin?: readonly [number, number];
 }
@@ -40,6 +42,14 @@ const FAN = (() => {
   const band = (f: Pt, b: Pt) => `M${L[0]} ${L[1]} Q${f[0]} ${f[1]} ${R[0]} ${R[1]} Q${b[0]} ${b[1]} ${L[0]} ${L[1]} Z`;
   return { tongues, band: band(front, back) };
 })();
+
+/**
+ * A small halo of light where an eternal effect takes hold, swelling and fading: light blue, or dark red when the effect was paid in Death.
+ * Centered on (`cx`, `cy`), `diameter` wide at most (screen pixels).
+ */
+export function EternityHalo({ cx, cy, diameter, death }: { cx: number; cy: number; diameter: number; death?: boolean }) {
+  return <div className={`eternity-halo ${death ? "is-death" : ""}`} style={{ left: cx, top: cy, width: diameter, height: diameter }} aria-hidden="true" />;
+}
 
 /**
  * The guide's halo: rings of white light that grow out of the orb as their center, wider and wider
