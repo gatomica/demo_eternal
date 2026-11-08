@@ -57,6 +57,7 @@ const without = <T,>(poses: Record<string, T> | undefined, names: string[]) =>
 /** The middle one: the Waxed without the Dodge, flame and all. */
 export const BLOB_MID: EnemyKind = {
   ...WAXED,
+  downPose: "w-fallen", // (the heap keeps the toppled flat pose)
   name: "Wax Blob (middle)",
   maxHP: BLOB_HP,
   // The blob's parts never splash each other, whatever they burn with.
@@ -73,6 +74,7 @@ export const BLOB_MID: EnemyKind = {
 function side(name: string, hammer = false): EnemyKind {
   const kind: EnemyKind = {
     ...WAXED,
+    downPose: "w-fallen",
     name,
     maxHP: BLOB_HP,
     flags: undefined,

@@ -14,9 +14,30 @@ import type { ArmorTier, CombatState, Line, PlayerAction, Stance, WeaponTier } f
 /** Kinds that are only a part of a multi-target enemy: the viewer shows the whole body instead. */
 const PART_KINDS = new Set<KindId>(Object.values(BODIES).flatMap(b => b.parts.map(p => p.kind)));
 
-/** What the viewer can look at, besides you: each enemy, and each multi-target enemy as one body (all its parts at once). */
+/**
+ * The weapon and armor variants of an enemy: the same wretch with something else in its hand (or on its head). The viewer folds them into the enemy
+ * as statuses to turn on and off (one at a time), instead of listing each as an enemy of its own. (The Wax Blob is not one of these: it is an enemy
+ * of its own, with parts.)
+ */
+export const VARIANTS: Partial<Record<KindId, { kind: KindId; label: string }[]>> = {
+  waxed: [{ kind: "waxedChisel", label: "Chisel" }, { kind: "waxedHammer", label: "Hammer" }],
+  sleepwalker: [
+    { kind: "sleepwalkerBare", label: "Bare-handed" },
+    { kind: "sleepwalkerHammer", label: "Hammer" },
+    { kind: "patrolWarden", label: "Patrol warden: torch, hood" },
+  ],
+};
+
+/** The enemy a variant is a variant of. */
+const BASE_OF = new Map<KindId, KindId>(Object.entries(VARIANTS).flatMap(([base, vs]) => vs!.map(x => [x.kind, base as KindId] as const)));
+
+/** The statuses the viewer offers for an enemy's variants: one to turn on for each, all off for the enemy as it is. */
+export const variantToggles = (sub: EnemySubject): StatusToggle[] =>
+  (VARIANTS[sub as KindId] ?? []).map(x => ({ key: `variant:${x.kind}`, off: `${x.label}: off`, on: `${x.label}: on` }));
+
+/** What the viewer can look at, besides you: each enemy (its variants folded into it), and each multi-target enemy as one body (all its parts at once). */
 export type EnemySubject = KindId | BodyId;
-export const VIEWER_SUBJECTS: EnemySubject[] = [...(Object.keys(ENEMY_KINDS) as KindId[]).filter(k => !PART_KINDS.has(k)), ...(Object.keys(BODIES) as BodyId[])];
+export const VIEWER_SUBJECTS: EnemySubject[] = [...(Object.keys(ENEMY_KINDS) as KindId[]).filter(k => !PART_KINDS.has(k) && !BASE_OF.has(k)), ...(Object.keys(BODIES) as BodyId[])];
 
 /** The name the viewer gives a subject. */
 export const subjectName = (sub: EnemySubject) => (sub in BODIES ? BODIES[sub as BodyId].name : ENEMY_KINDS[sub as KindId].name);
@@ -66,6 +87,8 @@ export interface ViewerShow {
   on: Record<string, boolean>;
   /** The fight's turn as shown. Once it moves past this, the action has played. */
   turn: number;
+  /** Play a Block with nothing to block: the dummy does nothing (a "whiff"), to see the stances a block that wasn't attacked leads to. */
+  whiff?: boolean;
   /** Play the Rest but break it with a blow (to see its flinch). */
   interrupt?: boolean;
   /** Who acts in the turn being played: all the parts, or one of them (the others hold their stance). */
@@ -103,6 +126,18 @@ export function applyShow(s: CombatState, show: ViewerShow): CombatState {
 const shouldHold = (show: ViewerShow, i: number) => show.parts.length > 1 && typeof show.acting === "number" && show.acting !== i;
 
 function applyPart(e: CombatState["enemies"][number], part: PartShow, show: ViewerShow, played: boolean, hold: boolean) {
+  // A variant that is on: it is that kind (its weapon, armor, health and looks); with none on, the enemy as it is. (Whichever the fight last held.)
+  const base = BASE_OF.get(e.kind as KindId) ?? (e.kind as KindId);
+  const chosen = VARIANTS[base]?.find(x => show.on[`variant:${x.kind}`])?.kind ?? base;
+  if (e.kind !== chosen) {
+    const k = ENEMY_KINDS[chosen];
+    e.kind = chosen;
+    e.name = k.name;
+    e.maxHP = k.maxHP;
+    e.weapon = k.weapon;
+    e.armor = k.armor;
+    e.eternal = k.weapon !== "baseline" && !k.ownWeapon;
+  }
   const kind = kindOf(e);
   // Once the action has played, it stands in the stance it moved on to, statuses as the action left them.
   const stanceName = played && part.next ? part.next : part.stance;

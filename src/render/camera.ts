@@ -120,7 +120,9 @@ const CAMERA_SIDE = 1.4;
 /** Where the two lines stand relative to the player: sideways and ahead (meters), and spacing within a line. */
 const LINES = {
   front: { side: 2.2, ahead: 1.3, spacing: 1.15 },
-  back: { side: 4.3, ahead: 3.6, spacing: 1.5 },
+  // (A little closer than it was, 4.3 and 3.6, now that everything is shaded a little: the sight radius below stays where it was, so the back line
+  // is no longer on the edge of the dark.)
+  back: { side: 3.8, ahead: 3.1, spacing: 1.5 },
 } as const;
 
 /**
@@ -135,7 +137,7 @@ export const SCENE_TILT = Math.atan2(LINES.front.ahead, LINES.front.side);
  * to `clear`, fading to `back` (the arc the back line stands on, so just inside the edge, and dim; the front line stands on a nearer arc),
  * `backDark` dark there, and black from `edge` on: no floor, no horizon, nothing beyond.
  */
-export const LIGHT = { clear: 2.8, back: Math.hypot(LINES.back.side, LINES.back.ahead), backDark: 0.8, edge: 7.4 } as const;
+export const LIGHT = { clear: 2.8, back: Math.hypot(4.3, 3.6), backDark: 0.8, edge: 7.4 } as const;
 
 /** How dark the light has become (0 lit, 1 black) at this floor distance from the player. */
 export function darkAt(d: number): number {

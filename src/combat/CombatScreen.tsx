@@ -37,7 +37,7 @@ const BOSS_STRINGS = 12;
 /** How an enemy's look draws it differently (its kind's variant). */
 const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 
-export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, playerAction, playerHold, playerAngle, playerDead, light = true, debugLimbs = false, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, figureAngle, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
+export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, restOnPlay, shade = true, playerAction, playerHold, playerAngle, playerDead, light = true, debugLimbs = false, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, figureAngle, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
   initial: CombatState;
   /** A scene to play before the first turn (it leaves the fight as `initial`). */
   opening?: Opening;
@@ -51,6 +51,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   playTarget?: string;
   /** The model viewer: you attack it this turn (to break its Rest). */
   attackOnPlay?: boolean;
+  /** The ambient shade over everything (default on): the model viewer turns it off to check the real colours. */
+  shade?: boolean;
+  /** The model viewer: the player does nothing when an action is played, even against a Block or a Maneuver, so the Block has nothing to block (a "whiff"). */
+  restOnPlay?: boolean;
   /** The model viewer's Model stance: how the enemy is seen (3/4 or straight on, from the front or behind). */
   figureAngle?: { view: "front" | "back"; straight: boolean; sides?: boolean };
   /** The model viewer's player mode: each change plays this action for you (instead of a Rest or an Attack). */
@@ -218,6 +222,14 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const shownBefore = prevView?.enemies.find(e => e.id === shownId);
   /** Who the bar hangs below: the shown enemy, or the middle part of the body it is a part of. */
   const barHolder = shownEnemy?.body ? (view.enemies.find(e => e.body === shownEnemy.body && e.part === "mid" && e.alive) ?? shownEnemy).id : shownId;
+
+  /** Whether a bar hangs below this enemy for a Rest this turn: it Rests (or recovers) now, or, for one part of a body, whichever part does, on the middle part. */
+  const restingBar = (e: Enemy): boolean => {
+    const rests = (x: Enemy) => x.alive && x.intent.type === "rest";
+    if (!e.body) return rests(e);
+    const mates = view.enemies.filter(x => x.body === e.body && x.alive);
+    return (e.part === "mid" || mates.every(x => x.part !== "mid")) && mates.some(rests);
+  };
 
   /* ---------- the wheel for the current selection ---------- */
   const wheel: Wheel = (() => {
@@ -587,7 +599,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     const foe = (playTarget ? fight.enemies.find(e => e.id === playTarget) : undefined) ?? fight.enemies.find(e => e.alive);
     // (Not against a fixed rule like Usurp Flame: that plays on its own.)
     const fixedRule = !!foe && !!kindOf(foe).fixedActions?.includes(foe.intent.action ?? "");
-    if (playing && !busy) play(!fixedRule && (attackOnPlay || foe?.intent.type === "block" || foe?.intent.type === "maneuver") ? { type: "attack", target: foe!.id } : { type: "rest" });
+    if (playing && !busy) play(!fixedRule && !restOnPlay && (attackOnPlay || foe?.intent.type === "block" || foe?.intent.type === "maneuver") ? { type: "attack", target: foe!.id } : { type: "rest" });
   });
   const lastSignal = useRef(playSignal);
   useEffect(() => {
@@ -1387,7 +1399,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         // (A part of a body, the Wax Blob: the bar always hangs below its middle part, whichever part is the target.)
         bar: playing && !busy && e.id === barHolder && e.alive
           ? <HealthBar fighter={shownEnemy ?? e} before={shownBefore && barValues(shownBefore)} mirrored />
-          : undefined,
+          // Mid-turn, whoever is Resting shows a bar below them from the moment the turn starts, as the Rest winds up, so you can see what the Rest changes
+          // when it lands (it flashes white then). (A body of several parts has one bar, below its middle part.)
+          : busy && e.alive && restingBar(e)
+            ? <HealthBar fighter={e} before={prevView?.enemies.find(x => x.id === e.id) && barValues(prevView.enemies.find(x => x.id === e.id)!)} mirrored />
+            : undefined,
       })),
   ];
 
@@ -1450,7 +1466,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         <Scene
           figures={figures} shot={shot} projectiles={projectiles} usurpTrails={usurpTrails} arenaLit={candlesLit}
           arena={fight.enemies.some(e => kindOf(e).arena)}
-          light={light}
+          light={light} shade={shade}
           dark={wakeDark ?? (ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark)}
           ignite={ignite ? { who: ignite.who, start: ignite.start, seed: ignite.seed } : undefined}
         />

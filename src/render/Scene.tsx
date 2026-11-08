@@ -10,10 +10,12 @@ import { ClangBurst, EternityHalo, FlameHit, HaloBurst, ImpactRing, type Project
 import type { Pt } from "./geom";
 import { Blood, Shards } from "./HealthBar";
 import { lookOf } from "./looks";
-import { flameOf, type PoseName } from "./poses";
+import { ALL_POSES, flameOf, type PoseName } from "./poses";
 import { CloakRemains, GuideRemains, Remains } from "./Remains";
 import { StickFigure } from "./StickFigure";
-import { facingYaw } from "./rig3d";
+import { AMBIENT } from "./shade";
+import { facingYaw, liftPose, placeRig } from "./rig3d";
+import { LittleFlame } from "./LittleFlame";
 import { Waxed3D } from "./Waxed3D";
 import { BlobBack, BlobFront, type BlobBox } from "./WaxBlob";
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "../warden/arena";
@@ -104,7 +106,7 @@ const rand = (seed: number, i: number) => {
  * Draws the floor and every figure through the camera. When a new shot arrives, everyone (and
  * the camera) moves from wherever they are right now to the new spots, over the shot's duration.
  */
-export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [], arena, arenaLit, ignite, light }: {
+export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [], arena, arenaLit, ignite, light, shade = true }: {
   figures: SceneFigure[];
   shot: SceneShot;
   projectiles?: Projectile[];
@@ -123,6 +125,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   ignite?: { who: string; start?: number; seed: number };
   /** A fight's limited light: only the floor near the player is lit, the back line just inside its edge. */
   light?: boolean;
+  /** The ambient shade: everything a little darker than it really is (default on; the Model viewer can turn it off to check the real colours). */
+  shade?: boolean;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -237,11 +241,15 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
    * camera's subject (you, or the middle of the two fighting), not by where its drawing falls on screen, so a figure inside the light is never
    * darkened by the dark beyond it (its head rising above the edge of the circle, say).
    */
+  // (The ambient shade is under all of that: every figure shows at `AMBIENT` of its brightness.)
+  const ambient = shade ? AMBIENT : 1;
   const lightAt = (p: Vec) => {
-    if (!light) return 1;
+    if (!light) return ambient;
     const me = focusOf(c);
-    return 1 - darkAt(Math.hypot(p.x - me.x, p.z - me.z));
+    return ambient * (1 - darkAt(Math.hypot(p.x - me.x, p.z - me.z)));
   };
+  /** The way a figure faces on the floor: along its dodge, else toward the player. */
+  const figureYaw = (f: SceneFigure, at: Vec) => (dodgeFacing(f) ? yawOf(dodgeFacing(f)!) : facingYaw(c, at, posNow("player"), f.view, !!f.straight));
   /** The floor point under a screen x on a figure standing at `at` (its feet's depth). */
   const floorAt = (at: Vec, sx: number): Vec => {
     const { sx: fx, ppm } = proj(at);
@@ -298,6 +306,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     <div className="scene" ref={boxRef}>
       <div className="scene-floor" style={{ top: `${HORIZON * 100}%` }} />
       {w > 0 && <FloorGrid cam={c} w={w} h={h} />}
+      {/* The ambient shade over the sky, the floor and its lines (the figures are shaded one by one, below). */}
+      {ambient < 1 && <div className="scene-shade" style={{ background: `rgba(0, 0, 0, ${(1 - ambient).toFixed(3)})` }} />}
       {props.map(({ pr, box }) => (
         <div key={pr.id} className={`arena-slot ${coversFigure(box) ? "is-see-through" : ""}`} style={{ left: box.x, top: box.y, width: box.w, height: box.h, zIndex: 1000 - Math.round(box.depth * 10), filter: `brightness(${Math.max(0.55, Math.min(1, 1.05 - box.depth * 0.04)) * lightAt(pr.pos)})` }}>
           <SealedSleeper kind={pr.kind} flip={pr.flip} lit={propLit} />
@@ -333,7 +343,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         >
           {f.holdsString && !f.dead && <StringAura layer="back" spread={f.body ? 2.4 : 1} />}
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : f.variant === "waxed" && !f.body && w > 0 ? <Waxed3D pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={dodgeFacing(f) ? yawOf(dodgeFacing(f)!) : facingYaw(c, at, posNow("player"), f.view, !!f.straight)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
+            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : f.variant === "waxed" && !f.body && w > 0 ? <Waxed3D pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}
           </div>
@@ -353,6 +363,15 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         return (
           <LoneFlame key={`candle-${f.id}`} className="arena-candle-flame" at={[fx, fy]} sz={sz} zIndex={1001 - Math.round(box.depth * 10)} />
         );
+      })}
+      {/* A flame out in someone's hands gives off a faint red light round it, over the figures and the floor near it. */}
+      {w > 0 && placed.map(({ f, box, at }) => {
+        const pose = ALL_POSES[f.pose];
+        if (f.variant !== "waxed" || f.body || f.dead || !pose || (pose.for3d?.prop ?? pose.prop)?.kind !== "flame") return null;
+        const rig = liftPose(pose, f.hand);
+        if (!rig.prop || rig.propHidden) return null;
+        const flame = placeRig(rig, at, figureYaw(f, at), c, w, h, f.scale).prop!.at, size = box.w * 1.3;
+        return <div key={`flame-light-${f.id}`} className="flame-light" style={{ left: flame.sx - size / 2, top: flame.sy - size / 2, width: size, height: size }} />;
       })}
       {light && w > 0 && <LightFall cam={c} center={focusOf(c)} w={w} h={h} />}
       {dark && <div className="scene-dark" style={{ opacity: dark.level, transition: `opacity ${dark.ms}ms ease-in` }} />}
@@ -550,10 +569,7 @@ function LoneFlame({ at, sz, className, zIndex }: { at: Pt; sz: number; classNam
   return (
     <svg className={className} style={{ left: at[0] - sz / 2, top: at[1] - sz * 0.8, width: sz, height: sz, zIndex }} viewBox="-10 -16 20 20" aria-hidden="true">
       <circle cx={0} cy={-3} r={9} className="fig-glow" />
-      <g className="fig-flame">
-        <path d="M0 -12 C4.6 -5 4.4 0 0 0 C-4.4 0 -4.6 -5 0 -12 Z" />
-        <path d="M0 -6 C2 -2.4 2 0 0 0 C-2 0 -2 -2.4 0 -6 Z" className="fig-flame-core" />
-      </g>
+      <LittleFlame x={0} y={0} height={12} />
     </svg>
   );
 }

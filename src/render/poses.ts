@@ -119,6 +119,49 @@ export interface Skeleton {
    */
   pitch3?: number;
   /**
+   * The 3D rig only: the face looks straight at what the weapon hand holds (`"prop"`, the flame): the head bows toward it (a share of the
+   * way, as far as the neck lets it) and the face points at it. Or, given outright, where the head is and the way the face points (sideways, up, ahead; figure units; the gaze any length), for a pose
+   * whose arms move the held thing away from where it was (the rest after Clutch Flame keeps the clutch pose's face).
+   */
+  look3?: "prop" | { head: readonly [number, number, number]; gaze: readonly [number, number, number] };
+  /** The 3D rig only: the held thing is not drawn (it is gone: the flame was eaten); it still says where the face looks. */
+  hideProp3?: boolean;
+  /**
+   * The 3D rig only: which of the figure's hands the pose's `weaponArm` is (default: the kind's weapon hand, the right). The flat pose's
+   * arms are mirrored to the other sides: the arm drawn as the weapon arm goes to the left if this is "left". What is held in the weapon
+   * hand (a lump of wax) goes with it, and so does the weapon of an armed Waxed, which is held in the other hand.
+   */
+  hand3?: Side;
+  /**
+   * The 3D rig only: the head tipped back from the neck this many degrees (negative: forward), in the plane the figure faces along, away
+   * from what it faces; its distance from the neck does not change.
+   */
+  head3?: number;
+  /**
+   * The 3D rig only: a whole arm (elbow and hand, from its shoulder, which does not move) tipped back this many degrees (negative: forward), in
+   * the plane the figure faces along, so a raised arm comes down as it swings back; its bones keep their lengths. Done before `forearm3`.
+   */
+  arm3?: { right?: number; left?: number };
+  /**
+   * The 3D rig only: a whole arm swung sideways about the vertical through its shoulder, degrees, positive toward the figure's right: an arm
+   * that points forward goes out to its right, one that points back goes out to its left (so the same positive angle opens both arms away
+   * from the body when one points forward and the other back). Done with `arm3`; the bones keep their lengths.
+   */
+  spread3?: { right?: number; left?: number };
+  /**
+   * The 3D rig only: a forearm (from its elbow, so the elbow does not move) tipped back this many degrees (negative: forward), the same way
+   * as `head3`. Done after the ribcage is turned, so the elbow's and hand's places already include that.
+   */
+  forearm3?: { right?: number; left?: number };
+  /**
+   * The 3D rig only: the ribcage turned about its own axis (the line from the waist to the neck), degrees, right-handed about the way
+   * that axis points from the waist to the neck: with an upright back, positive turns the chest to the figure's right (its right shoulder
+   * goes back and its left one forward), negative to its left. The shoulders (and so the ribcage, whose width follows them) and the arms on
+   * them turn rigidly together, so each arm keeps its place in the shoulders' own frame (its position and direction relative to the shoulder
+   * line); the head and the spine do not move.
+   */
+  spin3?: number;
+  /**
    * The 3D rig only: the shoulders and ribcage twisted about the spine, this many degrees, the figure's right shoulder going down and its
    * left one up (negative: the other way). The arms re-solve to their hands; the head and the spine itself do not move.
    */
@@ -166,7 +209,7 @@ export type PoseName =
   | "sw-windup" | "sw-brace" | "sw-flinch" | "sw-down" | "sw-idle" | "sw-charging" | "sw-struggling" | "sw-guarded"
   | "sw-overhead" | "sw-chop" | "sw-parry" | "sw-charge" | "sw-backstep" | "sw-despair"
   | "w-idle" | "w-hands" | "w-scratch" | "w-wax-hand" | "w-hurl"
-  | "w-dead" | "w-cower" | "w-crawl" | "w-low-windup" | "w-low-strike" | "w-drag" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
+  | "w-staggered" | "w-dead" | "w-cower" | "w-reared" | "w-hurl-windup" | "w-clutch-eat" | "w-brace" | "w-brace-block" | "w-overhead-windup" | "w-overhead-strike" | "w-crawl" | "w-low-windup" | "w-low-strike" | "w-drag" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
   | WardenPoseName
   | GuidePoseName;
 
@@ -181,6 +224,61 @@ const KNEELING = {
 
 /** The waxed carry nothing; the grip just follows a hand (and isn't drawn). */
 const bare = (hand: Pt) => ({ at: hand, angle: 0 });
+
+/** Hands Raised: both hands up, fingers hooked, about to claw (the drawing the Reared Back stance and the Overhead Attack start from). */
+const HANDS_2D: Skeleton = {
+  head: [54, 43], neck: [52, 55], hip: [47, 88],
+  adjust: { torso: 1.043, leadThigh: 1.041, leadShin: 0.832, rearShin: 0.832, weaponUpper: 1.414, weaponFore: 1.04, freeUpper: 1.172, freeFore: 1.04 },
+  weaponArm: { elbow: [63, 45], hand: [67, 31] },
+  freeArm: { elbow: [45, 44], hand: [49, 30] },
+  ...KNEELING, weapon: bare([67, 31]),
+};
+
+/** Scratch: thrown forward from the knees, both hands raking down (the flat drawing; the Overhead Attack's strike starts from its body). */
+const SCRATCH_2D: Skeleton = {
+  head: [78, 54], neck: [69, 62], hip: [52, 88],
+  adjust: { torso: 0.971, leadThigh: 0.97, leadShin: 0.832, rearThigh: 0.98, rearShin: 0.832, weaponUpper: 1.088, weaponFore: 1.163, freeUpper: 0.319, freeFore: 1.055 },
+  weaponArm: { elbow: [80, 72], hand: [91, 84] },
+  freeArm: { elbow: [76, 66], hand: [89, 73] },
+  ...KNEELING, weapon: bare([91, 84]),
+};
+
+/** Wax on Hand: leaning back, a lump of wax torn from itself held behind the shoulder (the flat drawing; the Hurl Wax's wind-up starts from it too). */
+const WAX_HAND_2D: Skeleton = {
+  head: [45, 44], neck: [46, 55], hip: [48, 88],
+  adjust: { torso: 1.033, leadThigh: 1.024, leadShin: 0.832, rearThigh: 0.987, rearShin: 0.832, weaponUpper: 0.707, weaponFore: 0.909, freeUpper: 0.759, freeFore: 0.735 },
+  weaponArm: { elbow: [36, 52], hand: [27, 43] },
+  freeArm: { elbow: [57, 64], hand: [66, 59] },
+  ...KNEELING, weapon: bare([27, 43]), prop: { kind: "wax", at: [25, 40] },
+};
+
+/**
+ * Wax on Hand in 3D: it is the left hand that tears the wax off and holds it; the arms are their full length, not the flat drawing's shortened
+ * ones; the torso is turned 20° to its left, the right shoulder toward the player and the left one away; and both arms are swung 35° out to the
+ * sides, so his head does not cover them from other angles.
+ */
+const WAX_HAND_3D: NonNullable<Skeleton["for3d"]> = {
+  hand3: "left", spin3: -20, spread3: { right: 35, left: 35 },
+  adjust: { torso: 1.033, leadThigh: 1.024, leadShin: 0.832, rearThigh: 0.987, rearShin: 0.832, weaponUpper: 1.2, weaponFore: 1.2, freeUpper: 1.2, freeFore: 1.2 },
+};
+
+/** Clutch Flame: folded over it, head bowed, hugging the flame to its belly (the flat drawing; the rest after it starts from its body too). */
+const CLUTCH_2D: Skeleton = {
+  head: [64, 60], neck: [58, 68], hip: [46, 90],
+  adjust: { torso: 0.783, leadThigh: 0.987, leadShin: 0.832, rearThigh: 0.921, rearShin: 0.832, weaponUpper: 1.466, weaponFore: 0.452, freeUpper: 1.445, freeFore: 0.385 },
+  weaponArm: { elbow: [70, 86], hand: [64, 84] },
+  freeArm: { elbow: [58, 90], hand: [60, 85] },
+  ...KNEELING, weapon: bare([64, 84]), prop: { kind: "flame", at: [62, 84] },
+};
+
+/** Reared Back in 3D (the stance, and the base of the Overhead Attack's wind-up): see the pose `w-reared`. */
+const REARED_3D: NonNullable<Skeleton["for3d"]> = {
+  legs3: { knees: 7, feet: 0.8, sit: 23 }, pitch3: 8, spin3: -35, head3: 15, arm3: { left: 45 }, forearm3: { right: 49, left: -35 },
+  waist: [49.2, 73.6], neck: [47.1, 54.9], head: [49.1, 43.1],
+  weaponArm: { elbow: [58.1, 45.1], hand: [62.1, 31.1] },
+  freeArm: { elbow: [40.1, 44.1], hand: [44.1, 30.1] },
+  weapon: bare([62.1, 31.1]),
+};
 
 /** Crawling's flat drawing (also the map's), the base of the Low Attack's poses as well. */
 const CRAWL_2D: Omit<Skeleton, "for3d"> = {
@@ -507,38 +605,84 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
     freeArm: { elbow: [53, 77], hand: [55, 91] },
     ...KNEELING, weapon: bare([61, 91]), legs3: { knees: 7, feet: 0.8, sit: 11 }, arms3: { right: { plant: { out: 1.5, reach: 0.975 } }, left: { plant: { out: 1.5, reach: 0.975 } } },
   },
-  // Dead: folded right down onto its knees, hunched low over itself, head bowed to its knees, arms
-  // wrapped round its own body, hugging itself.
+  // Staggered: the hunched Dead pose, but sat straighter up, as in Idle (the lower spine arched back, the ribcage about 41° above level): still on its knees,
+  // the head hanging forward, the arms crossed over the chest, the hands on the opposite shoulders.
+  "w-staggered": {
+    head: [64, 62], neck: [57, 62], waist: [43, 74], hip: [47, 88],
+    adjust: { weaponUpper: 1.2, weaponFore: 1.2, freeUpper: 1.2, freeFore: 1.2 },
+    weaponArm: { elbow: [60, 80], hand: [54, 72] },
+    freeArm: { elbow: [58, 80], hand: [66, 72] },
+    ...KNEELING, weapon: bare([54, 72]), legs3: { knees: 7, feet: 0.8, sit: 11 },
+    arms3: {
+      // The arms crossed over the chest: each hand on the other shoulder, the right forearm over the left, the elbows out and down.
+      right: { to: [-5, 25.3, 8.6], bend: [1, -0.8, 0] },
+      left: { to: [-5, 26.4, 7.7], bend: [1, -0.8, 0] },
+    },
+  },
+  // Dead: still on its knees, but hunched far over, a slouchier Idle: the lower spine arched back a little, the ribcage collapsed forward (a touch
+  // below level), the head hanging; the arms crossed over the chest, the hands on the opposite shoulders.
   "w-dead": {
-    head: [70, 101], neck: [60, 94], hip: [44, 105],
-    adjust: { torso: 0.6, leadThigh: 0.6, leadShin: 0.832, rearThigh: 0.6, rearShin: 0.832, weaponUpper: 0.95, weaponFore: 0.9, freeUpper: 0.9, freeFore: 0.9 },
-    weaponArm: { elbow: [68, 106], hand: [50, 98] },
-    freeArm: { elbow: [57, 108], hand: [47, 100] },
-    ...KNEELING, weapon: bare([50, 98]),
+    head: [65, 77], neck: [60, 73], waist: [42, 76], hip: [47, 88],
+    adjust: { weaponUpper: 1.2, weaponFore: 1.2, freeUpper: 1.2, freeFore: 1.2 },
+    weaponArm: { elbow: [60, 90], hand: [54, 83] },
+    freeArm: { elbow: [58, 90], hand: [66, 83] },
+    ...KNEELING, weapon: bare([54, 83]), legs3: { knees: 7, feet: 0.8, sit: 11 },
+    arms3: {
+      // The arms crossed over the chest: each hand on the other shoulder, the right forearm over the left, the elbows out and down.
+      right: { to: [-5, 18.2, 5.7], bend: [1, -0.8, 0] },
+      left: { to: [-5, 19.6, 5.5], bend: [1, -0.8, 0] },
+    },
   },
   // Hands Raised: both hands up, fingers hooked, about to claw.
-  "w-hands": {
-    head: [54, 43], neck: [52, 55], hip: [47, 88],
-    adjust: { torso: 1.043, leadThigh: 1.041, leadShin: 0.832, rearShin: 0.832, weaponUpper: 1.414, weaponFore: 1.04, freeUpper: 1.172, freeFore: 1.04 },
-    weaponArm: { elbow: [63, 45], hand: [67, 31] },
-    freeArm: { elbow: [45, 44], hand: [49, 30] },
-    ...KNEELING, weapon: bare([67, 31]),
+  "w-hands": HANDS_2D,
+  // Reared Back (the stance): the hands-up drawing, in 3D with the ribcage bent back 15° more at the waist (it leaned forward 8.6° of vertical;
+  // now it leans back 6.4°), the head, shoulders and raised arms going with it; and the ribcage turned 35° about its own axis, to its
+  // left, so the right shoulder is nearer the front (the arms turn with the shoulders, keeping their place relative to them);
+  // the head tipped back 15° from the neck, away from the player, and the right forearm tipped back 49° from its elbow the same way (leaning back about 45° from vertical); the left arm tipped back
+  // 45° from its shoulder (its elbow and hand lower) with the forearm folded up 35° toward the shoulder (the elbow bent more); the hips
+  // a little lower (the pelvis at 23, from 26) and everything above them pitched back 8° more, as one block.
+  "w-reared": { ...HANDS_2D, for3d: REARED_3D },
+  // Brace, wind-up (what it holds until the blow lands): the Reared Back pose with both arms lowered about 20° (the right one tipped forward 25°,
+  // the left one back 20° more) and the elbows bent more (the right forearm tipped back further, the left one folded up further).
+  "w-brace": { ...HANDS_2D, for3d: { ...REARED_3D, arm3: { left: 65, right: -25 }, forearm3: { right: 105, left: -85 } } },
+  // Brace, block (what it takes as the blow lands, coming from the wind-up): the hips lower (17), and the forearms crossed in front of the face,
+  // each hand reaching over to the other side above the eyes, the elbows low and out to the sides.
+  "w-brace-block": {
+    ...HANDS_2D,
+    for3d: {
+      ...REARED_3D,
+      legs3: { knees: 7, feet: 0.8, sit: 17 }, arm3: undefined, forearm3: undefined,
+      adjust: { ...HANDS_2D.adjust, weaponUpper: 1.2, weaponFore: 1.2, freeUpper: 1.2, freeFore: 1.2 },
+      arms3: {
+        right: { to: [-9, 69, 8], bend: [1, -0.7, 0.2] },
+        left: { to: [-9, 66, 4], bend: [1, -0.7, 0.2] },
+      },
+    },
   },
+  // Overhead Attack, wind-up: the Reared Back pose, the whole body above the hip leaning 14° further back (the pitch from 8° to 22°).
+  "w-overhead-windup": { ...HANDS_2D, for3d: { ...REARED_3D, pitch3: 22 } },
   // Scratch: thrown forward from the knees, both hands raking down.
-  "w-scratch": {
-    head: [78, 54], neck: [69, 62], hip: [52, 88],
-    adjust: { torso: 0.971, leadThigh: 0.97, leadShin: 0.832, rearThigh: 0.98, rearShin: 0.832, weaponUpper: 1.088, weaponFore: 1.163, freeUpper: 0.319, freeFore: 1.055 },
-    weaponArm: { elbow: [80, 72], hand: [91, 84] },
-    freeArm: { elbow: [76, 66], hand: [89, 73] },
-    ...KNEELING, weapon: bare([91, 84]),
+  "w-scratch": SCRATCH_2D,
+  // Overhead Attack, strike: the Scratch's body (thrown forward from the knees), in 3D with real arms (the flat drawing's shorten the left upper
+  // arm to 3.9): both hands brought together low in front, almost down to the ground (18 up), the elbows bowed out to the sides.
+  "w-overhead-strike": {
+    ...SCRATCH_2D,
+    for3d: {
+      adjust: { ...SCRATCH_2D.adjust, weaponUpper: 1.3, weaponFore: 1.3, freeUpper: 1.3, freeFore: 1.3 },
+      arms3: {
+        right: { to: [0.9, 18, 26.4], bend: [1, 0, 0] },
+        left: { to: [0.9, 18, 26.4], bend: [1, 0, 0] },
+      },
+    },
   },
   // Wax on Hand: leaning back, a lump of wax torn from itself held behind the shoulder.
-  "w-wax-hand": {
-    head: [45, 44], neck: [46, 55], hip: [48, 88],
-    adjust: { torso: 1.033, leadThigh: 1.024, leadShin: 0.832, rearThigh: 0.987, rearShin: 0.832, weaponUpper: 0.707, weaponFore: 0.909, freeUpper: 0.759, freeFore: 0.735 },
-    weaponArm: { elbow: [36, 52], hand: [27, 43] },
-    freeArm: { elbow: [57, 64], hand: [66, 59] },
-    ...KNEELING, weapon: bare([27, 43]), prop: { kind: "wax", at: [25, 40] },
+  "w-wax-hand": { ...WAX_HAND_2D, for3d: WAX_HAND_3D },
+  // Hurl Wax, wind-up: the Wax on Hand pose, rearing back for the throw (the whole upper body pitched back 12° from the hip); the right arm angled slightly
+  // upward with the elbow less bent (46°, from 64°); the left, throwing arm lowered further (its upper arm tipped back 25° more, to 13° below horizontal);
+  // and both arms swung 35° out to his sides, so his head does not cover them from other angles.
+  "w-hurl-windup": {
+    ...WAX_HAND_2D,
+    for3d: { ...WAX_HAND_3D, pitch3: 12, arm3: { right: 12, left: 25 }, forearm3: { right: -20 } },
   },
   // Hurl Wax: the throwing arm whipped forward, the other flung back.
   "w-hurl": {
@@ -547,6 +691,12 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
     weaponArm: { elbow: [70, 48], hand: [83, 44] },
     freeArm: { elbow: [46, 68], hand: [37, 77] },
     ...KNEELING, weapon: bare([83, 44]),
+    // (In 3D it is the left hand that throws; the arms are their full length, equal, not the flat drawing's; and the torso is turned 20° the other way from
+    // Wax on Hand, to its right: the left shoulder toward the player, the right one away.)
+    for3d: {
+      hand3: "left", spin3: 20,
+      adjust: { torso: 1.039, leadShin: 0.832, rearThigh: 0.983, rearShin: 0.832, weaponUpper: 1.2, weaponFore: 1.2, freeUpper: 1.2, freeFore: 1.2 },
+    },
   },
   // Cowering Sideways: twisted away and low, arms wrapped over the head.
   "w-cower": {
@@ -608,14 +758,25 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
     weaponArm: { elbow: [64, 80], hand: [64, 72] },
     freeArm: { elbow: [52, 80], hand: [56, 73] },
     ...KNEELING, weapon: bare([64, 72]), prop: { kind: "flame", at: [60, 70] },
+    for3d: { look3: "prop" }, // (the face looks straight at the flame)
   },
   // Clutch Flame: folded over it, head bowed, hugging the flame to its belly.
-  "w-clutch": {
-    head: [64, 60], neck: [58, 68], hip: [46, 90],
-    adjust: { torso: 0.783, leadThigh: 0.987, leadShin: 0.832, rearThigh: 0.921, rearShin: 0.832, weaponUpper: 1.466, weaponFore: 0.452, freeUpper: 1.445, freeFore: 0.385 },
-    weaponArm: { elbow: [70, 86], hand: [64, 84] },
-    freeArm: { elbow: [58, 90], hand: [60, 85] },
-    ...KNEELING, weapon: bare([64, 84]), prop: { kind: "flame", at: [62, 84] },
+  "w-clutch": { ...CLUTCH_2D, for3d: { look3: "prop" } },
+  // Clutch Flame, rest (what it takes once the rest goes through): the clutch pose with the flame gone, doused as it pressed its hands against its wax
+  // mouth, as if it ate it (the hands at the mouth, the face still bowed where the flame was).
+  "w-clutch-eat": {
+    ...CLUTCH_2D,
+    prop: undefined,
+    for3d: {
+      // (The face is where the clutch pose's is: bowed, looking down where the flame was.)
+      look3: { head: [0, 47.5, 17.88], gaze: [0.319, -0.882, -0.346] }, hideProp3: true,
+      adjust: { ...CLUTCH_2D.adjust, weaponUpper: 1.2, weaponFore: 1.2, freeUpper: 1.2, freeFore: 1.2 },
+      arms3: {
+        // Both hands pressed against the wax mouth, the elbows out and down.
+        right: { to: [2.2, 38.8, 15.4], bend: [0.8, -1, -0.2] },
+        left: { to: [2.2, 38.8, 15.4], bend: [0.8, -1, -0.2] },
+      },
+    },
   },
   // A Rest broken by a blow: jerked upright and back, arms thrown up.
   "w-flinch": {

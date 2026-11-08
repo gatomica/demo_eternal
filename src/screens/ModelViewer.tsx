@@ -13,7 +13,9 @@ import type { CombatState } from "../core/types";
 import { ARMOR, WEAPONS } from "../core/rules";
 import type { ArmorTier, WeaponTier } from "../core/types";
 import type { PoseName } from "../render/poses";
-import { applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, type EnemySubject, figureAngleOf, LINE_TOGGLE, MODEL, MODEL_ANGLES, type ModelAngle, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow } from "./viewerModel";
+import { applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, variantToggles, type EnemySubject, figureAngleOf, LINE_TOGGLE, MODEL, MODEL_ANGLES, type ModelAngle, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow } from "./viewerModel";
+import { GearViewer } from "./GearViewer";
+import { GEAR_WEAPONS, type GearId } from "../render/gear3d";
 import { cycle, useKeys } from "../ui/input";
 import { Picker } from "../ui/Picker";
 
@@ -21,16 +23,27 @@ import { Picker } from "../ui/Picker";
 type Subject = EnemySubject | "player";
 const SUBJECTS: Subject[] = [...VIEWER_SUBJECTS, "player"];
 
-/** Pick which enemy (or you) to look at. A/D change, E opens it, Q goes back to the menu. */
-function ViewerSetup({ kind, onChange, onStart, onExit }: {
+/** Which row of the setup is the one in hand: the models (enemies and you), or the gear. */
+type Row = "model" | "gear";
+const GEAR_IDS = GEAR_WEAPONS.map(m => m.id) as GearId[];
+
+/** Pick which enemy (or you), or which piece of gear, to look at. W/S change the row, A/D change what's picked, E opens it, Q goes back to the menu. */
+function ViewerSetup({ kind, gear, row, onChange, onGear, onRow, onStart, onExit }: {
   kind: Subject;
+  gear: GearId;
+  row: Row;
   onChange: (k: Subject) => void;
+  onGear: (g: GearId) => void;
+  onRow: (r: Row) => void;
   onStart: () => void;
   onExit: () => void;
 }) {
   useKeys(key => {
-    if (key === "left" || key === "right") onChange(cycle(SUBJECTS, kind, key === "right" ? 1 : -1));
-    else if (key === "select") onStart();
+    if (key === "up" || key === "down") onRow(row === "model" ? "gear" : "model");
+    else if (key === "left" || key === "right") {
+      if (row === "model") onChange(cycle(SUBJECTS, kind, key === "right" ? 1 : -1));
+      else onGear(cycle(GEAR_IDS, gear, key === "right" ? 1 : -1));
+    } else if (key === "select") onStart();
     else if (key === "back" || key === "pause") onExit();
   });
   return (
@@ -38,14 +51,23 @@ function ViewerSetup({ kind, onChange, onStart, onExit }: {
       <h2 className="setup-title">Model viewer</h2>
       <Picker
         label="Model"
-        focused
+        focused={row === "model"}
         value={kind}
         options={SUBJECTS}
         labels={{ ...Object.fromEntries(VIEWER_SUBJECTS.map(k => [k, subjectName(k)])), player: "You (player)" }}
-        onChange={onChange}
+        onChange={k => { onRow("model"); onChange(k); }}
+      />
+      {/* Gear: the weapons, modelled in 3D for the new rig to use (not the enemies). */}
+      <Picker
+        label="Gear"
+        focused={row === "gear"}
+        value={gear}
+        options={GEAR_IDS}
+        labels={Object.fromEntries(GEAR_WEAPONS.map(m => [m.id, m.name]))}
+        onChange={g => { onRow("gear"); onGear(g); }}
       />
       <p className="hint">
-        <kbd>A</kbd><kbd>D</kbd> change · <kbd>E</kbd> view · <kbd>Q</kbd> menu
+        <kbd>W</kbd><kbd>S</kbd> row · <kbd>A</kbd><kbd>D</kbd> change · <kbd>E</kbd> view · <kbd>Q</kbd> menu
       </p>
       <div className="setup-buttons">
         <button className="hud-button" onClick={onExit}>Menu</button>
@@ -57,9 +79,12 @@ function ViewerSetup({ kind, onChange, onStart, onExit }: {
 
 export function ModelViewer({ onExit }: { onExit: () => void }) {
   const [kind, setKind] = useState<Subject>(VIEWER_SUBJECTS[0]);
-  const [viewing, setViewing] = useState(false);
+  const [gear, setGear] = useState<GearId>(GEAR_IDS[0]);
+  const [row, setRow] = useState<Row>("model");
+  const [viewing, setViewing] = useState<false | Row>(false);
   const [run, setRun] = useState(0);
-  if (!viewing) return <ViewerSetup kind={kind} onChange={setKind} onStart={() => { setRun(r => r + 1); setViewing(true); }} onExit={onExit} />;
+  if (!viewing) return <ViewerSetup kind={kind} gear={gear} row={row} onChange={setKind} onGear={setGear} onRow={setRow} onStart={() => { setRun(r => r + 1); setViewing(row); }} onExit={onExit} />;
+  if (viewing === "gear") return <GearViewer id={gear} onChange={setGear} onBack={() => setViewing(false)} />;
   if (kind === "player") return <PlayerViewerFight key={`player-${run}`} onBack={() => setViewing(false)} onRetry={() => setRun(r => r + 1)} onExit={onExit} />;
   return <ViewerFight key={`${kind}-${run}`} subject={kind} onBack={() => setViewing(false)} onRetry={() => setRun(r => r + 1)} onExit={onExit} />;
 }
@@ -76,15 +101,18 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
   const [show, setShow] = useState<ViewerShow>(() => ({ parts: kinds.map(k => ({ stance: k.pattern.stances[0].name })), on: {}, turn: 1 }));
   const [playSignal, setPlaySignal] = useState(0);
   const [lit, setLit] = useState(true);
+  const [shade, setShade] = useState(true);
   const initial = useMemo(() => viewerFight(subject), [subject]);
   const override = useCallback((s: CombatState) => applyShow(s, show), [show]);
   const shown = useMemo(() => applyShow(initial, show), [initial, show]);
   // The statuses of all the parts (by key), after the line they share.
   const statuses = [...new Map(kinds.flatMap(k => k.statuses ?? []).map(t => [t.key, t])).values()];
-  const toggles = [LINE_TOGGLE, ...statuses, DEBUG_TOGGLE];
+  const toggles = [LINE_TOGGLE, ...statuses, ...variantToggles(subject), DEBUG_TOGGLE];
   const flip = (toggle: StatusToggle) =>
     setShow(prev => {
       const on = { ...prev.on, [toggle.key]: !prev.on[toggle.key] };
+      // The weapon and armor variants are one at a time: turning one on turns the others off.
+      if (toggle.key.startsWith("variant:") && on[toggle.key]) for (const k of Object.keys(on)) if (k.startsWith("variant:") && k !== toggle.key) on[k] = false;
       return {
         ...prev, interrupt: undefined, acting: undefined, on,
         // Switched on, some statuses send the part that has them to the stance that follows them (phase two: Idle).
@@ -102,15 +130,15 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
     setShow(prev => ({ ...prev, acting: undefined, parts: prev.parts.map(() => ({ stance: name })) }));
   // Playing an action also picks, at random, which of the stances it leads to it moves on to,
   // as in a fight; it settles into that stance as the action ends.
-  const nextOf = (i: number, action: string, interrupt: boolean) => {
-    // A broken Rest counts as undone: it picks up again from the Recover stances.
-    const options = nextStances(kinds[i].pattern, { action, outcome: interrupt ? "undone" : "done", avoid: interrupt ? show.parts[i].stance : undefined });
+  const nextOf = (i: number, action: string, interrupt: boolean, whiff = false) => {
+    // A broken Rest counts as undone: it picks up again from the Recover stances. A Block that had nothing to block leads on to the stances for that.
+    const options = nextStances(kinds[i].pattern, { action, outcome: interrupt ? "undone" : "done", blocked: !whiff, avoid: interrupt ? show.parts[i].stance : undefined });
     return options[Math.floor(Math.random() * options.length)].name;
   };
   /** One part does an action; the others of its body hold their stance. */
-  const play = (i: number, action: string, interrupt = false) => {
-    const next = nextOf(i, action, interrupt);
-    setShow(prev => ({ ...prev, interrupt, acting: multi ? i : undefined, parts: prev.parts.map((p, j) => (j === i ? { ...p, action, next, chosen: action } : { stance: p.stance, chosen: p.chosen })) }));
+  const play = (i: number, action: string, interrupt = false, whiff = false) => {
+    const next = nextOf(i, action, interrupt, whiff);
+    setShow(prev => ({ ...prev, interrupt, whiff, acting: multi ? i : undefined, parts: prev.parts.map((p, j) => (j === i ? { ...p, action, next, chosen: action } : { stance: p.stance, chosen: p.chosen })) }));
     setPlaySignal(n => n + 1);
   };
   /** Every part does the action it has picked (the first its stance allows, otherwise), all in the same turn. */
@@ -176,6 +204,19 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
                 >
                   ▶ {a.name} <span className="viewer-kind">{fixed ? "fixed rule" : a.type}</span>
                 </button>,
+                // A Block can also be played with nothing to block, to see where a block that wasn't attacked leads.
+                ...(a.type === "block" && !fixed
+                  ? [
+                      <button
+                        key={`${a.name}-whiff`}
+                        className={`chip viewer-action${available ? "" : " viewer-unmet"}`}
+                        title={`Play ${a.name} with nothing attacking it: it blocks nothing, and moves on to the stances for that`}
+                        onClick={e => { e.currentTarget.blur(); play(i, a.name, false, true); }}
+                      >
+                        ○ Whiff <span className="viewer-kind">{a.name} blocks nothing</span>
+                      </button>,
+                    ]
+                  : []),
                 // A Rest can also be broken by a blow, to see the flinch.
                 ...(a.type === "rest" && !fixed && part.stance !== STAGGERED
                   ? [
@@ -203,7 +244,7 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
         <h2 className="viewer-title">{subjectName(subject)}</h2>
         <button className="hud-button viewer-change" onClick={onBack}>Change enemy</button>
       </div>
-      <LightToggle lit={lit} onChange={setLit} />
+      <LightToggle lit={lit} onChange={setLit} shade={shade} onShade={setShade} />
       <div className="viewer-section">
         <span className="picker-label">Status</span>
         <div className="picker-options">
@@ -263,10 +304,12 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
       override={override}
       panel={panel}
       light={lit}
+      shade={shade}
       debugLimbs={!!show.on.debug}
       playSignal={playSignal}
       playTarget={playTarget}
       attackOnPlay={!!show.interrupt}
+      restOnPlay={!!show.whiff}
       figureAngle={anyModel ? figureAngleOf(show.angle ?? "front34") : undefined}
       onTurnPlayed={afterTurn}
       onRetry={onRetry}
@@ -291,6 +334,7 @@ function PlayerViewerFight({ onBack, onRetry, onExit }: { onBack: () => void; on
   const [angle, setAngle] = useState<ModelAngle>("front34");
   const [scenarioId, setScenarioId] = useState<string | undefined>();
   const [lit, setLit] = useState(true);
+  const [shade, setShade] = useState(true);
   const [debug, setDebug] = useState(false);
   const [playSignal, setPlaySignal] = useState(0);
   const scenario = PLAYER_SCENARIOS.find(sc => sc.id === scenarioId);
@@ -318,7 +362,7 @@ function PlayerViewerFight({ onBack, onRetry, onExit }: { onBack: () => void; on
         <h2 className="viewer-title">You</h2>
         <button className="hud-button viewer-change" onClick={onBack}>Change model</button>
       </div>
-      <LightToggle lit={lit} onChange={setLit} />
+      <LightToggle lit={lit} onChange={setLit} shade={shade} onShade={setShade} />
       <div className="viewer-section">
         <span className="picker-label">Status</span>
         <div className="picker-options">
@@ -349,6 +393,7 @@ function PlayerViewerFight({ onBack, onRetry, onExit }: { onBack: () => void; on
       override={override}
       panel={panel}
       light={lit}
+      shade={shade}
       debugLimbs={debug}
       playSignal={playSignal}
       playerAction={scenario ? playerActionOf(scenario) : undefined}
@@ -364,12 +409,14 @@ function PlayerViewerFight({ onBack, onRetry, onExit }: { onBack: () => void; on
 }
 
 /** The fight's limited light, on (to see how far-away sprites are shaded: put the enemy on the back line) or off (to see everything). */
-function LightToggle({ lit, onChange }: { lit: boolean; onChange: (v: boolean) => void }) {
+function LightToggle({ lit, onChange, shade, onShade }: { lit: boolean; onChange: (v: boolean) => void; shade: boolean; onShade: (v: boolean) => void }) {
   return (
     <div className="viewer-section">
       <span className="picker-label">Light</span>
       <div className="picker-options">
         <button className="chip viewer-toggle" aria-pressed={lit} onClick={() => onChange(!lit)}>{lit ? "Fight's light: on" : "Fight's light: off"}</button>
+        {/* The ambient shade (everything a little darker than it really is): off, the colours are as they really are. */}
+        <button className="chip viewer-toggle" aria-pressed={shade} onClick={() => onShade(!shade)}>{shade ? "Shade: on" : "Shade: off (real colours)"}</button>
       </div>
     </div>
   );

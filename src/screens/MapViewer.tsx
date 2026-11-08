@@ -30,6 +30,7 @@ export function MapViewer({ onExit }: { onExit: () => void }) {
   const [alt, setAlt] = useState(0);
   const [at, setAt] = useState({ x: WORLD.start.x, y: WORLD.start.y });
   const [copied, setCopied] = useState(false);
+  const [shade, setShade] = useState(true);
   const altRef = useRef(alt);
   altRef.current = alt;
   const exit = useRef(onExit);
@@ -114,9 +115,10 @@ export function MapViewer({ onExit }: { onExit: () => void }) {
         <span className="hint">{address}</span>
         <button className="hud-button" onClick={copy}>{copied ? "Copied" : "Copy address"}</button>
         <span className="hint">WASD move · Q down a level · E up a level · Esc back</span>
+        <button className="hud-button" aria-pressed={shade} onClick={() => setShade(s => !s)}>{shade ? "Shade: on" : "Shade: off (real colours)"}</button>
         <button className="hud-button" onClick={onExit}>Menu</button>
       </header>
-      <canvas ref={canvasRef} className="mapviewer-canvas" />
+      <canvas ref={canvasRef} className={`mapviewer-canvas${shade ? "" : " no-shade"}`} />
     </main>
   );
 }

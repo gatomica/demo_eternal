@@ -6,6 +6,7 @@
  */
 import type { Vec } from "../render/camera";
 import type { Pt } from "../render/geom";
+import { LittleFlame } from "../render/LittleFlame";
 
 
 interface ArenaProp {
@@ -64,11 +65,10 @@ export function SealedSleeper({ kind, lit, flip }: { kind: ArenaProp["kind"]; li
         )}
         {/* Its head burns once the arena is lit: just a flame. */}
         {lit && (
-          <g className="fig-flame">
+          <>
             <circle cx={fx} cy={fy - 4} r={7} className="fig-glow" />
-            <path d={`M${fx} ${fy - 10} C${fx + 3.6} ${fy - 4.5} ${fx + 3.4} ${fy} ${fx} ${fy} C${fx - 3.4} ${fy} ${fx - 3.6} ${fy - 4.5} ${fx} ${fy - 10} Z`} />
-            <path d={`M${fx} ${fy - 5} C${fx + 1.6} ${fy - 2} ${fx + 1.6} ${fy} ${fx} ${fy} C${fx - 1.6} ${fy} ${fx - 1.6} ${fy - 2} ${fx} ${fy - 5} Z`} className="fig-flame-core" />
-          </g>
+            <LittleFlame x={fx} y={fy} height={10} />
+          </>
         )}
       </g>
     </svg>

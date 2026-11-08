@@ -256,6 +256,10 @@ export function effectsOf(step: Step | undefined, youManeuvered: boolean): Map<s
       case "stagger":
         add(ev.who, "fx-break");
         break;
+      case "rest":
+        // A Rest that lands (or the recovery after a stagger) flashes white; one broken by a blow does not.
+        if (ev.result === "rested" || ev.result === "recovered") add(ev.who, "fx-rested");
+        break;
       case "fall":
         add(ev.who, "fx-fall");
         break;

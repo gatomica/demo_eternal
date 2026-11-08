@@ -16,6 +16,7 @@
   --grip: #8a6b4a;       /* hafts and handles */
   --armor: #6f7489;
   --wax: #b9a14e;        /* the waxed: sickly yellow */
+  --ambient: 0.82;       /* the ambient shade on the map: the same as AMBIENT in render/shade.ts */
   --eyes: #15141b;
   --flesh: #a2505a;     /* health left to fill */
   --flesh-lost: #e7a3aa; /* health just lost, fading away */
@@ -76,7 +77,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---------- Exploration: one canvas, black beyond the walls ---------- */
 .explore { position: absolute; inset: 0; background: #000; }
-.explore-canvas { display: block; width: 100%; height: 100%; }
+.explore-canvas { display: block; width: 100%; height: 100%; filter: brightness(var(--ambient)); } /* (the ambient shade: see render/shade.ts) */
 /* The stir at the edge of your light, toward enemies hunting you out of sight. */
 .explore-disturb { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 /* Shown over the dark while the map near you is painted. */
@@ -238,6 +239,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* A blocked hit flashes the blocker. (The jolt apart, like a dodge's step, moves them for real in the scene.) */
 .fx-block { animation: block-flash 0.4s ease-out 0.15s; }
 .fx-dodge { animation: dodge-blur 0.5s ease-out; }
+/* A Rest that lands: the same quick flash as a block's (a bright flash, then straight back). */
+.fx-rested { animation: block-flash 0.4s ease-out 0.15s; }
 .fx-break { animation: hit-shake 0.4s ease-out, break-fade 0.8s ease-out forwards; }
 .fx-fall { animation: fall 0.7s ease-in 0.2s forwards; }
 /* A unit that falls leaves its remains where it fell: it drops, then lies there, a little faded. */
@@ -440,9 +443,21 @@ kbd {
 .fig-wax-bind { fill: none; stroke: var(--wax); stroke-width: 10; stroke-linecap: round; stroke-linejoin: round; }
 .fig-wax-head { fill: var(--wax); stroke: color-mix(in srgb, var(--wax) 70%, black); stroke-width: 1; }
 .fig-wax-drip { fill: none; stroke: var(--wax); stroke-width: 2.5; stroke-linecap: round; }
+/* A dead waxed's melt: the puddle it lies in, the rim slumping over its base, the bead that falls from a drip. */
+.fig-wax-puddle { fill: color-mix(in srgb, var(--wax) 88%, black); stroke: color-mix(in srgb, var(--wax) 60%, black); stroke-width: 0.8; stroke-linejoin: round; }
+.fig-wax-lip { fill: var(--wax); stroke: color-mix(in srgb, var(--wax) 65%, black); stroke-width: 0.8; stroke-linejoin: round; }
+.fig-wax-drop { fill: var(--wax); animation: wax-drop 2.4s ease-in infinite; transform-box: fill-box; transform-origin: 50% 50%; }
+@keyframes wax-drop { 0% { transform: translateY(0); opacity: 0; } 12% { opacity: 1; } 80% { opacity: 1; } 100% { transform: translateY(var(--fall)); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .fig-wax-drop { animation: none; opacity: 0.8; } }
 .fig-wax-shell { fill: none; stroke: var(--wax); stroke-width: 13; stroke-linecap: round; stroke-linejoin: round; }
 .fig-flame path { fill: #e0782f; animation: flame-flicker 0.6s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: 50% 100%; }
 .fig-flame .fig-flame-core { fill: #f6d77a; }
+/* The little flames (LittleFlame.tsx): gentle and see-through, a swirling knot at the heart. (The Warden's and other big flames are .fig-flame above.) */
+.little-flame-sway { animation: little-flame-sway 1.8s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: 50% 100%; }
+.little-flame-knot { animation: little-flame-swirl 9s linear infinite; transform-box: fill-box; transform-origin: 50% 50%; }
+@keyframes little-flame-sway { from { transform: scale(1, 1) rotate(-1.5deg); } to { transform: scale(0.96, 1.05) rotate(1.5deg); } }
+@keyframes little-flame-swirl { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .little-flame-sway, .little-flame-knot { animation: none; } }
 @keyframes flame-flicker { from { transform: scale(1, 1); } to { transform: scale(0.88, 1.12); } }
 @media (prefers-reduced-motion: reduce) { .fig-flame path { animation: none; } }
 
@@ -574,6 +589,12 @@ kbd {
 .viewer-action.viewer-unmet { opacity: 0.5; }
 .viewer-kind { opacity: 0.6; font-size: 0.7rem; margin-left: 4px; }
 
+/* The gear viewer: a weapon in 3D on a stage, with the panel beside it. */
+.gear-viewer { position: relative; height: 100%; display: grid; place-items: center; }
+.gear-viewer .gear-panel { top: 12px; }
+.gear-stage { width: min(100%, 150vh); height: 100%; max-height: 100%; cursor: grab; touch-action: none; user-select: none; }
+.gear-stage:active { cursor: grabbing; }
+
 /* ---------- Projectiles: thrown across the field as a ranged attack lands ---------- */
 .projectile {
   position: absolute; z-index: 2000; pointer-events: none;
@@ -652,7 +673,19 @@ kbd {
 /* The map viewer: the map as the game draws it, seen with a free camera. */
 .mapviewer { height: 100%; display: grid; grid-template-rows: auto 1fr; gap: 8px; padding: 12px; min-height: 0; }
 .mapviewer-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.mapviewer-canvas { display: block; width: 100%; height: 100%; min-height: 0; border: 1px solid var(--line); border-radius: 6px; background: #000; }
+.mapviewer-canvas { display: block; width: 100%; height: 100%; min-height: 0; border: 1px solid var(--line); border-radius: 6px; background: #000; filter: brightness(var(--ambient)); }
+.mapviewer-canvas.no-shade { filter: none; }
+
+/* The ambient shade (render/shade.ts): a flat darkening over the sky, floor and grid, under the figures (each is shaded on its own). */
+.scene-shade { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+/* A flame out in someone's hands: a faint red light round it, blended over what is near it (over the figures, under the effects and the bars). */
+.flame-light {
+  position: absolute; z-index: 1600; pointer-events: none; border-radius: 50%; mix-blend-mode: screen;
+  background: radial-gradient(circle, rgb(255 70 45 / 0.34) 0, rgb(255 70 45 / 0.16) 32%, rgb(255 70 45 / 0.05) 60%, transparent 72%);
+  animation: flame-light 1.8s ease-in-out infinite alternate;
+}
+@keyframes flame-light { from { opacity: 0.8; transform: scale(0.96); } to { opacity: 1; transform: scale(1.04); } }
+@media (prefers-reduced-motion: reduce) { .flame-light { animation: none; } }
 
 /* The fight's light: black beyond a circle around the player. Over the floor, under every figure (they are shaded by their own distance). */
 .scene-light { position: absolute; inset: 0; z-index: 1; pointer-events: none; }

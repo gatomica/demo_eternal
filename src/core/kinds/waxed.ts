@@ -61,19 +61,21 @@ export const WAXED: EnemyKind = {
     Crawling: "w-crawl",
     "Wax on Hand": "w-wax-hand",
     "Cradle Flame": "w-cradle",
-    "Reared Back": "w-hands",
+    "Reared Back": "w-reared",
   },
   idlePose: "w-idle",
-  downPose: "w-fallen",
+  downPose: "w-staggered",
   flinchPose: "w-flinch",
   actionPoses: {
     "Low Attack": { act: "w-low-windup", strike: "w-low-strike" },
-    "Overhead Attack": { act: "w-hands", strike: "w-scratch" },
-    "Hurl Wax": { act: "w-wax-hand", strike: "w-hurl", projectile: "wax" },
-    Brace: { act: "w-cower" },
+    "Overhead Attack": { act: "w-overhead-windup", strike: "w-overhead-strike" },
+    "Hurl Wax": { act: "w-hurl-windup", strike: "w-hurl", projectile: "wax" },
+    // (It holds the Reared Back pose with the arms lowered and bent until the blow lands, then takes its guard: the hips lower, the forearms crossed in front of the face.)
+    Brace: { act: "w-cower", windup: "w-brace", guard: "w-brace-block" },
     "Drag Forward": { act: "w-drag" },
     "Slither Back": { act: "w-slither" },
-    "Clutch Flame": { act: "w-clutch" },
+    // (The Rest folds over the flame from the start of the turn, and once it goes through the flame is gone: it pressed its hands to its wax mouth, as if it ate it.)
+    "Clutch Flame": { act: "w-clutch", windup: "w-clutch", rest: "w-clutch-eat" },
     // The cradled flame bursts: the same pose as clutching it, as the blast rolls out.
     "Flame Immolation": { act: "w-clutch", strike: "w-clutch", projectile: "blast" },
   },

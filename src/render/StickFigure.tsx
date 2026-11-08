@@ -15,6 +15,7 @@
  */
 import { memo, type ReactNode, useContext } from "react";
 import { DebugLimbsContext } from "./debugLimbs";
+import { LittleFlame } from "./LittleFlame";
 import type { Variant } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
 import { lerp, limb, type Pt } from "./geom";
@@ -457,7 +458,7 @@ function Helmet({ s }: { s: Skeleton }) {
 }
 
 /** How far each weapon reaches from the grip, so the strike trail ends at its tip. */
-const WEAPON_REACH: Record<WeaponTier, number> = { baseline: 0, light: 15, normal: 34, heavy: 41 };
+export const WEAPON_REACH: Record<WeaponTier, number> = { baseline: 0, light: 15, normal: 34, heavy: 41 };
 
 /**
  * The swing trail on a strike: a tapered crescent around the shoulder, sweeping from where the
@@ -606,12 +607,7 @@ function WaxShell({ s, near, far }: { s: Skeleton; near: Pt; far: Pt }) {
 export function Prop({ prop }: { prop: NonNullable<Skeleton["prop"]> }) {
   const [x, y] = prop.at;
   if (prop.kind === "wax") return <circle cx={x} cy={y} r={4.5} className="fig-wax-head" />;
-  return (
-    <g className="fig-flame">
-      <path d={`M${x} ${y - 6} C${x + 3.3} ${y - 2} ${x + 2.7} ${y + 2} ${x} ${y + 2} C${x - 2.7} ${y + 2} ${x - 3.3} ${y - 2} ${x} ${y - 6} Z`} />
-      <path d={`M${x} ${y - 2.6} C${x + 1.3} ${y - 0.6} ${x + 1.3} ${y + 1.4} ${x} ${y + 1.4} C${x - 1.3} ${y + 1.4} ${x - 1.3} ${y - 0.6} ${x} ${y - 2.6} Z`} className="fig-flame-core" />
-    </g>
-  );
+  return <LittleFlame x={x} y={y + 2} height={9} />;
 }
 
 /** Colour the right arm and leg while posing (dev server only): see `debug` in StickFigure below. Off for now. */
