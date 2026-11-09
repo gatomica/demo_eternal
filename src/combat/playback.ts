@@ -173,12 +173,17 @@ interface TurnIndex {
   targeted: Map<string, number[]>;
   /** The first step where it dodges an attack, or its own Maneuver happens. */
   dodge: Map<string, number>;
-  /** The first step where a blow lands on it cleanly. */
+  /**
+   * The first step where it is hurt: a blow lands on it cleanly, a shockwave from an ally sweeps through it, a burn or an eternal effect takes
+   * its Health. (Whatever breaks a Rest: it flinches then.)
+   */
   hit: Map<string, number>;
   /** The step where its Maneuver happens (the repositioning), moving it or not. */
   maneuver: Map<string, number>;
   /** Its Rest was broken by a blow. */
   interrupted: Set<string>;
+  /** The step where its broken Rest settles (the end of the turn's attacks): when it flinches, if nothing hurt it itself (a part of a body, hurt through another). */
+  broken: Map<string, number>;
   /** The step where it rises again with a revive, at the end of the turn it fell. */
   revived: Map<string, number>;
   /** The step where it takes a flame (Usurp Flame). */
@@ -194,7 +199,7 @@ interface TurnIndex {
 export function indexTurn(steps: Step[]): TurnIndex {
   const ix: TurnIndex = {
     strike: new Map(), rest: new Map(), fall: new Map(), raised: new Map(), targeted: new Map(), dodge: new Map(), hit: new Map(), maneuver: new Map(),
-    interrupted: new Set(), revived: new Map(), usurp: new Map(), backUp: new Map(), phaseTwoBy: new Map(), phaseTwo: -1,
+    interrupted: new Set(), broken: new Map(), revived: new Map(), usurp: new Map(), backUp: new Map(), phaseTwoBy: new Map(), phaseTwo: -1,
   };
   const first = (m: Map<string, number>, id: string, i: number) => { if (!m.has(id)) m.set(id, i); };
   steps.forEach((st, i) => {
@@ -206,13 +211,17 @@ export function indexTurn(steps: Step[]): TurnIndex {
         ix.targeted.set(ev.target, hits);
         if (ev.result === "dodged") first(ix.dodge, ev.target, i);
         if (ev.result === "hit") first(ix.hit, ev.target, i);
+      } else if (ev.kind === "splash" || ev.kind === "eternal") {
+        if (ev.damage > 0) first(ix.hit, ev.target, i);
+      } else if (ev.kind === "burned") {
+        if (ev.damage > 0) first(ix.hit, ev.who, i);
       } else if (ev.kind === "maneuver") {
         first(ix.dodge, ev.who, i);
         first(ix.maneuver, ev.who, i);
       }
       else if (ev.kind === "rest") {
         if (ev.result === "rested") first(ix.rest, ev.who, i);
-        if (ev.result === "interrupted") ix.interrupted.add(ev.who);
+        if (ev.result === "interrupted") { ix.interrupted.add(ev.who); first(ix.broken, ev.who, i); }
         if (ev.result === "recovered") first(ix.backUp, ev.who, i);
       } else if (ev.kind === "revive") { first(ix.backUp, ev.who, i); first(ix.revived, ev.who, i); }
       else if (ev.kind === "fall") first(ix.fall, ev.who, i);

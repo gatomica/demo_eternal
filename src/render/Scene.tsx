@@ -16,7 +16,8 @@ import { StickFigure } from "./StickFigure";
 import { AMBIENT } from "./shade";
 import { facingYaw, liftPose, placeRig } from "./rig3d";
 import { LittleFlame } from "./LittleFlame";
-import { Waxed3D } from "./Waxed3D";
+import { FlameAnchor, HeadFlame } from "./HeadFlame";
+import { HEAD_TOP, Waxed3D } from "./Waxed3D";
 import { BlobBack, BlobFront, type BlobBox } from "./WaxBlob";
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "../warden/arena";
 import { IGNITE } from "../warden/scenes";
@@ -56,6 +57,11 @@ export interface SceneFigure {
   smokeSince?: number;
   /** A candle burning on its head (the waxed remains, once the arena is lit). */
   candle?: boolean;
+  /**
+   * A lit waxed's own flame, burning on its head: "lit", or "blaze" while it gathers it to burst (brighter, red strings looping out of it and
+   * back in, and no flame in its hands).
+   */
+  headFlame?: "lit" | "blaze";
   /** Wax caked on it (the player, Waxed). */
   waxCaked?: boolean;
   /** You just spent Eternity on your weapon's effect: it flashes (a new key flashes again). */
@@ -267,6 +273,21 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     const { dir, retreat } = f.dodge;
     return retreat ? { x: -dir.x, z: -dir.z } : dir;
   };
+  /**
+   * Where a figure's own flame burns, in screen pixels: the flame it holds, or else on top of its head (`onHead`: on its head, whatever it
+   * holds). A waxed drawn in 3D: from its rig, where its head (or the flame in its hands) really is.
+   */
+  const flameSpot = (f: SceneFigure, box: { x: number; y: number; w: number; h: number }, at: Vec, onHead = false): Pt => {
+    const pose = ALL_POSES[f.pose];
+    if (f.variant !== "waxed" || w <= 0 || !pose) {
+      return toScreen(box, onHead && pose ? [pose.head[0], pose.head[1] - 12] : flameOf(f.pose), isMirrored(f));
+    }
+    const rig = liftPose(pose, f.hand), seen = placeRig(rig, at, figureYaw(f, at), c, w, h, f.scale);
+    if (!onHead && rig.prop?.kind === "flame" && !rig.propHidden && f.headFlame !== "blaze" && seen.prop) return [seen.prop.at.sx, seen.prop.at.sy];
+    // On top of the head as it is drawn (a sphere: its top is straight up the screen from its middle), its base sunk a little into the wax.
+    const hd = seen.seen.head;
+    return [hd.sx, hd.sy - HEAD_TOP * (hd.ppm / seen.origin.ppm) * (box.h / 120)];
+  };
   /** The hand a figure's stolen flames stream into, in figure units. */
   const handOf = (f: SceneFigure) => lookOf(f.variant)?.flameHand ?? flameOf(f.pose);
   // Lit for good once the arena is lit, or from the moment his flare relights them.
@@ -280,7 +301,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
       const i = sources.length;
       sources.push({ id, at, seen, kindle: IGNITE.kindle + rand(ignite.seed, i) * 1200, draw: IGNITE.draw + rand(ignite.seed + 1, i) * 1400 });
     };
-    for (const { f, box } of placed) if (f.flame) add(f.id, toScreen(box, flameOf(f.pose), isMirrored(f)), true);
+    for (const { f, box, at } of placed) if (f.flame) add(f.id, flameSpot(f, box, at), true);
     for (const { pr, box } of props) add(pr.id, toScreen(box, PROP_FLAME[pr.kind], !!pr.flip), true);
     const [hx, hy] = toScreen(igniter.box, handOf(igniter.f), isMirrored(igniter.f));
     const far = Math.max(w, h) * 0.8;
@@ -299,6 +320,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     const zs = parts.map(({ box: b }) => 1000 - Math.round(b.depth * 10));
     return [{ body, box, lo: Math.min(...zs) - 1, hi: Math.max(...zs) + 1, filter: `brightness(${Math.max(0.68, Math.min(1, 1.12 - mid.box.depth * 0.06)) * lightAt(mid.at)})` }];
   });
+  // Where each flame on a head burns (a lit waxed's, the candles of the waxed remains): its marker goes inside the figure, so the flame follows it.
+  const headFlames = new Map(placed.filter(({ f }) => f.candle || f.headFlame).map(({ f, box, at }) => [f.id, flameSpot(f, box, at, true)]));
   const coversFigure = (box: ReturnType<typeof figureBox>) => placed.some(({ box: b }) =>
     b.depth > box.depth && b.x < box.x + box.w && b.x + b.w > box.x && b.y < box.y + box.h && b.y + b.h > box.y);
 
@@ -343,7 +366,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         >
           {f.holdsString && !f.dead && <StringAura layer="back" spread={f.body ? 2.4 : 1} />}
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : f.variant === "waxed" && !f.body && w > 0 ? <Waxed3D pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
+            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : f.variant === "waxed" && w > 0 ? <Waxed3D pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
+            {headFlames.has(f.id) && <FlameAnchor id={f.id} x={headFlames.get(f.id)![0] - box.x} y={headFlames.get(f.id)![1] - box.y} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}
           </div>
@@ -356,18 +380,19 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         )}
         </Fragment>
       ))}
-      {/* The waxed remains burn as candles once the arena is lit. */}
-      {placed.filter(({ f }) => f.candle).map(({ f, box }) => {
-        const [fx, fy] = toScreen(box, flameOf(f.pose), isMirrored(f));
-        const sz = box.h * 0.13;
+      {/* The waxed remains burn as candles once the arena is lit, and a lit waxed carries its flame on its head. Gathering it to burst, the flame
+          blazes: bigger and brighter, with red strings looping out of it and back in, and a red light round it. */}
+      {placed.filter(({ f }) => headFlames.has(f.id)).map(({ f, box }) => {
+        const [fx, fy] = headFlames.get(f.id)!;
+        const blaze = f.headFlame === "blaze", sz = box.h * (blaze ? 0.19 : 0.13), z = 1001 - Math.round(box.depth * 10);
         return (
-          <LoneFlame key={`candle-${f.id}`} className="arena-candle-flame" at={[fx, fy]} sz={sz} zIndex={1001 - Math.round(box.depth * 10)} />
+          <HeadFlame key={`candle-${f.id}`} anchor={f.id} at={[fx, fy]} sz={sz} blaze={blaze} light={box.w * (blaze ? 1.7 : 1.3)} zIndex={z} />
         );
       })}
       {/* A flame out in someone's hands gives off a faint red light round it, over the figures and the floor near it. */}
       {w > 0 && placed.map(({ f, box, at }) => {
         const pose = ALL_POSES[f.pose];
-        if (f.variant !== "waxed" || f.body || f.dead || !pose || (pose.for3d?.prop ?? pose.prop)?.kind !== "flame") return null;
+        if (f.variant !== "waxed" || f.dead || f.headFlame === "blaze" || !pose || (pose.for3d?.prop ?? pose.prop)?.kind !== "flame") return null;
         const rig = liftPose(pose, f.hand);
         if (!rig.prop || rig.propHidden) return null;
         const flame = placeRig(rig, at, figureYaw(f, at), c, w, h, f.scale).prop!.at, size = box.w * 1.3;
@@ -378,7 +403,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
       {dark?.flame && (() => {
         const t = placed.find(x => x.f.id === dark.flame);
         if (!t) return null;
-        const [fx, fy] = toScreen(t.box, flameOf(t.f.pose), isMirrored(t.f));
+        const [fx, fy] = flameSpot(t.f, t.box, t.at);
         // The size of the figure's own flame (the Warden's candle is a little smaller), so it
         // hands over to it seamlessly as the light comes back.
         const sz = t.box.h * (lookOf(t.f.variant)?.loneFlame ?? 0.16);
@@ -396,7 +421,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
       {usurpTrails.map(usurpTrail => {
         const a = placed.find(x => x.f.id === usurpTrail.from), b = placed.find(x => x.f.id === usurpTrail.to);
         if (!a || !b) return null;
-        const from = toScreen(a.box, flameOf(a.f.pose), isMirrored(a.f));
+        const from = flameSpot(a.f, a.box, a.at);
         const hand = toScreen(b.box, handOf(b.f), isMirrored(b.f));
         // Arching up over him: the control point well above both.
         const ctl: Pt = [(from[0] + hand[0]) / 2, Math.min(from[1], hand[1]) - b.box.h * 0.22];
@@ -518,6 +543,22 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
           const ox = (isMirrored(thrower!.f) ? 100 - o[0] : o[0]) / 100;
           const hx = a.x + a.w * ox, hy = a.y + (a.h * o[1]) / 120;
           return <HaloBurst key={pr.key} cx={hx} cy={hy} diameter={Math.max(a.h * 0.9, Math.hypot(tx - hx, ty - hy) * 2.3)} />;
+        }
+        if (pr.kind === "burst") {
+          // A lit waxed bursting: a fireball out of its head, and a ring of flame rolling out from it across the floor the same all the way round,
+          // on past everyone in the fight.
+          const [hx, hy] = flameSpot(pr.fromPose && pr.fromPose in ALL_POSES ? { ...thrower!.f, pose: pr.fromPose as PoseName } : thrower!.f, a, thrower!.at, true);
+          const ball = a.h * 0.9;
+          const A = posNow(pr.from);
+          const reach = Math.max(4, ...placed.map(({ at: p }) => (A ? Math.hypot(p.x - A.x, p.z - A.z) : 0))) * 1.25;
+          return (
+            <div key={pr.key}>
+              <div className="blast-flash" style={{ left: hx, top: hy, width: ball, height: ball }}>
+                <FireballFlash />
+              </div>
+              {A && <Shockwave center={A} reach={reach} toward={0} flame={1.4} proj={proj} full />}
+            </div>
+          );
         }
         if (pr.kind === "blast") {
           // A giant fireball flashes in before him and fades fast; a shockwave of flame follows

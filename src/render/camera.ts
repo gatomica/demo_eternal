@@ -182,14 +182,18 @@ export function formation(anchor: Vec, yaw: number, front: string[], back: strin
       spots.set(id, fromPlayer(anchor, yaw, r * Math.sin(a), r * Math.cos(a)));
     });
   }
-  // Then its parts spread across the slot: left, middle and right, close together.
+  // Then its parts spread across the slot: left, middle and right, close together. The middle one stands out of the heap toward you,
+  // at its near edge, not in its middle.
   for (const [body, first] of firstOf) {
     const centre = spots.get(first)!;
     const parts = [...front, ...back].filter(id => bodies[id]?.body === body);
+    const d = Math.hypot(anchor.x - centre.x, anchor.z - centre.z) || 1;
+    const toYou: Vec = { x: (anchor.x - centre.x) / d, z: (anchor.z - centre.z) / d };
     parts.forEach((id, i) => {
       const part = bodies[id].part;
       const across = part === "left" ? -1 : part === "right" ? 1 : part === "mid" ? 0 : i - (parts.length - 1) / 2;
-      spots.set(id, add(centre, right(yaw), across * BODY_SPREAD));
+      const spot = add(centre, right(yaw), across * BODY_SPREAD);
+      spots.set(id, part === "mid" ? add(spot, toYou, BODY_FORWARD) : spot);
     });
   }
   return spots;
@@ -200,6 +204,9 @@ export interface BodyPart { body: string; part?: "left" | "mid" | "right" }
 
 /** How far apart the left, middle and right parts of one body stand, in meters. */
 export const BODY_SPREAD = 0.85;
+
+/** How far the middle part of a body stands out of it toward you (meters): at the heap's near edge. */
+export const BODY_FORWARD = 0.5;
 
 /** The bodies in a fight: each part's body and place in it, by enemy id. */
 export function bodiesOfEnemies(enemies: { id: string; body?: string; part?: "left" | "mid" | "right" }[]): Record<string, BodyPart> {

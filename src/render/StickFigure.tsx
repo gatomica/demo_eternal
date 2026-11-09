@@ -606,7 +606,24 @@ function WaxShell({ s, near, far }: { s: Skeleton; near: Pt; far: Pt }) {
 /** A held wax lump, or a small flame. */
 export function Prop({ prop }: { prop: NonNullable<Skeleton["prop"]> }) {
   const [x, y] = prop.at;
-  if (prop.kind === "wax") return <circle cx={x} cy={y} r={4.5} className="fig-wax-head" />;
+  // The wax torn off to throw: soft and molten, paler and glossier than the wax it came from, so it shows apart from the body even from afar;
+  // it sags, drips hang from it and stretch, and drops keep falling from it.
+  if (prop.kind === "wax") {
+    return (
+      <g transform={`translate(${x} ${y})`} className="fig-wax-molten">
+        {/* Drops falling from it (they loop: swell, fall, fade). */}
+        {([[-1.6, 0], [1.4, 0.45], [0.1, 0.8]] as const).map(([dx, delay], i) => (
+          <circle key={`drop${i}`} cx={dx} cy={5.2} r={1.05} className="fig-wax-dribble" style={{ animationDelay: `${delay}s` }} />
+        ))}
+        {/* Two drips hanging from its underside, stretching and snapping back. */}
+        <path d="M-2.6 2.8 Q-2.4 6.4 -1.6 6.6 Q-0.9 6.4 -0.9 3.6 Z" className="fig-wax-hang" />
+        <path d="M0.9 3.4 Q1.1 7.6 1.8 7.8 Q2.5 7.6 2.6 3 Z" className="fig-wax-hang" style={{ animationDelay: "0.5s" }} />
+        {/* The lump, sagging into a drop shape, with a wet shine on it. */}
+        <path d="M0 -4.6 C3.4 -4.6 5 -2 4.7 0.6 C4.4 3.2 2.4 4.6 0 4.6 C-2.4 4.6 -4.5 3.3 -4.7 0.6 C-4.9 -2.2 -3.3 -4.6 0 -4.6 Z" className="fig-wax-molten-lump" />
+        <ellipse cx={-1.6} cy={-2.2} rx={1.5} ry={0.9} className="fig-wax-shine" />
+      </g>
+    );
+  }
   return <LittleFlame x={x} y={y + 2} height={9} />;
 }
 

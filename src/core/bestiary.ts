@@ -84,7 +84,7 @@ export interface EnemyKind {
    * `windup`: a Rest or a Block takes this pose from the start of the turn, to show its intent: a Rest until it goes
    * through (then `rest`) or is broken by a blow (it flinches); a Block until the blow lands (then `guard`).
    */
-  actionPoses?: Record<string, { act?: string; strike?: string; rest?: string; windup?: string; projectile?: "fan" | "blast" | "wax" | "impact" | "halo"; guard?: string }>;
+  actionPoses?: Record<string, { act?: string; strike?: string; rest?: string; windup?: string; projectile?: "fan" | "blast" | "wax" | "impact" | "halo" | "burst"; guard?: string }>;
   /** The hand that holds its weapon (default right): the `weaponArm` of every pose is the arm on this side. */
   weaponHand?: Side;
   /**
@@ -124,6 +124,16 @@ export interface EnemyKind {
    * it does `action`, which it shows in `stance`.
    */
   flame?: { stance: string; action: string };
+  /**
+   * Lit, the poses in which it gathers its flame to burst (the Waxed's Cradle Flame and Flame Immolation's wind-up): the flame on its head blazes
+   * brighter, red strings coming out of it and going back in, and the flame in its hands is not drawn. (Its death pose puts the head flame out.)
+   */
+  blazePoses?: string[];
+  /**
+   * The actions it dies doing (Flame Immolation; its `afterTurn` ends it): from its strike on it lies in its strike pose until it is taken off
+   * the field, and the Model viewer shows it Dead once the action has played.
+   */
+  fatalActions?: string[];
   /** Conditions named in the pattern (`*Name`, written in lowercase here), checked when picking. */
   conditions?: Record<string, (self: Enemy, state: CombatState) => boolean>;
   /** It has fallen for good (no revive left): what that does to the rest of the fight (the Warden's death snuffs the waxed). */

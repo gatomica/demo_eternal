@@ -1110,7 +1110,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   /** The step where a blow breaks someone's Rest (they flinch, to the end of the turn), or -1. */
   const flinchStep = (e: Enemy) => {
     if (!turnIx || e.intent.type !== "rest" || e.intent.forced || !turnIx.interrupted.has(e.id)) return -1;
-    return turnIx.hit.get(e.id) ?? -1;
+    // (A shockwave from an ally hurts it too; and a part of a body hurt through another flinches as its Rest is broken.)
+    return turnIx.hit.get(e.id) ?? turnIx.broken.get(e.id) ?? -1;
   };
   /** His phase-two scene has played this turn (he entered it, and the scene is over). */
   const phaseTwoDone = (e: Enemy) => reached(stepOf("phaseTwoBy", e.id));
@@ -1123,6 +1124,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const poseOfEnemy = (e: Enemy): PoseName => {
     // One that has died (not one taken by a flame) falls in its down pose, the same as when it is staggered.
     if (!e.alive && (e.fate ?? "fallen") === "fallen") return downPoseOf(e);
+    // An action it dies doing (Flame Immolation): once its strike has landed it lies in that pose, its death pose, whatever else the turn
+    // does to it (staggered by a blow, say), until it is taken off the field as the turn ends.
+    if (e.intent.action && !e.intent.forced && kindOf(e).fatalActions?.includes(e.intent.action) && reached(strikeStep(e.id))) return strikePose(e);
     // After his phase-two scene, he's already standing in his next stance (Idle).
     if (phaseTwoDone(e) && !ignite) return settledPose(e);
     // The phase-two scene: he stands in Idle, unseen in the dark until his flare.
@@ -1151,7 +1155,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       guard: guarding ? { hold: e.intent.type === "block" && e.intent.windupPose ? asPose(e.intent.windupPose, "block") : poseForIntent(e), react: e.intent.guardPose ? asPose(e.intent.guardPose, "block") : actionPose(e), keepAfterDodge: e.intent.type === "maneuver" } : undefined,
       telegraph: playback ? restTelegraph(e) : poseForIntent(e),
       // Some (the Warden) attack straight out of whatever stance they're in.
-      down: downPoseOf(e), windUp: kindOf(e).attacksFromStance && e.intent.stance ? poseForIntent(e) : windUpPose(e), strike: strikePose(e), idle: settledPose(e),
+      // (An action it dies doing leaves it lying in its strike pose, its death pose, until it is taken off the field as the turn ends.)
+      down: downPoseOf(e), windUp: kindOf(e).attacksFromStance && e.intent.stance ? poseForIntent(e) : windUpPose(e), strike: strikePose(e),
+      idle: e.intent.action && kindOf(e).fatalActions?.includes(e.intent.action) ? strikePose(e) : settledPose(e),
       strikeHandsOff: handsOff(e),
       // Its strike always plays out in full: if it ends up staggered (or down), it still spins on
       // into the pose its strike ends in, and only drops once the step is over.
@@ -1213,7 +1219,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       const origin = kind === "blast" || kind === "impact" ? impactPoint(thrower?.intent.strikePose) : kind === "halo" ? ([66, 86] as const) : undefined;
       // A flaming flail's slam burns.
       const fiery = kind === "impact" && !!thrower?.flags.flaming;
-      if (kind) projectiles.push({ from: ev.attacker, to: ev.target, kind, origin, fiery, key: `${stepKey}-${ev.attacker}` });
+      const fromPose = kind === "burst" && thrower ? windUpPose(thrower) : undefined;
+      if (kind) projectiles.push({ from: ev.attacker, to: ev.target, kind, origin, fiery, fromPose, key: `${stepKey}-${ev.attacker}` });
     }
   }
 
@@ -1305,6 +1312,17 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     const repositioning = stepOf("maneuver", id);
     return repositioning >= 0 && playback.index >= repositioning ? undefined : d;
   };
+  /**
+   * A lit waxed's flame on its head, as shown: blazing in the poses where it gathers it to burst (its kind's `blazePoses`), and gone once it
+   * has burst (its death pose) or while the Warden's Usurp Flame scene draws it itself.
+   */
+  const headFlameOf = (e: Enemy): SceneFigure["headFlame"] => {
+    const k = kindOf(e);
+    if (!e.alive || looksDead(e) || !k.flame || !shownFlags(e).lit || usurpNow?.target === e.id) return undefined;
+    const pose = enemyPose(e);
+    if (pose === k.deathPose) return undefined;
+    return k.blazePoses?.includes(pose) ? "blaze" : "lit";
+  };
   const figures: SceneFigure[] = [
     {
       id: "player",
@@ -1362,6 +1380,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         body: e.body,
         part: e.part,
         flame: !!kindOf(e).flame,
+        headFlame: headFlameOf(e),
         arm: lookOfFoe(e)?.candleArm ? (arms[e.id] = candleArmOf(e)) : undefined,
         // Phase two's look (black wax, burning inside) from the moment all is dark.
         phase2Look: !!ignite && ignite.who === e.id && igniteNow >= IGNITE.kindle,
@@ -1373,7 +1392,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         // The fallen lie there, a little faded: they drop (instead of fading out), then stay.
         // (A unit that is about to lie down, but still has its own attack to finish, stays up and unfaded until then.)
         classes: looksDead(e)
-          ? [...(fx.get(e.id)?.classes ?? []).filter(c => c !== "fx-fall"), ...(justFell(e.id) ? ["fx-die"] : []), "is-remains"]
+          // (One that died in its own strike, already lying in its death pose (Flame Immolation), does not drop into it again.)
+          ? [...(fx.get(e.id)?.classes ?? []).filter(c => c !== "fx-fall"), ...(justFell(e.id) && e.intent.strikePose !== kindOf(e).deathPose ? ["fx-die"] : []), "is-remains"]
           : [...(fx.get(e.id)?.classes ?? []).filter(c => c !== "fx-fall"), ...(!e.alive && kindOf(e).remains ? ["is-remains"] : [])],
         dead: looksDead(e) ? kindOf(e).deathLook ?? "pieces" : undefined,
         // His second form: the wax he leaves is burnt black.

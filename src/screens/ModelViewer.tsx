@@ -131,6 +131,8 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
   // Playing an action also picks, at random, which of the stances it leads to it moves on to,
   // as in a fight; it settles into that stance as the action ends.
   const nextOf = (i: number, action: string, interrupt: boolean, whiff = false) => {
+    // An action it dies doing (Flame Immolation) leaves it Dead, not in a stance.
+    if (!interrupt && kinds[i].fatalActions?.includes(action)) return DEAD;
     // A broken Rest counts as undone: it picks up again from the Recover stances. A Block that had nothing to block leads on to the stances for that.
     const options = nextStances(kinds[i].pattern, { action, outcome: interrupt ? "undone" : "done", blocked: !whiff, avoid: interrupt ? show.parts[i].stance : undefined });
     return options[Math.floor(Math.random() * options.length)].name;

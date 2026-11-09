@@ -5,94 +5,60 @@
  * but the three share one pool of Health and Fatigue and one place on the field (see `Enemy.body`
  * and core/resolve). Blocking stays each part's own. The pool is as much Health as the player's.
  *
- * What differs from the Waxed: no Crawling stance (Drag Forward, Slither Back: the Dodge), so it
- * never moves or dodges; and only the middle one can cradle a flame (Cradle Flame, with Clutch Flame,
- * its Rest, and Flame Immolation). The sides never rest on their own.
+ * Each part is a Waxed (its pattern, poses and 3D figure), always sealed whole in wax. The middle one has the whole of the
+ * Waxed's pattern (its Maneuvers move the whole heap) and stands at the heap's edge nearest you; the sides have all of it but
+ * the flame (no Cradle Flame, so no Clutch Flame or Flame Immolation): they never rest on their own, and their Maneuvers only dodge.
  *
  * The super Wax Blob: the same, but its two side parts wield Brick Hammers (as the Hammer
  * Waxed does: in the free hand, Hurl Wax still thrown with the other). The middle one is unarmed.
  */
 import type { BodyDef, EnemyKind } from "../bestiary";
-import { parsePattern } from "../patterns";
-import { WAXED } from "./waxed";
+import { WAXED, waxedPattern } from "./waxed";
 
 /** The whole body's Health: as much as the player's (20). */
 const BLOB_HP = 15;
 
-/** Its actions, with its clawing attack: the Waxed's Scratch, or a blow of the weapon it wields. */
-const actions = (claw = "Scratch:      attack, baseline, damage 2, cost 2   // as the Waxed's") => `
-    actions:
-      ${claw}
-      Hurl Wax:     attack, light, ranged
-      Brace:        block, baseline`;
-
-const FLAME_ACTIONS = `
-      Clutch Flame: rest
-      Flame Immolation: attack, heavy, ranged, *Lit, #fire, #shockwave   // a lit one bursts: it dies, and its fire hits everyone`;
-
-const stances = (claw = "Scratch") => `
-    stances:
-      All > Hands Raised      > ${claw}
-      All > Wax on Hand       > Hurl Wax
-      All > Cowering Sideways > Brace`;
-
-const FLAME_STANCE = `
-      All > Cradle Flame      > Flame Immolation, Clutch Flame`;
-
-/** The poses of what the blob's parts do not have: the Dodge, and (for the sides) the flame. */
-const DODGE = ["Drag Forward", "Slither Back"];
-const FLAME = ["Clutch Flame", "Flame Immolation"];
-
-/** Keeps only the poses of the stances and actions a part has. */
-/** The blob keeps the Waxed's old stances and Scratch: its pattern is its own, not yet reworked. */
-const BLOB_STANCE_POSES: Record<string, string> = { "Hands Raised": "w-hands", "Wax on Hand": "w-wax-hand", "Cowering Sideways": "w-cower", "Cradle Flame": "w-cradle" };
-const BLOB_ACTION_POSES = (() => {
-  const { "Low Attack": _l, "Overhead Attack": _o, ...rest } = WAXED.actionPoses!;
-  return { ...rest, Scratch: { act: "w-hands", strike: "w-scratch" } } as NonNullable<EnemyKind["actionPoses"]>;
-})();
+/** The stances and actions that go with the flame, which the side parts do not have. */
+const FLAME_STANCE = "Cradle Flame";
+const FLAME_ACTIONS = ["Clutch Flame", "Flame Immolation"];
 
 const without = <T,>(poses: Record<string, T> | undefined, names: string[]) =>
   Object.fromEntries(Object.entries(poses ?? {}).filter(([k]) => !names.includes(k))) as Record<string, T>;
 
-/** The middle one: the Waxed without the Dodge, flame and all. */
-export const BLOB_MID: EnemyKind = {
-  ...WAXED,
-  downPose: "w-fallen", // (the heap keeps the toppled flat pose)
-  name: "Wax Blob (middle)",
+/** What every part is, besides the Waxed it is: sealed in the heap, sharing its Health, never splashing the others. */
+const PART = {
   maxHP: BLOB_HP,
   // The blob's parts never splash each other, whatever they burn with.
   shockwave: () => false,
-  pattern: parsePattern("Wax Blob (middle)", `${actions()}${FLAME_ACTIONS}${stances()}${FLAME_STANCE}`),
-  stancePoses: BLOB_STANCE_POSES,
-  actionPoses: without(BLOB_ACTION_POSES, DODGE),
+} satisfies Partial<EnemyKind>;
+
+/** The middle one: a whole Waxed (its full pattern, Cradle Flame and all), drawn in 3D, sealed in the wax. It stands nearest you, at the heap's edge. */
+export const BLOB_MID: EnemyKind = {
+  ...WAXED,
+  ...PART,
+  name: "Wax Blob (middle)",
+  pattern: waxedPattern("Wax Blob (middle)", false),
 };
 
 /**
- * A side one: also without its flame (no Cradle Flame, and so no Clutch Flame or Flame Immolation). With
- * `hammer`, it wields a Brick Hammer, and its Scratch is a Hammer Blow (the super blob's).
+ * A side one: the Waxed without its flame (no Cradle Flame, and so no Clutch Flame or Flame Immolation). With `hammer`, it wields a
+ * Brick Hammer, as the Hammer Waxed does (its Low and Overhead Attacks are blows of it; the super blob's).
  */
 function side(name: string, hammer = false): EnemyKind {
-  const kind: EnemyKind = {
+  return {
     ...WAXED,
-    downPose: "w-fallen",
+    ...PART,
     name,
-    maxHP: BLOB_HP,
+    weapon: hammer ? "heavy" : WAXED.weapon,
     flags: undefined,
     statuses: undefined,
     afterTurn: undefined,
     flame: undefined,
-    shockwave: () => false,
-    pattern: parsePattern(name, `${actions()}${stances()}`),
-    stancePoses: without(BLOB_STANCE_POSES, ["Cradle Flame"]),
-    actionPoses: without(BLOB_ACTION_POSES, [...DODGE, ...FLAME]),
-  };
-  if (!hammer) return kind;
-  const { Scratch, ...rest } = kind.actionPoses!;
-  return {
-    ...kind,
-    weapon: "heavy",
-    pattern: parsePattern(name, `${actions("Hammer Blow: attack   // a blow of its hammer, in its free hand")}${stances("Hammer Blow")}`),
-    actionPoses: { ...rest, "Hammer Blow": Scratch },
+    blazePoses: undefined,
+    fatalActions: undefined,
+    pattern: waxedPattern(name, hammer, false),
+    stancePoses: without(WAXED.stancePoses, [FLAME_STANCE]),
+    actionPoses: without(WAXED.actionPoses, FLAME_ACTIONS),
   };
 }
 

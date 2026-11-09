@@ -10,7 +10,7 @@ export interface Projectile {
   from: string;
   to: string;
   /** `clang`: a melee blow caught by a Block, so a starburst flashes where the blocker (`from`) meets the attacker (`to`). */
-  kind: "fan" | "blast" | "wax" | "impact" | "halo" | "clang" | "flamehit" | "eternity" | "eternityDeath";
+  kind: "fan" | "blast" | "burst" | "wax" | "impact" | "halo" | "clang" | "flamehit" | "eternity" | "eternityDeath";
   /** Changes every beat, so the flight replays. */
   key: string;
   /** A flaming flail's impact: its shockwave burns instead of white spikes. */
@@ -19,6 +19,8 @@ export interface Projectile {
   where?: "block" | "hit" | "self";
   /** Where on the thrower it comes from, in figure units (100 × 120, facing right), e.g. its hand. */
   origin?: readonly [number, number];
+  /** `burst`: the pose whose head it bursts out of (the wind-up's: by the time it lands the thrower lies dead). */
+  fromPose?: string;
 }
 
 /**

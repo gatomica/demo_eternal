@@ -7,7 +7,7 @@ import type { EnemyKind } from "../bestiary";
 import { parsePattern } from "../patterns";
 
 /**
- * The Waxed's pattern. Its two clawing attacks are blows of whatever it holds in its free hand
+ * The Waxed's pattern, as text. Its two clawing attacks are blows of whatever it holds in its free hand
  * (Hurl Wax still tears the wax off with the other): barehanded, they are its own baseline blow
  * (damage 2, cost 2, as its old Scratch); armed, the weapon's weight, numbers and effect.
  *
@@ -15,23 +15,32 @@ import { parsePattern } from "../patterns";
  * Crawling or Reared Back, one that stopped nothing (`!Brace`) to Wax on Hand or Cradle Flame.
  * Actions nothing follows (Hurl Wax, Overhead Attack) go back to the Recover stances.
  */
-const waxedPattern = (name: string, armed: boolean) => parsePattern(name, `
-    actions:
-      Low Attack:      attack${armed ? "" : ", baseline, damage 2, cost 2"}   // a low blow, from the crawl
-      Overhead Attack: attack${armed ? "" : ", baseline, damage 2, cost 2"}, *Close   // only within reach
-      Hurl Wax:     attack, light, ranged
-      Brace:        block, baseline
-      Drag Forward: maneuver, advance, *Far   // crawls in only when far away
-      Slither Back: maneuver, retreat, *Close // backs off only when close
-      Clutch Flame: rest
-      Flame Immolation: attack, heavy, ranged, *Lit, #fire, #shockwave   // a lit waxed bursts: it dies, and its fire hits everyone
-    stances:
-      Recover, Clutch Flame                > Idle        > Drag Forward, Slither Back
-      Recover, Drag Forward, Brace         > Crawling    > Drag Forward, Low Attack
-      Slither Back, !Brace                 > Wax on Hand > Hurl Wax
-      Recover, Slither Back, !Brace        > Cradle Flame > Flame Immolation, Clutch Flame
-      Low Attack, Brace                    > Reared Back > Overhead Attack, Brace
-  `);
+export const waxedPatternText = (armed: boolean, flame = true) => [
+  "    actions:",
+  `      Low Attack:      attack${armed ? "" : ", baseline, damage 2, cost 2"}   // a low blow, from the crawl`,
+  `      Overhead Attack: attack${armed ? "" : ", baseline, damage 2, cost 2"}, *Close   // only within reach`,
+  "      Hurl Wax:     attack, light, ranged",
+  "      Brace:        block, baseline",
+  "      Drag Forward: maneuver, advance, *Far   // crawls in only when far away",
+  "      Slither Back: maneuver, retreat, *Close // backs off only when close",
+  ...(flame ? [
+    "      Clutch Flame: rest",
+    "      Flame Immolation: attack, heavy, ranged, *Lit, #fire, #shockwave   // a lit waxed bursts: it dies, and its fire hits everyone",
+  ] : []),
+  "    stances:",
+  `      Recover${flame ? ", Clutch Flame" : ""}                > Idle        > Drag Forward, Slither Back`,
+  "      Recover, Drag Forward, Brace         > Crawling    > Drag Forward, Low Attack",
+  "      Slither Back, !Brace                 > Wax on Hand > Hurl Wax",
+  // (Without its flame, a Brace that stopped nothing only leads to Wax on Hand.)
+  ...(flame ? ["      Recover, Slither Back, !Brace        > Cradle Flame > Flame Immolation, Clutch Flame"] : []),
+  "      Low Attack, Brace                    > Reared Back > Overhead Attack, Brace",
+].join("\n");
+
+/**
+ * The Waxed's pattern (see `waxedPatternText`). `flame`: with its Cradle Flame stance (and Clutch Flame, its Rest, and Flame Immolation);
+ * the Wax Blob's side parts have none.
+ */
+export const waxedPattern = (name: string, armed: boolean, flame = true) => parsePattern(name, waxedPatternText(armed, flame));
 
 export const WAXED: EnemyKind = {
   name: "Waxed",
@@ -76,11 +85,16 @@ export const WAXED: EnemyKind = {
     "Slither Back": { act: "w-slither" },
     // (The Rest folds over the flame from the start of the turn, and once it goes through the flame is gone: it pressed its hands to its wax mouth, as if it ate it.)
     "Clutch Flame": { act: "w-clutch", windup: "w-clutch", rest: "w-clutch-eat" },
-    // The cradled flame bursts: the same pose as clutching it, as the blast rolls out.
-    "Flame Immolation": { act: "w-clutch", strike: "w-clutch", projectile: "blast" },
+    // The flame bursts: it gathers it folded over as if clutching it (its head flame blazing, none in its hands), and as the fire bursts out of
+    // its head and rolls out all the way round it dies on the spot, in the pose it lies in.
+    "Flame Immolation": { act: "w-clutch", strike: "w-dead", projectile: "burst" },
   },
   // It still holds a flame of its own, cradled at its chest.
   flame: { stance: "Cradle Flame", action: "Clutch Flame" },
+  // Lit, it does not cradle a flame in its hands: the one on its head blazes, about to burst.
+  blazePoses: ["w-cradle", "w-clutch"],
+  // Its burst is the end of it.
+  fatalActions: ["Flame Immolation"],
   // Where it falls, it stays: faded, for the rest of the fight.
   remains: true,
   deathLook: "wax",

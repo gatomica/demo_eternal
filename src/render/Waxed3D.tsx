@@ -22,6 +22,8 @@ import { HeldWeapon, Prop, WEAPON_REACH } from "./StickFigure";
 const LIMB = 5, BIND = 10, SHELL = 13;
 /** The sealed head: the lump of wax. */
 const HEAD_RX = 9.5, HEAD_RY = 10;
+/** How far above the middle of the head a flame on it stands (figure units): on top, its base sunk a little into the wax. */
+export const HEAD_TOP = HEAD_RY;
 
 /** The swings that leave an arch behind: the pose of the strike, and the pose of the wind-up that its right hand swings from. */
 const SWINGS: Partial<Record<PoseName, PoseName>> = { "w-low-strike": "w-low-windup", "w-overhead-strike": "w-overhead-windup" };
@@ -64,6 +66,8 @@ export interface Waxed3DProps {
   weapon: WeaponTier;
   /** Wax sealing the whole body. */
   encased?: boolean;
+  /** The flame in its hands is not drawn (lit, the flame it gathers to burst is the one on its head). */
+  hideFlame?: boolean;
   eternalFlash?: string;
   title?: string;
   cam: Cam;
@@ -78,7 +82,7 @@ export interface Waxed3DProps {
   box: { x: number; y: number; w: number; h: number };
 }
 
-export function Waxed3D({ pose, hand = "right", weapon, encased, eternalFlash, title, cam, at, yaw, scale = 1, w, h, box }: Waxed3DProps) {
+export function Waxed3D({ pose, hand = "right", weapon, encased, hideFlame, eternalFlash, title, cam, at, yaw, scale = 1, w, h, box }: Waxed3DProps) {
   const debug = useContext(DebugLimbsContext);
   const rig = useMemo(() => liftPose(ALL_POSES[pose], hand), [pose, hand]);
   const windUp = SWINGS[pose];
@@ -239,7 +243,7 @@ export function Waxed3D({ pose, hand = "right", weapon, encased, eternalFlash, t
   }
 
   // What it holds: a wax lump or a flame, in front of its hand.
-  if (prop && !rig.propHidden) {
+  if (prop && !rig.propHidden && !(hideFlame && prop.kind === "flame")) {
     const kp = scaleAt(prop.at);
     parts.push({
       key: "prop", depth: prop.at.depth - 0.02,

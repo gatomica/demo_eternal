@@ -20,7 +20,8 @@ function shapeOf(b: BlobBox) {
   const x0 = Math.min(...b.parts.map(p => p.x + p.w / 2 - p.w * 0.62));
   const x1 = Math.max(...b.parts.map(p => p.x + p.w / 2 + p.w * 0.62));
   const feet = Math.max(...b.parts.map(feetOf));
-  const top = Math.min(...b.parts.map(p => feetOf(p) - p.h * (b.slumped ? 0.3 : 0.52)));
+  // (Low: the parts kneel in it, drawn in 3D, and their chests, heads and arms rise out of it.)
+  const top = Math.min(...b.parts.map(p => feetOf(p) - p.h * (b.slumped ? 0.22 : 0.34)));
   return { x0, W: x1 - x0, feet, top, tall };
 }
 
@@ -83,7 +84,7 @@ export function BlobBack({ box }: { box: BlobBox }) {
 /** In front of the figures: lumps over their legs, and arms dragging along the floor. */
 export function BlobFront({ box }: { box: BlobBox }) {
   const { x0, W, feet, tall } = shapeOf(box);
-  const lowTop = feet - tall * (box.slumped ? 0.2 : 0.33);
+  const lowTop = feet - tall * (box.slumped ? 0.14 : 0.22);
   const H = feet - lowTop + tall * 0.1;
   const lumps: [number, number, number, number][] = [
     [0.1, 0.55, 0.14, 0.34], [0.28, 0.62, 0.16, 0.4], [0.5, 0.68, 0.18, 0.4], [0.72, 0.62, 0.16, 0.4], [0.9, 0.55, 0.14, 0.34],

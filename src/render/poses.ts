@@ -707,7 +707,19 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
     ...KNEELING, weapon: bare([40, 46]),
   },
   // Crawling: on its hands, dragging its bound legs.
-  "w-crawl": { ...CRAWL_2D, for3d: CRAWL_3D },
+  // In 3D the hips are raised (7 higher than the Low Attack's crawl, set back so the waist and shoulders stay where they were) and the
+  // legs go back with them: the thighs nearly upright, the knees on the floor a little behind the hips instead of under the belly, the
+  // bound shins trailing behind. (The legs here are written at their true lengths, so the figure does not shift up or down.)
+  "w-crawl": {
+    ...CRAWL_2D,
+    for3d: {
+      ...CRAWL_3D,
+      hip: [40.8, 86],
+      leadLeg: { knee: [37.1, 110.2], foot: [13.1, 105.4] },
+      rearLeg: { knee: [35.9, 110], foot: [11.8, 105.4] },
+      adjust: { weaponUpper: 1.2, weaponFore: 1.2, freeUpper: 1.2, freeFore: 1.2 },
+    },
+  },
   // Low Attack, wind-up: the crawl, with everything above the pelvis turned 40° to its right as one block (the legs and pelvis stay put); the
   // left arm as in the crawl's lean, the elbow out toward the watchers; the right arm fully extended back and up, the hand above the
   // shoulders, pointing away from the target.
