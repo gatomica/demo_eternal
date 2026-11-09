@@ -9,7 +9,8 @@ import { describeAction } from "../core/intents";
 import type { ActionDef } from "../core/patterns";
 import { createCombat } from "../core/setup";
 import type { PoseName } from "../render/poses";
-import type { ArmorTier, CombatState, Line, PlayerAction, Stance, WeaponTier } from "../core/types";
+import type { ArmorItem, ArmorTier, CombatState, HeadItem, Line, PlayerAction, Stance, WeaponTier } from "../core/types";
+import { ITEMS } from "../explore/items";
 
 /** Kinds that are only a part of a multi-target enemy: the viewer shows the whole body instead. */
 const PART_KINDS = new Set<KindId>(Object.values(BODIES).flatMap(b => b.parts.map(p => p.kind)));
@@ -245,6 +246,13 @@ const FOE_ID = "e0";
 
 export const playerActionOf = (sc: PlayerScenario): PlayerAction => ({ type: sc.action.type, target: sc.action.target === "foe" ? FOE_ID : "self" });
 
+/** The armor and head gear the viewer puts on you: the starting classes' own pieces, worn (none: plain armor of the picked tier, bare-headed). */
+export interface Wear { armor?: ArmorItem; head?: HeadItem }
+/** Every piece that can be worn, the armor first, then the head gear. */
+export const WEARABLES = (Object.keys(ITEMS) as (keyof typeof ITEMS)[]).filter(id => ITEMS[id].slot !== "weapon") as (ArmorItem | HeadItem)[];
+/** A piece worn, as the viewer's Wear. */
+export const wearOf = (id: ArmorItem | HeadItem): Wear => (ITEMS[id].slot === "armor" ? { armor: id as ArmorItem } : { head: id as HeadItem });
+
 export function playerViewerFight(weapon: WeaponTier, armor: ArmorTier): CombatState {
   return createCombat(
     { name: "You", maxHP: PLAYER_MAX_HP, weapon, armor, charges: 0 },
@@ -258,10 +266,14 @@ export function playerViewerFight(weapon: WeaponTier, armor: ArmorTier): CombatS
  * you, whole, doing what the scenario needs, and you start staggered if it says so. Always the
  * same start, so every play of an action begins from the same spot.
  */
-export function applyPlayerShow(s: CombatState, weapon: WeaponTier, armor: ArmorTier, scenario?: PlayerScenario): CombatState {
+export function applyPlayerShow(s: CombatState, weapon: WeaponTier, armor: ArmorTier, scenario?: PlayerScenario, wear: Wear = {}): CombatState {
   const v = structuredClone(s);
   v.player.weapon = weapon;
-  v.player.armor = armor;
+  // What you wear: a class's own armor (its tier is the item's) or plain armor of a tier, and its head gear (or none).
+  v.player.armorItem = wear.armor;
+  v.player.armor = wear.armor ? (ITEMS[wear.armor].tier as ArmorTier) : armor;
+  v.player.headItem = wear.head;
+  v.player.head = wear.head ? (ITEMS[wear.head].tier as ArmorTier) : "none";
   v.player.staggered = !!scenario?.staggered;
   v.player.stance = scenario?.stance ?? "idle";
   v.player.fatigue = scenario?.staggered ? v.player.hp : 0;
@@ -275,7 +287,7 @@ export function applyPlayerShow(s: CombatState, weapon: WeaponTier, armor: Armor
   e.line = scenario?.foeLine ?? "front";
   const strike = scenario?.foe === "strike";
   const stance = strike ? "Charging" : "Struggling";
-  const action = kind.pattern.actions.get(strike ? "weapon strike" : "despair");
+  const action = kind.pattern.actions.get(strike ? "swing left" : "despair");
   if (action) e.intent = { ...describeAction(e.kind, e.line, stance, action), pose: kind.stancePoses[stance] };
   v.status = "playing";
   return v;

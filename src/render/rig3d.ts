@@ -50,6 +50,9 @@ const LOOK_BOW = 0.6;
 /** Unless a pose says otherwise (`legs3`), the knees are this far either side of the middle (figure units; Idle's), the feet meeting. */
 const DEFAULT_LEGS = { knees: 7, feet: 0.8 };
 
+/** A free leg's foot stands this much further out to its side than its hip (a share of the hip's distance from the middle). */
+const FOOT_OUT = 1.25;
+
 /** How high the centre of the wax round the shins is off the floor when they lie on it (figure units): half its thickness. */
 const FLOOR = 5;
 
@@ -72,10 +75,43 @@ function reach3(shoulder: P3, target: P3, upper: number, fore: number, bend: P3)
   return { elbow, hand };
 }
 
-/** A flat pose lifted into 3D space: see the file's note. `hand`: the hand that holds the weapon. */
-export function liftPose(drawn: Skeleton, handGiven: Side = "right"): Rig3 {
-  // (A pose may be drawn differently in 3D, and say which hand its weapon arm is.)
+/** How a figure's own build lifts into space (the waxed's, by default: legs bound together, one hand on the weapon). */
+export interface LiftOptions {
+  /**
+   * Two free legs (the sleepwalkers'): each on its own hip, the leading one on its `leadSide`, keeping the directions its pose drew it in
+   * and its true length (the flat drawing's shortened legs are for how it is seen; in space they are seen as they are), the whole figure
+   * dropped so its feet stand where the pose put them.
+   */
+  freeLegs?: boolean;
+  /** How long its weapon is (figure units): in a pose held in both hands (`grip`) the free hand reaches the weapon in space. */
+  weaponReach?: number;
+}
+
+/** The flat drawing's shortened legs: a free leg in space is its true length. */
+const LEG_ADJUSTS = new Set(["leadThigh", "leadShin", "rearThigh", "rearShin"]);
+
+/** How far behind the weapon hand the other hand holds a weapon in both hands (figure units), as in the flat rig. */
+const GRIP_GAP = 4;
+
+/**
+ * The way a pose's weapon points, in body space: as its `weapon3` says, or else its flat angle (0 = ahead, -90 = up) lifted into the side plane
+ * and turned with the body above the pelvis (`turn3`).
+ */
+export function poseWeaponAxis(drawn: Skeleton): P3 {
   const raw: Skeleton = drawn.for3d ? { ...drawn, ...drawn.for3d } : drawn;
+  if (raw.weapon3) { const v = raw.weapon3, n = Math.hypot(...v) || 1; return [v[0] / n, v[1] / n, v[2] / n]; }
+  const a = (raw.weapon.angle * Math.PI) / 180, t = ((raw.turn3 ?? 0) * Math.PI) / 180, ahead = Math.cos(a);
+  // (turned as `turn3` turns the body: its front toward its right)
+  return [ahead * Math.sin(t), -Math.sin(a), ahead * Math.cos(t)];
+}
+
+/** A flat pose lifted into 3D space: see the file's note. `hand`: the hand that holds the weapon. */
+export function liftPose(drawn: Skeleton, handGiven: Side = "right", opts: LiftOptions = {}): Rig3 {
+  // (A pose may be drawn differently in 3D, and say which hand its weapon arm is.)
+  const asDrawn: Skeleton = drawn.for3d ? { ...drawn, ...drawn.for3d } : drawn;
+  const raw: Skeleton = opts.freeLegs && asDrawn.adjust
+    ? { ...asDrawn, adjust: Object.fromEntries(Object.entries(asDrawn.adjust).filter(([k]) => !LEG_ADJUSTS.has(k))) }
+    : asDrawn;
   const hand: Side = raw.hand3 ?? handGiven;
   // The torso at its true length; the limbs from the middle (neck and hip), so they stay in the side plane.
   const base = fitTorso(raw);
@@ -127,7 +163,12 @@ export function liftPose(drawn: Skeleton, handGiven: Side = "right"): Rig3 {
 
   const weaponArm = arm(s.weaponArm, weaponLat), freeArm = arm(s.freeArm, freeLat);
   const byHand = (side: Side) => (side === hand ? weaponArm : freeArm);
-  const byLead = mirrored;
+  /** A free leg as its pose draws it, from its own hip (the hips set apart sideways), the foot a little further out. */
+  const free = (side: Side) => {
+    const l = side === (raw.leadSide ?? "left") ? s.leadLeg : s.rearLeg, sg = sign(side);
+    return { knee: to3(l.knee, sg * hp), foot: to3(l.foot, sg * hp * FOOT_OUT) };
+  };
+  const byLead = opts.freeLegs ? free : mirrored;
 
   const joints: Record<Joint, P3> = {
     head: to3(base.head), neck: to3(base.neck), pelvis: to3(base.hip),
@@ -137,6 +178,27 @@ export function liftPose(drawn: Skeleton, handGiven: Side = "right"): Rig3 {
     elbowR: byHand("right").elbow, handR: byHand("right").hand, elbowL: byHand("left").elbow, handL: byHand("left").hand,
     kneeR: byLead("right").knee, footR: byLead("right").foot, kneeL: byLead("left").knee, footL: byLead("left").foot,
   };
+  // Legs splayed: each swung out to its side about its hip, and the whole body let down after so the lower foot is back on the floor.
+  if (opts.freeLegs && raw.splay3) {
+    const a = (raw.splay3 * Math.PI) / 180, before = Math.min(joints.footR[1], joints.footL[1]);
+    let lowest = Infinity;
+    for (const side of ["R", "L"] as const) {
+      const sg = side === "R" ? 1 : -1, c = Math.cos(a), s = Math.sin(sg * a), hip = joints[`hip${side}` as Joint];
+      for (const j of [`knee${side}`, `foot${side}`] as Joint[]) {
+        const dx = joints[j][0] - hip[0], dy = joints[j][1] - hip[1];
+        joints[j] = [hip[0] + dx * c - dy * s, hip[1] + dx * s + dy * c, joints[j][2]];
+      }
+      lowest = Math.min(lowest, joints[`foot${side}` as Joint][1]);
+    }
+    const down = lowest - before;
+    for (const j of JOINTS) joints[j] = [joints[j][0], joints[j][1] - down, joints[j][2]];
+  }
+  // A slouch: the shoulders rounded forward (and a little down), the arms going with them unless they reach their own spots after (`arms3`).
+  if (raw.hunch3) {
+    const f = raw.hunch3 * U, d = (raw.hunch3 / 3) * U;
+    const moving = raw.arms3 ? (["shoulderR", "shoulderL"] as const) : (["shoulderR", "shoulderL", "elbowR", "handR", "elbowL", "handL"] as const);
+    for (const j of moving) joints[j] = [joints[j][0], joints[j][1] - d, joints[j][2] + f];
+  }
   // Sitting back: the upper body drops with the pelvis, and the legs lie on the floor under it, with the thighs on top.
   let lowered = 0;
   if (raw.legs3?.sit !== undefined || raw.legs3?.ahead !== undefined) {
@@ -269,6 +331,16 @@ export function liftPose(drawn: Skeleton, handGiven: Side = "right"): Rig3 {
       joints[`elbow${side}` as Joint] = elbow;
       joints[`hand${side}` as Joint] = reached;
     }
+  }
+  // Held in both hands: the free hand reaches the weapon (just behind the weapon hand, or its middle), its elbow out to its side.
+  if (raw.grip && opts.weaponReach) {
+    const axis = poseWeaponAxis(raw), wh = hand === "right" ? joints.handR : joints.handL;
+    const along = (raw.grip === "middle" ? opts.weaponReach / 2 : -GRIP_GAP) * U;
+    const side = hand === "right" ? "L" : "R", sg = side === "R" ? 1 : -1, adj = raw.adjust ?? {};
+    const { elbow, hand: reached } = reach3(joints[`shoulder${side}` as Joint], [wh[0] + axis[0] * along, wh[1] + axis[1] * along, wh[2] + axis[2] * along],
+      RIG.upperArm * (adj.freeUpper ?? 1) * U, RIG.forearm * (adj.freeFore ?? 1) * U, [sg, 0, -0.3]);
+    joints[`elbow${side}` as Joint] = elbow;
+    joints[`hand${side}` as Joint] = reached;
   }
   // A held thing sits where the pose put it relative to the weapon hand.
   const prop = raw.prop && ((): { kind: "wax" | "flame"; at: P3 } => {
@@ -411,7 +483,7 @@ export function weaponOf(rig: Rig3, reach: number): { hand: P3; axis: P3; tip: P
 }
 
 /** A weapon from `h` pointing along `raw` (any length), `reach` long, turned up just enough to keep its far end off the floor. */
-function held(h: P3, raw: P3, reach: number, floor = 1.5): { hand: P3; axis: P3; tip: P3 } {
+export function held(h: P3, raw: P3, reach: number, floor = 1.5): { hand: P3; axis: P3; tip: P3 } {
   const len = reach * U, n = Math.hypot(...raw) || 1;
   let axis: P3 = [raw[0] / n, raw[1] / n, raw[2] / n];
   const lowest = floor * U; // (the far end stays this far off the floor at least)

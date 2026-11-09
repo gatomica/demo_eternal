@@ -11,9 +11,10 @@ import { needText } from "../core/conditions";
 import { nextStances } from "../core/patterns";
 import type { CombatState } from "../core/types";
 import { ARMOR, WEAPONS } from "../core/rules";
-import type { ArmorTier, WeaponTier } from "../core/types";
+import type { ArmorItem, ArmorTier, HeadItem, WeaponTier } from "../core/types";
+import { ITEMS } from "../explore/items";
 import type { PoseName } from "../render/poses";
-import { applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, variantToggles, type EnemySubject, figureAngleOf, LINE_TOGGLE, MODEL, MODEL_ANGLES, type ModelAngle, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow } from "./viewerModel";
+import { applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, variantToggles, type EnemySubject, figureAngleOf, LINE_TOGGLE, MODEL, MODEL_ANGLES, type ModelAngle, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow, type Wear, WEARABLES, wearOf } from "./viewerModel";
 import { GearViewer } from "./GearViewer";
 import { GEAR_WEAPONS, type GearId } from "../render/gear3d";
 import { cycle, useKeys } from "../ui/input";
@@ -23,26 +24,32 @@ import { Picker } from "../ui/Picker";
 type Subject = EnemySubject | "player";
 const SUBJECTS: Subject[] = [...VIEWER_SUBJECTS, "player"];
 
-/** Which row of the setup is the one in hand: the models (enemies and you), or the gear. */
-type Row = "model" | "gear";
+/** Which row of the setup is the one in hand: the models (enemies and you), the gear (the weapons alone), or what you wear (shown on you). */
+type Row = "model" | "gear" | "wear";
+const ROWS: Row[] = ["model", "gear", "wear"];
+type WearId = ArmorItem | HeadItem;
 const GEAR_IDS = GEAR_WEAPONS.map(m => m.id) as GearId[];
 
 /** Pick which enemy (or you), or which piece of gear, to look at. W/S change the row, A/D change what's picked, E opens it, Q goes back to the menu. */
-function ViewerSetup({ kind, gear, row, onChange, onGear, onRow, onStart, onExit }: {
+function ViewerSetup({ kind, gear, wear, row, onChange, onGear, onWear, onRow, onStart, onExit }: {
   kind: Subject;
   gear: GearId;
+  wear: WearId;
   row: Row;
   onChange: (k: Subject) => void;
   onGear: (g: GearId) => void;
+  onWear: (w: WearId) => void;
   onRow: (r: Row) => void;
   onStart: () => void;
   onExit: () => void;
 }) {
   useKeys(key => {
-    if (key === "up" || key === "down") onRow(row === "model" ? "gear" : "model");
+    if (key === "up" || key === "down") onRow(cycle(ROWS, row, key === "down" ? 1 : -1));
     else if (key === "left" || key === "right") {
-      if (row === "model") onChange(cycle(SUBJECTS, kind, key === "right" ? 1 : -1));
-      else onGear(cycle(GEAR_IDS, gear, key === "right" ? 1 : -1));
+      const k = key === "right" ? 1 : -1;
+      if (row === "model") onChange(cycle(SUBJECTS, kind, k));
+      else if (row === "gear") onGear(cycle(GEAR_IDS, gear, k));
+      else onWear(cycle(WEARABLES, wear, k));
     } else if (key === "select") onStart();
     else if (key === "back" || key === "pause") onExit();
   });
@@ -66,6 +73,15 @@ function ViewerSetup({ kind, gear, row, onChange, onGear, onRow, onStart, onExit
         labels={Object.fromEntries(GEAR_WEAPONS.map(m => [m.id, m.name]))}
         onChange={g => { onRow("gear"); onGear(g); }}
       />
+      {/* What you wear: each piece of armor and head gear, shown on you (the player viewer, wearing it). */}
+      <Picker
+        label="Wearing"
+        focused={row === "wear"}
+        value={wear}
+        options={WEARABLES}
+        labels={Object.fromEntries(WEARABLES.map(id => [id, ITEMS[id].name]))}
+        onChange={w => { onRow("wear"); onWear(w); }}
+      />
       <p className="hint">
         <kbd>W</kbd><kbd>S</kbd> row · <kbd>A</kbd><kbd>D</kbd> change · <kbd>E</kbd> view · <kbd>Q</kbd> menu
       </p>
@@ -80,11 +96,13 @@ function ViewerSetup({ kind, gear, row, onChange, onGear, onRow, onStart, onExit
 export function ModelViewer({ onExit }: { onExit: () => void }) {
   const [kind, setKind] = useState<Subject>(VIEWER_SUBJECTS[0]);
   const [gear, setGear] = useState<GearId>(GEAR_IDS[0]);
+  const [wear, setWear] = useState<WearId>(WEARABLES[0]);
   const [row, setRow] = useState<Row>("model");
   const [viewing, setViewing] = useState<false | Row>(false);
   const [run, setRun] = useState(0);
-  if (!viewing) return <ViewerSetup kind={kind} gear={gear} row={row} onChange={setKind} onGear={setGear} onRow={setRow} onStart={() => { setRun(r => r + 1); setViewing(row); }} onExit={onExit} />;
+  if (!viewing) return <ViewerSetup kind={kind} gear={gear} wear={wear} row={row} onChange={setKind} onGear={setGear} onWear={setWear} onRow={setRow} onStart={() => { setRun(r => r + 1); setViewing(row); }} onExit={onExit} />;
   if (viewing === "gear") return <GearViewer id={gear} onChange={setGear} onBack={() => setViewing(false)} />;
+  if (viewing === "wear") return <PlayerViewerFight key={`wear-${wear}-${run}`} wearing={wearOf(wear)} onBack={() => setViewing(false)} onRetry={() => setRun(r => r + 1)} onExit={onExit} />;
   if (kind === "player") return <PlayerViewerFight key={`player-${run}`} onBack={() => setViewing(false)} onRetry={() => setRun(r => r + 1)} onExit={onExit} />;
   return <ViewerFight key={`${kind}-${run}`} subject={kind} onBack={() => setViewing(false)} onRetry={() => setRun(r => r + 1)} onExit={onExit} />;
 }
@@ -328,7 +346,10 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
  * what the action needs (strikes, so there is something to block or dodge; or rests, so there is
  * something to hit). Every play starts from the same spot.
  */
-function PlayerViewerFight({ onBack, onRetry, onExit }: { onBack: () => void; onRetry: () => void; onExit: () => void }) {
+function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?: Wear; onBack: () => void; onRetry: () => void; onExit: () => void }) {
+  // What you wear: a class's armor (else plain armor of the Armor tier) and head gear; opened from the Wearing row, the piece picked there.
+  const [armorItem, setArmorItem] = useState<ArmorItem | "none">(wearing.armor ?? "none");
+  const [headItem, setHeadItem] = useState<HeadItem | "none">(wearing.head ?? "none");
   const [weapon, setWeapon] = useState<WeaponTier>("normal");
   const [armor, setArmor] = useState<ArmorTier>("light");
   /** The pose held still, or "model" for the T-pose. */
@@ -341,7 +362,10 @@ function PlayerViewerFight({ onBack, onRetry, onExit }: { onBack: () => void; on
   const [playSignal, setPlaySignal] = useState(0);
   const scenario = PLAYER_SCENARIOS.find(sc => sc.id === scenarioId);
   const initial = useMemo(() => playerViewerFight("normal", "light"), []);
-  const override = useCallback((s: CombatState) => applyPlayerShow(s, weapon, armor, scenario), [weapon, armor, scenario]);
+  const override = useCallback(
+    (s: CombatState) => applyPlayerShow(s, weapon, armor, scenario, { armor: armorItem === "none" ? undefined : armorItem, head: headItem === "none" ? undefined : headItem }),
+    [weapon, armor, scenario, armorItem, headItem],
+  );
   const model = held === "model";
   const seen = figureAngleOf(angle);
   const play = (id: string) => {
@@ -372,7 +396,9 @@ function PlayerViewerFight({ onBack, onRetry, onExit }: { onBack: () => void; on
         </div>
       </div>
       {chips("Weapon", Object.keys(WEAPONS) as WeaponTier[], weapon, o => (o === "baseline" ? "None" : WEAPONS[o].name), setWeapon)}
-      {chips("Armor", Object.keys(ARMOR) as ArmorTier[], armor, o => ARMOR[o].label, setArmor)}
+      {armorItem === "none" && chips("Armor", Object.keys(ARMOR) as ArmorTier[], armor, o => ARMOR[o].label, setArmor)}
+      {chips("Body", ["none" as const, ...WEARABLES.filter(id => ITEMS[id].slot === "armor") as ArmorItem[]], armorItem, o => (o === "none" ? "Plain" : ITEMS[o].name), setArmorItem)}
+      {chips("Head", ["none" as const, ...WEARABLES.filter(id => ITEMS[id].slot === "head") as HeadItem[]], headItem, o => (o === "none" ? "Bare" : ITEMS[o].name), setHeadItem)}
       {chips("Pose", [...PLAYER_POSES, "dead" as const, "model" as const], held, o => (o === "model" ? MODEL : o === "dead" ? "Dead" : o), o => { setHeld(o); setScenarioId(undefined); })}
       {model && chips("Angle", MODEL_ANGLES.map(a => a.id), angle, o => MODEL_ANGLES.find(a => a.id === o)!.label, setAngle)}
       {!model && held !== "dead" && (

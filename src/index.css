@@ -435,6 +435,15 @@ kbd {
 .armor-bronze-chestplate .fig-limb { stroke: #efece4; stroke-width: 5.4; }
 .armor-garb .fig-limb { stroke: #17171c; stroke-width: 5.2; }
 .armor-robe .fig-limb { stroke: #d6d4de; stroke-width: 4.8; }
+/* The player in 3D (Sleepwalker3D's `gear`): its armor over the ribcage, the Soldier's leather, its helm and mask, its black hood. */
+.fig-chest-bronze { fill: #b4803f; }
+.fig-chest-garb { fill: #17171c; }
+.fig-chest-robe { fill: #ebe9f1; }
+.fig-limb.fig-leather, .armor-bronze-chestplate .fig-limb.fig-leather { stroke: #7a5232; }
+.fig-helm-bronze { fill: #b4803f; stroke: #7d5424; stroke-width: 0.6; stroke-linejoin: round; }
+.fig-helm-crest { fill: none; stroke: #a63a2e; stroke-linecap: round; stroke-linejoin: round; }
+.fig-head.fig-mask { fill: #e3d9be; }
+.fig-hood.fig-hood-black { fill: #17171c; stroke: none; }
 .fig-limb.dbg-red { stroke: #e0201b !important; }
 .fig-limb.dbg-far { stroke: #3b82f6; }
 .fig-limb.dbg-lead { stroke: #ef4444; }

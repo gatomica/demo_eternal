@@ -60,8 +60,8 @@ export function endTurn(t: Turn) {
   // leaves you in idle (to kneel, and to stand up again).
   if (p.hp <= 0 || p.staggered || revivedNow) { p.stance = "idle"; p.lastAction = undefined; }
   else if (t.act && !t.out.has(p.id) && !t.cancelled.has(p.id)) {
-    p.stance = stanceAfter(t.act, t.swing);
-    // (A Rest broken by a blow was no rest.)
+    // (A Rest broken by a blow leaves you lowered, as you flinched: it was no rest.)
+    p.stance = t.act.type === "rest" && t.interrupted.has(p.id) ? "low" : stanceAfter(t.act, t.swing);
     p.lastAction = t.act.type === "rest" && t.interrupted.has(p.id) ? undefined : t.act.type;
   } else p.lastAction = undefined;
   // Wax only lasts while there's Fatigue to hold it (a staggered fighter keeps it until it recovers).

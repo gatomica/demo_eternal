@@ -763,8 +763,16 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
   const freeArm = (
     <LimbPoly pts={[freeShoulder, s.freeArm.elbow, s.freeArm.hand]} className={`fig-limb ${freeBehind && !straight ? "fig-far" : ""}${hand === "left" ? rightArmDebug : ""}${redFree}`} item={armorItem} tag="f" />
   );
+  // The weapon's edge side (its +y: the axe's head, the sickle's hollow edge) is kept away from the body, so it never faces the wielder: flipped over
+  // its own line when, at this angle, it would.
+  const edgeAway = (() => {
+    const a = (s.weapon.angle * Math.PI) / 180, reach = WEAPON_REACH[weapon] / 2;
+    const mid: Pt = [s.weapon.at[0] + Math.cos(a) * reach, s.weapon.at[1] + Math.sin(a) * reach];
+    const body: Pt = [(s.neck[0] + s.hip[0]) / 2 - mid[0], (s.neck[1] + s.hip[1]) / 2 - mid[1]];
+    return -Math.sin(a) * body[0] + Math.cos(a) * body[1] > 0 ? " scale(1 -1)" : "";
+  })();
   const weaponEl = waxed ? null : (
-    <g transform={`translate(${s.weapon.at[0]} ${s.weapon.at[1]}) rotate(${s.weapon.angle})`}>
+    <g transform={`translate(${s.weapon.at[0]} ${s.weapon.at[1]}) rotate(${s.weapon.angle})${edgeAway}`}>
       <HeldWeapon tier={weapon} flash={eternalFlash} item={weaponItem} />
     </g>
   );

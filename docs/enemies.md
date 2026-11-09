@@ -241,33 +241,43 @@ Reused across the whole game. A hunched, desperate wretch dragging a weapon too 
 
 **Gear:** a **Jagged Chisel** (light weapon, with its effect; it carried a normal weapon before) and, for now, no armor (some may wear armor later); it drops the weapon it carries.
 
+**Drawn in 3D in fights (first pass built; `render/Sleepwalker3D.tsx`):** like the Waxed, from a skeleton in space: two free legs, a dark head with two pale eyes (the Patrol Warden's hood: a round with its point hanging behind, the face in shadow), the 3D chisel, hammer or torch in its weapon hand. The poses are still the flat ones lifted as they are; on the map it is the flat figure.
+
 **Every enemy's weapon carries its effect (built):** there are no enemies with ordinary weapons. Whatever an enemy carries (the Sleepwalker's Jagged Chisel, the Patrol Warden's Waxed Torch, the Hammer Sleepwalker's and Hammer Waxed's Brick Hammer...) fights with its eternal effect, free for it; only the Warden's own flail carries none (`ownWeapon`).
 
 **Variants (built; `kinds/sleepwalker.ts`):** the **Patrol Warden** and the **Hammer Sleepwalker** (only a select few) are the same wretch (pattern, poses, respawning) carrying a Waxed Torch or Brick Hammer instead of the chisel. The **Patrol Warden** is the sleepwalker of the wardens' rounds: it carries the Waxed Torch and wears the Penitent Warden's **pointed hood** (its point hanging behind, the face in its shadow), but no wax beak, no drool and no cloak (`PatrolHood` in `StickFigure.tsx`; on the map too, `PATROL_LOOK`). Its remains keep the hood on the sunk head, the point flopped along the ground (`Remains`' `hooded`, and the map's `drawRemains`). Their blows carry the weapon's eternal effect against you, free (no Eternity). Beaten, a Patrol Warden also drops its **Patrol Warden's Hood** (head gear, light, placeholder lore; `wardenhood` in `explore/items.ts`). Beaten, they drop the **ordinary** weapon, not the eternal one: enemies fight with the eternal effects, but eternal gear is only found, as memories. In Test combat as their own encounters and "Sleepwalker, patrol warden and hammer"; **not yet placed on the map.** On the map the hammer one looks like any sleepwalker for now (the patrol warden wears its hood).
 
+**New moveset (built; replaces Charging / Struggling / Guarded and the Weapon Strike):** like the Waxed's, what it last did decides where it goes next; a swing ends turned the way it swings, into the stance turned that way.
+
 ```
 actions:
-  Weapon Strike: attack                 // whatever weapon it carries
-  Parry:         block, *Close
-  Charge:        maneuver, advance, *Far
-  Backstep:      maneuver, retreat, *Close
-  Despair:       rest
+  Swing Left:      attack, *Close        // whatever weapon it carries
+  Swing Right:     attack, *Close
+  Overhead Strike: attack
+  Parry:           block, *Close
+  Chase:           maneuver, advance, *Far
+  Retreat:         maneuver, retreat, *Close
+  Despair:         rest
 stances:
-  All > Charging   > Charge, Weapon Strike
-  All > Struggling > Backstep, Despair
-  All > Guarded    > Parry, Weapon Strike
+  Recover, !Parry                > Idle          > Chase, Retreat
+  Chase, Swing Right, !Parry     > Charging      > Chase, Swing Left
+  Swing Left                     > Shoulder In   > Swing Right, Parry
+  Swing Left, Swing Right, Parry > Arms Overhead > Overhead Strike
+  Recover, Retreat, Parry        > Struggling    > Despair
 ```
 
 | Stance | Look | Does | Safe answer |
 |---|---|---|---|
-| **Charging** | Head thrust out, weapon trailing behind, free hand grasping | Charge if you're far, else Weapon Strike | Far: nothing is coming at you but the Charge. Close: Block or dodge the strike |
-| **Struggling** | Hunched and swaying, a hand pressed to the head | Backstep if you're close, else Despair (Rest) | Close: it backs off. Far: it rests, a free hit |
-| **Guarded** | Shoulders up, head tucked, weapon braced across the body | Parry (Block) if you're close, else Weapon Strike | Close: it blocks, so don't attack into it. Far: it comes at you |
+| **Idle** | Slumped, the weapon's tip dragging | Chase if you're far, else Retreat | Far: it comes at you. Close: it backs off |
+| **Charging** | Head thrust out, weapon drawn back; in 3D turned to his right | Chase if you're far, else Swing Left | Far: only the Chase. Close: Block or dodge the swing |
+| **Shoulder In** | The old Guarded crouch, weapon braced across the body; in 3D turned to his left, presenting his right shoulder | Swing Right (it is always close here) | Block or dodge the swing |
+| **Arms Overhead** | The weapon hauled up over the head in both hands | Overhead Strike, from either line | Block or dodge |
+| **Struggling** | Hunched and swaying, a hand pressed to the face | Despair (Rest) | A free hit |
 | **Staggered** | Kneeling on one knee (the right knee raised, the left shin laid back up the screen), hunched right over and dejected, arms limp out to his sides, eyes on the ground | Forced Rest | Free hit |
 
-**Odds (built):** each stance a third of the time; the action follows from the situation, never chance.
-
-**Looks (first drafts, to tune with the user):** Idle: slumped, the weapon's tip dragging. Weapon Strike: hauled overhead in both hands, then a cross strike, the weapon swept down across the body to end low on the far side (with the swing trail). Parry: braced wide, the weapon swatted out. Charge: a stumbling lunge, a foot kicked up. Backstep: recoiling, weapon thrust out, free arm flailing. Despair: sinking, both hands clutching the head, the weapon slipping to the ground. Staggered and flinch still use the generic poses.
+- **Recover** opens a fight in Idle or Struggling. The Overhead Strike and Despair lead to no stance, so they go back to those two. A Parry that stopped a blow (`Parry`) goes on to Arms Overhead or Struggling; one that stopped nothing (`!Parry`), to Idle or Charging.
+- **Open question: Parry is never reached.** It is only in Shoulder In, after Swing Right, and both need `*Close`, so Swing Right is always taken first; `Parry` and `!Parry` in the "comes from" lists never happen. (Far, Shoulder In has nothing it can do and is disabled; it only follows Swing Left, which is close.)
+- **Poses (first pass, built):** Idle `sw-idle`, Charging `sw-charging` (3D: `turn3` 35), Shoulder In `sw-shoulder-in` (the old `sw-guarded`; 3D: `turn3` -40), Arms Overhead `sw-overhead` (in 3D standing on both feet), Struggling `sw-struggling`. Each swing runs between the two turned stances, its wind-up and landing taking their bodies: Swing Left `sw-swing-l-windup` (Charging turned further, the straight arm drawn back behind him) then `sw-swing-l` (swept round into Shoulder In's crouch, the arm across to his left); Swing Right `sw-swing-r-windup` (Shoulder In coiled further, the weapon drawn back on his left) then `sw-swing-r` (a backhand round into Charging's body, the straight arm swept round to straight back behind him); Overhead Strike `sw-overhead-leap` (Arms Overhead leaping: reared further back, both feet off the ground) then `sw-overhead-strike` (straight down ahead in both hands). Parry, Chase (`sw-charge`), Retreat (`sw-backstep`) and Despair keep their poses. Each strike leaves an arch. The flat drawings of the new strikes are the old cross strike's (the map never shows them).
 
 **How it plays:**
 - First playtest of the old random version: far more engaging with the uncertainty, but very few safe turns. To be re-playtested now that actions are conditional.

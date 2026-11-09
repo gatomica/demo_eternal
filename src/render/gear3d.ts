@@ -25,11 +25,11 @@ export type Prim =
   /** A thick line with round ends: a haft, a bar, `r` the radius. */
   | { k: "line"; a: V3; b: V3; r: number; color: string }
   /** A cylinder from `a` to `b`, `r` the radius: straight sides and flat ends (a grip). */
-  | { k: "cyl"; a: V3; b: V3; r: number; color: string }
+  | { k: "cyl"; a: V3; b: V3; r: number; color: string; edgeless?: boolean }
   /** An ellipsoid with these half-sizes along x, y and z: drawn as the ellipse it looks like from where it is seen. */
-  | { k: "ball"; c: V3; rx: number; ry: number; rz: number; color: string }
+  | { k: "ball"; c: V3; rx: number; ry: number; rz: number; color: string; edgeless?: boolean }
   /** A flat circle, its normal `n`: a stamp, a wrap round a haft (`ring`: only its outline, that wide). */
-  | { k: "disc"; c: V3; n: V3; r: number; color: string; ring?: number }
+  | { k: "disc"; c: V3; n: V3; r: number; color: string; ring?: number; edgeless?: boolean }
   /** A thin line lying on a face: cord, a crack, a fuller, a streak. */
   | { k: "stroke"; pts: V3[]; w: number; color: string };
 
@@ -43,6 +43,11 @@ export interface GearModel {
   reach: number;
   /** How long its damaging part is, along x, from its far end back (figure units): the blade, the brick, the bulb. A swing's arch is that thick. */
   damage: number;
+  /**
+   * Its edge side: the way (across it, in y and z) the side it strikes with faces, which leads through a swing: a blade's edge, one of a hammer's
+   * striking ends, the torch's side with the mark carved in it. None: it has no side to strike with, and it is held as it always was.
+   */
+  edge?: V3;
   /** A line about it, for the viewer. */
   note: string;
   prims: Prim[];
@@ -52,31 +57,24 @@ export interface GearModel {
  * Colours (the sprites', from the stylesheet)
  * ============================================================ */
 
-const WOOD = "#8a6b4a", CORD = "#a48d64", CHAR = "#2f2926";
+const WOOD = "#8a6b4a";
 const WAX = "#b9a14e", WAX_DARK = "#85733a", BRICK = "#85838d", BRICK_EDGE = "#5d5b66";
-const BRONZE = "#b9854a", BRONZE_DARK = "#8a5f2c", IRON = "#8f93a3", IRON_DARK = "#6b6f80";
+const BRONZE = "#b9854a", BRONZE_DARK = "#8a5f2c", BRONZE_SHADE = "#a2733d", IRON = "#8f93a3", IRON_DARK = "#6b6f80";
+/** Black iron (the axe's head), and the dark wood of its haft. */
+const BLACK_IRON = "#2e2d33", BLACK_IRON_DARK = "#1d1c21", DARK_WOOD = "#5b3f2b";
 
 /* ============================================================
  * Building them
  * ============================================================ */
 
-/** A rod along a path: a thick round-ended line for each stretch, the radius going from `r0` to `r1` along it. */
-function rod(path: readonly V3[], r0: number, r1: number, color: string): Prim[] {
-  return path.slice(1).map((b, i) => ({ k: "line", a: path[i], b, r: r0 + ((r1 - r0) * (i + 0.5)) / (path.length - 1), color }));
-}
-
-/** A wrap round something running along x, at `x`: a hoop, `r` wide, `w` thick. */
-const hoop = (x: number, r: number, color: string, w = 0.8, y = 0): Prim => ({ k: "disc", c: [x, y, 0], n: [1, 0, 0], r, color, ring: w });
-
 /** A thin line to lay on a plate's broad faces: through these points (in x, y), `w` wide. */
 type Mark = { pts: readonly P2[]; w: number; color: string };
-const mark = (pts: readonly P2[], w: number, color: string): Mark => ({ pts, w, color });
 
 /**
  * An outline (in x, y) given a thickness, z from z0 to z1: its two broad faces in `color`, the faces round its edge in `side`. `marks` are lines lying
- * on both broad faces (a fuller, cord, a crack); they are drawn with the face they lie on.
+ * on both broad faces (a fuller, cord, a crack); they are drawn with the face they lie on. `open(i)`: the edge from point i to the next has no face.
  */
-function plate(outline: readonly P2[], z0: number, z1: number, color: string, side: string, marks: readonly Mark[] = []): Prim[] {
+function plate(outline: readonly P2[], z0: number, z1: number, color: string, side: string, marks: readonly Mark[] = [], open?: (i: number) => boolean): Prim[] {
   const front = outline.map(([x, y]) => [x, y, z1] as V3), back = outline.map(([x, y]) => [x, y, z0] as V3);
   const on = (z: number) => marks.map(m => ({ pts: m.pts.map(([x, y]) => [x, y, z] as V3), w: m.w, color: m.color }));
   // Which way round the outline goes decides which way each edge faces out (the outline may have notches; this still holds edge by edge).
@@ -85,6 +83,8 @@ function plate(outline: readonly P2[], z0: number, z1: number, color: string, si
   const turn = area >= 0 ? 1 : -1;
   const prims: Prim[] = [{ k: "poly", pts: [...back].reverse(), color: side, marks: on(z0 - 0.03), out: [0, 0, -1] }];
   for (let i = 0; i < outline.length; i++) {
+    // (`open`: an edge that meets another plate, edge to edge in the same plane, has no face of its own there)
+    if (open?.(i)) continue;
     const j = (i + 1) % outline.length, dx = outline[j][0] - outline[i][0], dy = outline[j][1] - outline[i][1], l = Math.hypot(dx, dy) || 1;
     prims.push({ k: "poly", pts: [front[i], front[j], back[j], back[i]], color: side, out: [(turn * dy) / l, (-turn * dx) / l, 0] });
   }
@@ -92,9 +92,22 @@ function plate(outline: readonly P2[], z0: number, z1: number, color: string, si
   return prims;
 }
 
-/** A box, as a plate of a rectangle. */
-const slab = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, color: string, side = color): Prim[] =>
-  plate([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], z0, z1, color, side);
+/**
+ * One face through these points (a triangle, or a long outline round a whole face, which may bend a little: a bevel from a thick line to a sharp edge),
+ * facing out the way of `toward` (its way out is worked out from all the points, by Newell's method, and turned to agree): seamless, so faces of one
+ * solid meet without lines between them. `toward` undefined: a face that curves right round (a band along a curved back), always drawn.
+ */
+function facet(pts: V3[], color: string, toward?: V3): Prim {
+  if (!toward) return { k: "poly", pts, color, seamless: true };
+  let n: V3 = [0, 0, 0];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    n = [n[0] + (a[1] - b[1]) * (a[2] + b[2]), n[1] + (a[2] - b[2]) * (a[0] + b[0]), n[2] + (a[0] - b[0]) * (a[1] + b[1])];
+  }
+  if (n[0] * toward[0] + n[1] * toward[1] + n[2] * toward[2] < 0) n = [-n[0], -n[1], -n[2]];
+  const l = Math.hypot(...n) || 1;
+  return { k: "poly", pts, color, seamless: true, out: [n[0] / l, n[1] / l, n[2] / l] };
+}
 
 /** A small repeatable random number generator (so a scatter of streaks or scratches looks the same every time): numbers in [0, 1). */
 function seeded(seed: number): () => number {
@@ -177,53 +190,53 @@ function chisel(): Prim[] {
 }
 
 /**
- * The Brick Hammer (heavy), as simple as it goes: a straight cylinder for a haft, a brick that is one plain box, and a few small straight scratches on the
- * brick's broad faces, in random places.
+ * The Brick Hammer (heavy): a straight cylinder for a haft, and for a head a block of bricks laid in a running bond, three courses of them across the
+ * head, two bricks deep, every other course shifted half a brick. As the walls' bricks are on the map, the block is one plain box and its joints are
+ * only marked here and there: some of the lines between the bricks, and those not all the way, so it reads as bricks without every one drawn out.
  */
 function hammer(): Prim[] {
-  const brick = { x0: 29.5, x1: 41, y: 7, z: 3.6 }; // (half height, half thickness)
+  const X0 = 29.5, X1 = 41, HY = 7, HZ = 3.6; // the block: along the haft, across the head (half), its thickness (half)
   const r = 1.5;
-  // The haft runs straight from behind the grip to the brick, ending where it meets the brick's face: the end circle lies on that face, within it,
-  // so none of the haft is outside the brick and none of it goes further in than it must.
-  const haftFront = brick.x0 + 0.05;
-  // Scratches, gray like the brick's shaded faces (a fixed scatter): a few short ones anywhere on the broad faces, a couple on the top and the bottom, and
-  // mainly on the two ends that take the blows (across the head, y = +-7): near their edges, running out from the middle of the face as if the impacts
-  // had cracked it outward.
+  // The haft runs straight from behind the grip to the block, ending where it meets its face: the end circle lies on that face, within it,
+  // so none of the haft is outside the block and none of it goes further in than it must.
+  const haftFront = X0 + 0.05;
+  const COURSES = 3, C = (X1 - X0) / COURSES, BRICK_LONG = HY; // (two bricks across the head in a course; the shifted courses half one at each end)
+  /** Where the joints between the bricks of a course fall across the head (y). */
+  const joints = (c: number) => (c % 2 ? [-BRICK_LONG / 2, BRICK_LONG / 2] : [0]);
   const rnd = seeded(5);
-  const GRAY = BRICK_EDGE, DEEP = "#47454f"; // (the end faces are already that shade, so their scratches are a little deeper)
-  const scratches = () => {
-    const out: Mark[] = [];
-    for (let k = 0; k < 3; k++) {
-      const x = brick.x0 + 1.2 + rnd() * (brick.x1 - brick.x0 - 4.4), y = (rnd() * 2 - 1) * (brick.y - 1.6), len = 1.4 + rnd() * 2.2, a = rnd() * Math.PI;
-      out.push(mark([[x, y], [x + len * Math.cos(a), y + len * Math.sin(a)]], 0.4, GRAY));
-    }
-    return out;
+  /** Part of a joint from `a` to `b`, or nothing: most are marked, each only part of the way, now from one end, now from the middle. */
+  const part = (a: V3, b: V3): V3[] | undefined => {
+    if (rnd() > 0.65) return undefined;
+    const t0 = rnd() < 0.4 ? 0 : rnd() * 0.35, t1 = rnd() < 0.4 ? 1 : Math.min(1, t0 + 0.35 + rnd() * 0.4);
+    const at = (t: number): V3 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+    return [at(t0), at(t1)];
   };
-  const cx = (brick.x0 + brick.x1) / 2, hx = (brick.x1 - brick.x0) / 2;
-  // On an end face (across x and z): from near the edge, outward along the line from the face's centre, to just short of the edge.
-  const radial = (n: number): { pts: V3[]; w: number; color: string }[] => {
-    const out: { pts: V3[]; w: number; color: string }[] = [];
-    for (let k = 0; k < n; k++) {
-      const a = ((k + 0.2 + rnd() * 0.6) / n) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
-      const t = Math.min(hx / Math.max(Math.abs(c), 1e-6), brick.z / Math.max(Math.abs(s), 1e-6)); // the way out to the edge
-      const from = t * (0.55 + rnd() * 0.15), to = t * (0.9 + rnd() * 0.07);
-      out.push({ pts: [[cx + c * from, 0, s * from], [cx + c * to, 0, s * to]], w: 0.4, color: DEEP });
-    }
-    return out;
-  };
-  const prims = plate([[brick.x0, brick.y], [brick.x1, brick.y], [brick.x1, -brick.y], [brick.x0, -brick.y]], -brick.z, brick.z, BRICK, BRICK_EDGE, scratches());
+  const W = 0.45, GRAY = BRICK_EDGE, DEEP = "#47454f"; // (the side faces are already that gray, so their joints are a little deeper)
+  const lines = (segs: [V3, V3][], color: string) => segs.map(([a, b]) => part(a, b)).filter((q): q is V3[] => !!q).map(pts => ({ pts, w: W, color }));
+  const courseAt = (k: number) => X0 + k * C;
+  // A broad face (z = zf): the lines between the courses, across the head, and the joints within each course, along the haft.
+  const broad = (zf: number) => lines([
+    ...[1, 2].map(k => [[courseAt(k), -HY, zf], [courseAt(k), HY, zf]] as [V3, V3]),
+    ...Array.from({ length: COURSES }, (_, c) => joints(c).map(y => [[courseAt(c), y, zf], [courseAt(c + 1), y, zf]] as [V3, V3])).flat(),
+  ], GRAY);
+  // An end of the head (y = yf): the lines between the courses, through its thickness, and the joint between the two bricks deep, in the courses not
+  // shifted.
+  const end = (yf: number) => lines([
+    ...[1, 2].map(k => [[courseAt(k), yf, -HZ], [courseAt(k), yf, HZ]] as [V3, V3]),
+    ...[0, 2].map(c => [[courseAt(c), yf, 0], [courseAt(c + 1), yf, 0]] as [V3, V3]),
+  ], DEEP);
+  // The top or the bottom of the head (x = xf, its course `c`): the joints across it, and the one between the two bricks deep, along it.
+  const cap = (xf: number, c: number) => lines([
+    ...joints(c).map(y => [[xf, y, -HZ], [xf, y, HZ]] as [V3, V3]),
+    [[xf, -HY, 0], [xf, HY, 0]] as [V3, V3],
+  ], DEEP);
+  const prims = plate([[X0, HY], [X1, HY], [X1, -HY], [X0, -HY]], -HZ, HZ, BRICK, BRICK_EDGE);
   for (const p of prims) {
     if (p.k !== "poly" || !p.out) continue;
-    if (Math.abs(p.out[1]) > 0.5) { // an end that takes the blows
-      const y = Math.sign(p.out[1]) * (brick.y + 0.03);
-      p.marks = radial(6).map(m => ({ ...m, pts: m.pts.map(([x, , z]) => [x, y, z] as V3) }));
-    } else if (Math.abs(p.out[0]) > 0.5) { // the top (far end) and the bottom (where the haft goes in)
-      const x = p.out[0] > 0 ? brick.x1 + 0.03 : brick.x0 - 0.03, side = p.out[0] > 0 ? 1 : -1;
-      p.marks = [0, 1].map(k => {
-        const y = (k === 0 ? -1 : 1) * (p.out![0] > 0 ? 1.5 + rnd() * 3.5 : 2.6 + rnd() * 3), z = (rnd() * 2 - 1) * (brick.z - 1.2), len = 1 + rnd() * 1.4, a = rnd() * Math.PI;
-        return { pts: [[x, y, z], [x, y + len * Math.cos(a) * side, z + len * Math.sin(a)]] as V3[], w: 0.4, color: DEEP };
-      });
-    }
+    const [ox, oy, oz] = p.out, o = 0.03;
+    if (Math.abs(oz) > 0.5) p.marks = broad(Math.sign(oz) * (HZ + o));
+    else if (Math.abs(oy) > 0.5) p.marks = end(Math.sign(oy) * (HY + o));
+    else if (Math.abs(ox) > 0.5) p.marks = ox > 0 ? cap(X1 + o, COURSES - 1) : cap(X0 - o, 0);
   }
   return [
     { k: "cyl", a: [-6, 0, 0], b: [haftFront, 0, 0], r, color: WOOD },
@@ -232,80 +245,179 @@ function hammer(): Prim[] {
 }
 
 /**
- * The Waxed Torch (normal): a wooden torch whose charred rags are sealed in a bulb of wax stamped with the sealing king's mark; the wax has run down
- * the shaft in runnels.
+ * The Waxed Torch (normal): a wooden torch whose head is sealed in a bulb of wax with the sealing king's mark carved into it; the wax has run down the
+ * handle in two runnels, each ending in a drop.
+ *
+ * The handle is one plain cylinder, and it goes into the bulb only as far as it must for its end circle to lie inside the bulb (as the chisel's grip
+ * goes into its guard): none of its end shows, and there is no gap from the side. Each runnel is a thin cylinder lying along the handle, half sunk in
+ * it, its top end going into the bulb the same way. None of it has an outline (`edgeless`): the parts meet without a line between them.
  */
 function torch(): Prim[] {
+  return torchParts().map(p => (p.k === "cyl" || p.k === "ball" || p.k === "disc" ? { ...p, edgeless: true } : p));
+}
+/** The torch's shapes (`torch` draws them without outlines: wood and wax, all soft). */
+function torchParts(): Prim[] {
+  const bulb = { x: 30.4, rx: 6.2, ry: 5.4, rz: 5.4 }; // the wax over the head (round across, so its thin way is either)
+  const r = 1.35; // the handle
+  /** Where a circle `rr` across, its centre `d` off the handle's line, just lies inside the bulb: as far back along x as it can start. */
+  const into = (d: number, rr: number) => bulb.x - bulb.rx * Math.sqrt(1 - ((d + rr) / bulb.ry) ** 2);
+  const RUN = 0.6, OFF = r + RUN * 0.2; // a runnel's radius, and how far its line is off the handle's (most of it outside the handle)
+  const runnel = (angle: number, end: number, drop: number): Prim[] => {
+    const y = OFF * Math.cos(angle), z = OFF * Math.sin(angle);
+    return [
+      { k: "cyl", a: [end, y, z], b: [into(OFF, RUN), y, z], r: RUN, color: WAX },
+      { k: "ball", c: [end, y, z], rx: drop, ry: drop, rz: drop, color: WAX },
+    ];
+  };
+  // The mark is on the torch's striking side, its edge side (+y, the `edge` it leads its swings with), cut into the bulb's surface there: its lines curve
+  // with it, drawn in x (along the torch) and z (across that side), `by` off the surface (under it: dug in).
+  const onBulb = ([x, z]: P2, by: number): V3 => [x, bulb.ry * Math.sqrt(Math.max(0, 1 - ((x - bulb.x) / bulb.rx) ** 2 - (z / bulb.rz) ** 2)) + by, z];
+  const lid: P2[] = Array.from({ length: 7 }, (_, i) => { const t = Math.PI * (0.1 + (0.8 * i) / 6); return [29.7 + 0.6 * Math.sin(t), 1.5 * Math.cos(t)] as P2; });
+  // (the lid bows toward the tip, and each lash starts on it: where the lid is at that height)
+  const lidAt = (z: number) => 29.7 + 0.6 * Math.sqrt(1 - (z / 1.5) ** 2);
+  const lashes: P2[][] = [[[lidAt(0.9), 0.9], [32, 0.9]], [[lidAt(0), 0], [32.4, 0]], [[lidAt(-0.9), -0.9], [32, -0.9]]];
+  // (drawn at a small size, then doubled about its middle)
+  const SIZE = 2, MID = 30.8;
+  // Each line is a groove: the dark cut, a little under the surface.
+  const GROOVE = 0.35, DIG = -0.12;
+  const eye = [lid, ...lashes].map(line => {
+    // (each lash cut into steps, so it bends round the bulb with the surface)
+    const pts: P2[] = (line.length > 2 ? line : Array.from({ length: 5 }, (_, i) => [line[0][0] + ((line[1][0] - line[0][0]) * i) / 4, line[0][1] + ((line[1][1] - line[0][1]) * i) / 4] as P2))
+      .map(([x, z]) => [MID + (x - MID) * SIZE, z * SIZE] as P2);
+    return pts.map(p => onBulb(p, DIG));
+  });
   return [
-    ...rod([[-5, 0, 0], [8, 0, 0], [24, 0, 0]], 1.2, 1.5, WOOD),
-    hoop(20.4, 1.8, CORD), hoop(21.8, 1.8, CORD),
-    // the charred rags of the head, under the wax
-    ...slab(23, 29, -3.1, 3.1, -3.1, 3.1, CHAR),
-    // the bulb of wax over them, and the runnels that ran down the shaft
-    { k: "ball", c: [30.4, 0, 0], rx: 6.2, ry: 5.4, rz: 5.4, color: WAX },
-    ...rod([[25, 1.05, 0.2], [22.2, 0.9, 0.5], [19.4, 0.8, 0.4]], 0.7, 0.55, WAX),
-    { k: "ball", c: [19.2, 0.8, 0.4], rx: 0.85, ry: 0.85, rz: 0.85, color: WAX },
-    ...rod([[25, -0.9, -0.2], [21, -0.9, -0.5], [16.2, -0.8, -0.4]], 0.7, 0.55, WAX),
-    { k: "ball", c: [15.9, -0.85, -0.4], rx: 0.9, ry: 0.9, rz: 0.9, color: WAX },
-    // the sealing king's mark, pressed into the bulb's side: a round stamp, and on it a closed eye with three lashes hanging from the lid
-    { k: "disc", c: [30.6, 0, 5.7], n: [0, 0, 1], r: 2.7, color: WAX_DARK },
-    { k: "stroke", pts: arcPoints(30.6, 0.9, 1.5, 0.6, Math.PI * 0.1, Math.PI * 0.9, 6).map(([x, y]) => [x, y, 5.85] as V3), w: 0.3, color: CHAR },
-    { k: "stroke", pts: [[29.7, 0.3, 5.85], [29.7, -1.5, 5.85]], w: 0.3, color: CHAR },
-    { k: "stroke", pts: [[30.6, 0.2, 5.85], [30.6, -1.9, 5.85]], w: 0.3, color: CHAR },
-    { k: "stroke", pts: [[31.5, 0.3, 5.85], [31.5, -1.5, 5.85]], w: 0.3, color: CHAR },
+    // (its bottom end rounded off)
+    { k: "ball", c: [-5, 0, 0], rx: r, ry: r, rz: r, color: WOOD },
+    { k: "cyl", a: [-5, 0, 0], b: [into(0, r), 0, 0], r, color: WOOD },
+    // the bulb of wax over the head, and the runnels that ran down the handle
+    { k: "ball", c: [bulb.x, 0, 0], rx: bulb.rx, ry: bulb.ry, rz: bulb.rz, color: WAX },
+    ...runnel(0.35, 19.4, 0.85),
+    ...runnel(Math.PI + 0.3, 16.2, 0.9),
+    // the sealing king's mark, carved into the bulb's striking side in a darker wax: a closed eye, its three lashes hanging from the lid toward the tip
+    ...eye.map(pts => ({ k: "stroke", pts, w: GROOVE, color: WAX_DARK }) as Prim),
   ];
 }
 
-/** The Bronze Shortsword: a leaf blade, a short bar for a guard, a wrapped grip and a round pommel. */
+/**
+ * The Bronze Shortsword (the Soldier's): the Jagged Chisel made whole, its base: the same ball pommel, plain cylinder of a grip and oval guard, and the
+ * same blade of flat strips from a middle ridge down to sharp side edges, but clean (no nicks, no wax) and long, running on past where the chisel's breaks
+ * off and narrowing at its end, ridge and edges together, to a point.
+ *
+ * The grip and the blade go into the pommel and the guard only as far as they must (as the chisel's): none of their ends shows.
+ */
 function shortsword(): Prim[] {
-  // The leaf: widening from 2 at the guard to 3.1 a third of the way up, then narrowing in a curve to the point at 34.
-  const half = (x: number) => (x <= 15 ? 2 + 1.1 * ((x - 4.4) / 10.6) : 3.1 * (1 - ((x - 15) / 19) ** 2));
-  const xs = Array.from({ length: 17 }, (_, i) => 4.4 + (29.6 * i) / 16);
-  const blade: P2[] = [...xs.map(x => [x, half(x)] as P2), ...[...xs].reverse().map(x => [x, -half(x)] as P2)];
+  const R = 2.1, r = 1.3; // the pommel sphere, the grip
+  const guard = { x: 2.2, rx: 1.5, ry: 3.3, rz: 1.5 };
+  const T = 0.75, H = 2.3, TAPER = 26.5, TIP = 34; // half the thickness at the ridge, half the width, where it starts narrowing, its point
+  const gripBack = -5.4 + Math.sqrt(R * R - r * r);
+  const gripFront = guard.x - guard.rx * Math.sqrt(1 - Math.max((r / guard.ry) ** 2, (r / guard.rz) ** 2));
+  const root = guard.x + guard.rx * Math.sqrt(1 - Math.max((H / guard.ry) ** 2, (T / guard.rz) ** 2));
+  /** A flat face of the blade through these points, facing out on the `sgn` side (+1 up, -1 down): its way out worked out from the points. */
+  // On each face, the strip either side of the ridge: straight from the guard to where it narrows, then a triangle from there to the point.
+  const face = (sgn: 1 | -1): Prim[] => [1, -1].flatMap(sy => {
+    const z = T * sgn, color = sy > 0 ? BRONZE : BRONZE_SHADE;
+    return [
+      facet([[root, 0, z], [TAPER, 0, z], [TAPER, sy * H, 0], [root, sy * H, 0]], color, [0, 0, sgn]),
+      facet([[TAPER, 0, z], [TIP, 0, 0], [TAPER, sy * H, 0]], color, [0, 0, sgn]),
+    ];
+  });
   return [
-    { k: "ball", c: [-5.6, 0, 0], rx: 2, ry: 2, rz: 2, color: BRONZE_DARK },
-    ...rod([[-4, 0, 0], [2.2, 0, 0]], 1.3, 1.3, WOOD),
-    { k: "line", a: [3.3, -3.3, 0], b: [3.3, 3.3, 0], r: 1.15, color: BRONZE_DARK },
-    ...plate(blade, -0.5, 0.5, BRONZE, BRONZE_DARK, [mark([[5.6, 0], [29, 0]], 0.7, BRONZE_DARK)]),
+    { k: "ball", c: [-5.4, 0, 0], rx: R, ry: R, rz: R, color: BRONZE_DARK },
+    { k: "cyl", a: [gripBack, 0, 0], b: [gripFront, 0, 0], r, color: WOOD },
+    { k: "ball", c: [guard.x, 0, 0], rx: guard.rx, ry: guard.ry, rz: guard.rz, color: BRONZE_DARK },
+    ...face(1), ...face(-1),
   ];
 }
 
-/** The Barbarian's Axe: a long wooden haft, the broad two-lobed iron head set on its side near the end, the haft showing past it. */
+/**
+ * The Barbarian's Axe: a long haft of dark wood, one plain rod, and the broad two-lobed head of black iron set on its side near the end, the haft
+ * showing past it. Only its edge, a band round the curve of the bit (its edge side, +y, where the head stands out from the haft), is ground gray: a bevel
+ * from the head's thickness down to a sharp edge.
+ */
 function axe(): Prim[] {
   // The sprite draws the head turned a quarter: its edge runs alongside the haft, its two lobes (a top and a beard) bulge out along it. In its own
   // frame (a along the head's depth, b across): (28.5,-2) (28.5,2) (32,3.4) (36.5,10.5) curve to (41.5,0) curve (36.5,-10.5) (32,-3.4).
-  const local: P2[] = [
+  // The ground edge: the bit's curve from `END` (radians from its middle) round to the other side, `BAND` deep at the middle and coming to nothing at
+  // its two ends; the black head meets it along its inner line.
+  const END = (80 * Math.PI) / 180, BAND = 1.6, N = 24;
+  const bit = (t: number): P2 => [36.5 + 5 * Math.cos(t), 10.5 * Math.sin(t)];
+  const deep = (t: number) => BAND * (Math.cos(t) - Math.cos(END)) / (1 - Math.cos(END));
+  const ts = Array.from({ length: N + 1 }, (_, i) => END - (2 * END * i) / N); // (from the top round to the beard)
+  const outer = ts.map(bit), inner = ts.map(t => [bit(t)[0] - deep(t), bit(t)[1]] as P2);
+  const black: P2[] = [
     [28.5, -2], [28.5, 2], [32, 3.4], [36.5, 10.5],
-    ...arcPoints(36.5, 0, 5, 10.5, Math.PI / 2, 0, 12).slice(1),
-    ...arcPoints(36.5, 0, 5, 10.5, 0, -Math.PI / 2, 12).slice(1), [32, -3.4],
+    ...arcPoints(36.5, 0, 5, 10.5, Math.PI / 2, END, 4).slice(1, -1), ...inner,
+    ...arcPoints(36.5, 0, 5, 10.5, -END, -Math.PI / 2, 4).slice(1), [32, -3.4],
   ];
   // (then turned a quarter and set against the haft: world x = 35 - b, y = 1.2 + (a - 28.5))
-  const head: P2[] = local.map(([a, b]) => [35 - b, 1.2 + (a - 28.5)] as P2);
+  const place = (ps: P2[]) => ps.map(([a, b]) => [35 - b, 1.2 + (a - 28.5)] as P2);
+  // (the two meet along the inner line: neither has a side face there)
+  const firstInner = 4 + 3; // the black outline's index where the inner line starts (4 corners, 3 more points of the arc)
+  // The ground edge is a bevel: from the black head's full thickness along the inner line, down to nothing at the outer edge, on both faces, so the
+  // bit ends sharp.
+  const T = 0.8, inW = place(inner), outW = place(outer);
+  // (each side one smooth face: along the inner line at the head's thickness, back along the edge at none)
+  const bevel: Prim[] = [1, -1].map(sgn => facet([...inW.map(([x, y]) => [x, y, sgn * T] as V3), ...[...outW].reverse().map(([x, y]) => [x, y, 0] as V3)], IRON, [0, 0, sgn]));
   return [
-    ...rod([[-6, 0, 0], [18, 0, 0], [43, 0, 0]], 1.5, 1.5, WOOD),
-    ...plate(head, -0.8, 0.8, IRON, IRON_DARK),
-    hoop(31.3, 1.8, CORD), hoop(32.6, 1.8, CORD), hoop(38, 1.8, CORD), hoop(39.3, 1.8, CORD),
+    { k: "line", a: [-6, 0, 0], b: [43, 0, 0], r: 1.5, color: DARK_WOOD },
+    ...plate(place(black), -T, T, BLACK_IRON, BLACK_IRON_DARK, [], i => i >= firstInner && i < firstInner + N),
+    ...bevel,
   ];
 }
 
-/** The Nomadic Sickle: a short handle with a round end, and an iron blade in the shape of a crescent moon whose two tips lie on the handle's line. */
+/**
+ * The Nomadic Sickle: a short handle with a round end, a small round iron collar no wider than the handle, and an iron blade curved like a crescent moon:
+ * thickest where it leaves the collar, it arches up and forward and thins steadily to a single point on the handle's line; in section a wedge, its inner
+ * edge sharp. The handle goes into the round end and the collar only as far as
+ * it must (as the chisel's grip does its pommel and guard): none of its ends shows.
+ */
 function sickle(): Prim[] {
-  const outer = arcPoints(12.9, 0, 6.9, 9.5, Math.PI, 0, 18), inner = arcPoints(12.9, 0, 6.9, 7.6, 0, Math.PI, 18);
+  const R = 1.7, r = 1.3; // the round end, the handle
+  const collar = { x: 6, rx: 1.2, ry: r, rz: r }; // (round, no wider than the handle)
+  const gripBack = -4.8 + Math.sqrt(R * R - r * r);
+  const gripFront = collar.x - collar.rx * Math.sqrt(1 - Math.max((r / collar.ry) ** 2, (r / collar.rz) ** 2));
+  // The blade's middle line: an arch from the collar (going straight up from it) over to its point near the far end of the moon's curve; it is `W`
+  // across at the collar, narrowing all the way to nothing at the point.
+  const W = 2.6, N = 32, A0 = Math.PI, A1 = 0.06;
+  const mid = (t: number): P2 => [12.9 + 6.9 * Math.cos(t), 8.6 * Math.sin(t)];
+  const out = (t: number): P2 => { const n: P2 = [Math.cos(t) / 6.9, Math.sin(t) / 8.6], l = Math.hypot(...n); return [n[0] / l, n[1] / l]; };
+  const ts = Array.from({ length: N + 1 }, (_, i) => A0 + ((A1 - A0) * i) / N);
+  const side = (k: 1 | -1) => ts.map((t, i) => {
+    const w = (W / 2) * (1 - i / N) ** 0.85, m = mid(t), n = out(t);
+    return [m[0] + k * n[0] * w, m[1] + k * n[1] * w] as P2;
+  });
+  const back = side(1), edge = side(-1); // the outer, back of the blade; the inner, its edge
+  // In section a wedge: its back `T` thick (thinning toward the point with the blade), its faces sloping down to the edge, sharp.
+  const T = 0.6, thick = (i: number) => T * Math.sqrt(1 - i / N);
+  const at = (q: P2, z: number): V3 => [q[0], q[1], z];
+  // Each face one smooth shape (along the back at its thickness, back along the edge at none), and the back one narrow band round the outside of the
+  // curve, drawn under the faces.
+  const blade: Prim[] = [
+    facet([...back.map((q, i) => at(q, thick(i))), ...back.map((q, i) => at(q, -thick(i))).reverse()], IRON_DARK),
+    ...[1, -1].map(sgn => facet([...back.map((q, i) => at(q, sgn * thick(i))), ...[...edge].reverse().map(q => at(q, 0))], IRON, [0, 0, sgn])),
+  ];
+  // (where it leaves the collar: the root's end, a flat triangle, inside the collar)
+  blade.push(facet([at(back[0], T), at(back[0], -T), at(edge[0], 0)], IRON_DARK, [0, -1, 0]));
   return [
-    { k: "ball", c: [-4.8, 0, 0], rx: 1.7, ry: 1.7, rz: 1.7, color: WOOD },
-    ...rod([[-4, 0, 0], [6, 0, 0]], 1.3, 1.3, WOOD),
-    ...plate([...outer, ...inner], -0.6, 0.6, IRON, IRON_DARK),
+    { k: "ball", c: [-4.8, 0, 0], rx: R, ry: R, rz: R, color: WOOD },
+    { k: "cyl", a: [gripBack, 0, 0], b: [gripFront, 0, 0], r, color: WOOD },
+    ...blade,
+    { k: "ball", c: [collar.x, 0, 0], rx: collar.rx, ry: collar.ry, rz: collar.rz, color: IRON },
   ];
 }
 
-/** Every weapon, with the two most worked on first. */
+/**
+ * Every weapon, with the two most worked on first. Their edge sides (`edge`): the chisel's +y edge (of its two), the hammer's +y end of the brick,
+ * the shortsword's +y edge, the axe's bit (its head stands out along +y), the sickle's inner, hollow edge (toward -y, the handle's line), the torch's side with the carved mark (+y).
+ */
 export const GEAR_WEAPONS: GearModel[] = [
-  { id: "chisel", name: "Jagged Chisel", tier: "light", reach: 15, damage: 11.4, note: "Light. Bronze: a ridged grip, an oval guard, a broad blade ground square, nicked and chipped, waxed from the carving.", prims: chisel() },
-  { id: "hammer", name: "Brick Hammer", tier: "heavy", reach: 41, damage: 11.5, note: "Heavy. A straight haft and a plain brick, scratched here and there.", prims: hammer() },
-  { id: "torch", name: "Waxed Torch", tier: "normal", reach: 35, damage: 12.4, note: "Normal. A torch sealed in a bulb of wax, stamped with the sealing king's mark.", prims: torch() },
-  { id: "shortsword", name: "Bronze Shortsword", tier: "normal", item: "shortsword", reach: 34, damage: 29.6, note: "The Soldier's. A leaf blade, a bar for a guard, a wrapped grip and a round pommel.", prims: shortsword() },
-  { id: "axe", name: "Barbarian's Axe", tier: "heavy", item: "axe", reach: 43, damage: 13, note: "The Barbarian's. A long haft, a broad two-lobed iron head set on its side.", prims: axe() },
-  { id: "sickle", name: "Nomadic Sickle", tier: "light", item: "sickle", reach: 20, damage: 12, note: "The Nomad's. A short handle and a crescent blade.", prims: sickle() },
+  { id: "chisel", name: "Jagged Chisel", tier: "light", reach: 15, damage: 11.4, edge: [0, 1, 0], note: "Light. Bronze: a ridged grip, an oval guard, a broad blade ground square, nicked and chipped, waxed from the carving.", prims: chisel() },
+  { id: "hammer", name: "Brick Hammer", tier: "heavy", reach: 41, damage: 11.5, edge: [0, 1, 0], note: "Heavy. A straight haft and a head of bricks, laid in a running bond.", prims: hammer() },
+  { id: "torch", name: "Waxed Torch", tier: "normal", reach: 35, damage: 12.4, edge: [0, 1, 0], note: "Normal. A torch sealed in a bulb of wax, the sealing king's mark carved into it, the wax run down its handle.", prims: torch() },
+  { id: "shortsword", name: "Bronze Shortsword", tier: "normal", item: "shortsword", reach: 34, damage: 29.6, edge: [0, 1, 0], note: "The Soldier's. The chisel made whole: a ball pommel, a plain grip, an oval guard and a long ridged blade coming to a point.", prims: shortsword() },
+  { id: "axe", name: "Barbarian's Axe", tier: "heavy", item: "axe", reach: 43, damage: 13, edge: [0, 1, 0], note: "The Barbarian's. A long dark haft, a broad two-lobed head of black iron set on its side, its edge ground gray.", prims: axe() },
+  { id: "sickle", name: "Nomadic Sickle", tier: "light", item: "sickle", reach: 20, damage: 12, edge: [0, -1, 0], note: "The Nomad's. A short handle, an iron collar and a crescent blade, thickest at the collar and thinning to its point.", prims: sickle() },
 ];
 
 export type GearId = (typeof GEAR_WEAPONS)[number]["id"];
@@ -418,11 +530,12 @@ export function drawGear(prims: readonly Prim[], cam: GearView): Drawn[] {
         const axis = unit3(sub3(vb, va)), [u, w] = planeOf(sub3(p.b, p.a));
         const endOf = (c: V3, v: V3, facing: boolean): End => {
           const sil = silhouette([dirOf(c, [u[0] * p.r, u[1] * p.r, u[2] * p.r]), dirOf(c, [w[0] * p.r, w[1] * p.r, w[2] * p.r])]), k = cam.scale(v), [cx, cy] = cam.project(v);
-          return { cx, cy, rx: sil.rx * k, ry: sil.ry * k, angle: sil.angle, fill: tone(p.color, facing ? 1.12 : 0.92), facing };
+          // (an edgeless one is all one tone, so it melts into what it meets: only the end we see is lighter)
+          return { cx, cy, rx: sil.rx * k, ry: sil.ry * k, angle: sil.angle, fill: tone(p.color, facing ? 1.12 : p.edgeless ? 1 : 0.92), facing };
         };
         const bFacing = axis[2] < 0; // (b's end faces the viewer if the axis points toward it)
         out.push({
-          k: "cyl", body, sides: [side1, side2], fill: tone(p.color, 0.92), stroke: tone(p.color, 0.55), depth: m[2],
+          k: "cyl", body, sides: [side1, side2], fill: tone(p.color, p.edgeless ? 1 : 0.92), stroke: tone(p.color, p.edgeless ? 1 : 0.55), depth: m[2],
           far: endOf(bFacing ? p.a : p.b, bFacing ? va : vb, false),
           near: endOf(bFacing ? p.b : p.a, bFacing ? vb : va, true),
         });
@@ -430,13 +543,13 @@ export function drawGear(prims: readonly Prim[], cam: GearView): Drawn[] {
       }
       case "ball": {
         const v = cam.view(p.c), [cx, cy] = cam.project(v), s = silhouette([dirOf(p.c, [p.rx, 0, 0]), dirOf(p.c, [0, p.ry, 0]), dirOf(p.c, [0, 0, p.rz])]), k = cam.scale(v);
-        out.push({ k: "ellipse", cx, cy, rx: s.rx * k, ry: s.ry * k, angle: s.angle, fill: tone(p.color, 1), stroke: tone(p.color, 0.55), depth: v[2] });
+        out.push({ k: "ellipse", cx, cy, rx: s.rx * k, ry: s.ry * k, angle: s.angle, fill: tone(p.color, 1), stroke: tone(p.color, p.edgeless ? 1 : 0.55), depth: v[2] });
         break;
       }
       case "disc": {
         const v = cam.view(p.c), [cx, cy] = cam.project(v), [u, w] = planeOf(p.n), s = silhouette([dirOf(p.c, [u[0] * p.r, u[1] * p.r, u[2] * p.r]), dirOf(p.c, [w[0] * p.r, w[1] * p.r, w[2] * p.r])]), k = cam.scale(v);
         // (A wrap round a rod is drawn over the rod's stretches, whose middles may be nearer or farther than it.)
-        out.push({ k: "ellipse", cx, cy, rx: s.rx * k, ry: s.ry * k, angle: s.angle, fill: p.ring ? "none" : tone(p.color, 1), stroke: p.ring ? tone(p.color, 1) : tone(p.color, 0.55), ring: p.ring ? p.ring * k : undefined, depth: v[2] - (p.ring ? p.r + 4 : 0) });
+        out.push({ k: "ellipse", cx, cy, rx: s.rx * k, ry: s.ry * k, angle: s.angle, fill: p.ring ? "none" : tone(p.color, 1), stroke: p.ring || p.edgeless ? tone(p.color, 1) : tone(p.color, 0.55), ring: p.ring ? p.ring * k : undefined, depth: v[2] - (p.ring ? p.r + 4 : 0) });
         break;
       }
       case "stroke": {

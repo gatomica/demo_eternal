@@ -19,7 +19,7 @@ import { behind, bodiesOfEnemies, type Cam, closeIn, facingToward, figureBox, fo
 import type { Projectile } from "../render/effects";
 import { type BarValues, HealthBar, PlayerBars } from "../render/HealthBar";
 import { lookOf } from "../render/looks";
-import { actionPose, asPose, downPoseOf, flinchPoseOf, handOffOf, idlePoseOf, impactPoint, poseForIntent, type PoseName, strikePose, windUpPose } from "../render/poses";
+import { actionPose, asPose, downPoseOf, flinchPoseOf, handOffOf, idlePoseOf, impactPoint, player3dPose, poseForIntent, type PoseName, strikePose, windUpPose } from "../render/poses";
 import { Scene, type SceneFigure } from "../render/Scene";
 import { StringFx, type StringBurst } from "../render/StringFx";
 import type { StringPop } from "../render/StringCounter";
@@ -36,6 +36,9 @@ const BOSS_STRINGS = 12;
 
 /** How an enemy's look draws it differently (its kind's variant). */
 const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
+
+/** The player is drawn in 3D in a fight, on the Sleepwalker's body (`player3dPose`, Sleepwalker3D's `gear`). */
+const PLAYER_3D = true;
 
 export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, restOnPlay, shade = true, playerAction, playerHold, playerAngle, playerDead, light = true, debugLimbs = false, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, figureAngle, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
   initial: CombatState;
@@ -1000,6 +1003,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     right: { windUp: "low-right", strike: "low-left" },
     left: { windUp: "low-left", strike: "low-right" },
   };
+  // In 3D (the player always is, in a fight) a sideways swing has its own wind-up and landing, from the one stance into the other.
+  if (PLAYER_3D) {
+    swingPoses.right = { windUp: "swing-right-up", strike: "swing-right" };
+    swingPoses.left = { windUp: "swing-left-up", strike: "swing-left" };
+  }
   const forcedTurn = playback?.playerPose === "kneel";
   const playerPose: PoseName = !playback && walkOff?.player ? walkOff.player : playback
     ? playbackPose("player", p.staggered, {
@@ -1324,7 +1332,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // Staggered while Waxed (or with your flame taken), you are sealed whole in wax, and stay that way until you recover:
       // your own stagger pose (down on one knee), the wax over all of it. No flame burns on your head, except while the Warden
       // is about to take it (his Usurp Flame scene lights it itself).
-      pose: track("player", playerPose),
+      pose: track("player", PLAYER_3D ? player3dPose(playerPose) : playerPose),
+      player3d: PLAYER_3D,
       dead: youDead ? "pieces" : undefined,
       encased: playerSealed,
       // Waxed (or waxed by a torch, which is only a look) but still standing: wax caked on you.
@@ -1364,6 +1373,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         armor: e.armor,
         variant: kindOf(e).variant,
         hooded: !!kindOf(e).hood,
+        sleepwalker3d: kindOf(e).figure3d === "sleepwalker",
         // Waxed by a torch (a look only), still standing: wax caked on it.
         waxCaked: !!e.coated && !e.staggered && !kindOf(e).variant,
         // The outer parts of a Wax Blob stand a little smaller than the middle one.

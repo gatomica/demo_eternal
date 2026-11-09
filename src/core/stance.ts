@@ -3,7 +3,7 @@
  * look and move (no number of the rules depends on it), but it is part of the fight's state, so it lasts from turn to turn.
  *
  *  - Idle: where you start, and where a Rest, a stagger and its recovery leave you.
- *  - Lowered (`low`): knees bent, neither leg leading: after a Block, or after an overhead swing.
+ *  - Lowered (`low`): knees bent, neither leg leading, centred: after a Block, after an overhead swing, or after flinching (a Rest broken by a blow).
  *  - Left leg leading (`lead-left`): after a swing to the right, or after dodging forward (a Maneuver on an enemy).
  *  - Right leg leading (`lead-right`): after a swing to the left, or after dodging back (falling back).
  *

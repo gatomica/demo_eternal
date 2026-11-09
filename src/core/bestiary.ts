@@ -71,6 +71,8 @@ export interface EnemyKind {
   hood?: boolean;
   /** Drawn with a special look (see render/looks.ts). */
   variant?: Variant;
+  /** Drawn from a 3D rig in a fight, with this figure (the sleepwalkers: `render/Sleepwalker3D.tsx`; the waxed are by their `variant`). */
+  figure3d?: "sleepwalker";
   /** Drawn this much bigger than a normal figure. */
   scale?: number;
   pattern: Pattern;

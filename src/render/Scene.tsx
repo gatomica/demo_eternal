@@ -18,6 +18,7 @@ import { facingYaw, liftPose, type P3, placeRig, ribcageOf } from "./rig3d";
 import { LittleFlame } from "./LittleFlame";
 import { FlameAnchor, HeadFlame } from "./HeadFlame";
 import { HEAD_TOP, Waxed3D } from "./Waxed3D";
+import { Sleepwalker3D } from "./Sleepwalker3D";
 import { BlobPool, type BlobBox } from "./WaxBlob";
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "../warden/arena";
 import { IGNITE } from "../warden/scenes";
@@ -68,6 +69,10 @@ export interface SceneFigure {
   eternalFlash?: string;
   /** A patrol warden's pointed hood. */
   hooded?: boolean;
+  /** Drawn from the 3D rig as a sleepwalker (Sleepwalker3D). */
+  sleepwalker3d?: boolean;
+  /** The player drawn in 3D, on the Sleepwalker's body (Sleepwalker3D's `gear`): its pose already one of the 3D ones (`player3dPose`). */
+  player3d?: boolean;
   /** Sealed whole in wax (its flame taken by Usurp Flame). */
   encased?: boolean;
   /** It has fallen: its body in "pieces" on the floor (drawn instead of the figure), or sealed in "wax". */
@@ -262,7 +267,15 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     return ambient * (1 - darkAt(Math.hypot(p.x - me.x, p.z - me.z)));
   };
   /** The way a figure faces on the floor: along its dodge, else toward the player. */
-  const figureYaw = (f: SceneFigure, at: Vec) => (dodgeFacing(f) ? yawOf(dodgeFacing(f)!) : facingYaw(c, at, posNow("player"), f.view, !!f.straight));
+  const figureYaw = (f: SceneFigure, at: Vec) => {
+    if (dodgeFacing(f)) return yawOf(dodgeFacing(f)!);
+    // The player in 3D faces the enemies (the middle of those still up), unless the viewer shows it straight on.
+    if (f.player3d && !f.straight) {
+      const foes = figures.filter(g => g.id !== "player" && !g.dead).map(g => posNow(g.id)).filter((p): p is Vec => !!p);
+      if (foes.length) return facingYaw(c, at, { x: foes.reduce((n, p) => n + p.x, 0) / foes.length, z: foes.reduce((n, p) => n + p.z, 0) / foes.length }, "front", false);
+    }
+    return facingYaw(c, at, posNow("player"), f.view, !!f.straight);
+  };
   /** The floor point under a screen x on a figure standing at `at` (its feet's depth). */
   const floorAt = (at: Vec, sx: number): Vec => {
     const { sx: fx, ppm } = proj(at);
@@ -387,13 +400,13 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
 
   // The selected figure's box as the camera has it this frame (the camera may still be moving), for the ring over it.
   const selectedItem = placed.find(({ f }) => f.selected), selectedBox = selectedItem?.box;
-  // The small mark sits on the figure's ribcage: from the 3D rig where there is one (a waxed), else halfway between the neck and the hips of its pose.
+  // The small mark sits on the figure's ribcage: from the 3D rig where there is one (a waxed, a sleepwalker), else halfway between the neck and the hips of its pose.
   const markY = (() => {
     if (!selectedItem) return 0;
     const { f, box, at } = selectedItem, pose = ALL_POSES[f.pose];
     if (!pose) return box.y + box.h * 0.5;
-    if (f.variant === "waxed" && !f.dead && w > 0) {
-      const rig = liftPose(pose, f.hand);
+    if ((f.variant === "waxed" || f.sleepwalker3d || f.player3d) && !f.dead && w > 0) {
+      const rig = liftPose(pose, f.hand, { freeLegs: !!(f.sleepwalker3d || f.player3d) });
       return placeRig(rig, at, figureYaw(f, at), c, w, h, f.scale).see(ribcageOf(rig).centre as P3).sy;
     }
     return box.y + (box.h * (((pose.for3d?.neck ?? pose.neck)[1] + (pose.for3d?.hip ?? pose.hip)[1]) / 2)) / 120;
@@ -449,7 +462,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         >
           {f.holdsString && !f.dead && <StringAura layer="back" spread={f.body ? 2.4 : 1} />}
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
+            {f.dead === "pieces" && !((f.sleepwalker3d || f.player3d) && w > 0) ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : (f.sleepwalker3d || f.player3d) && w > 0 ? <Sleepwalker3D pose={f.pose} hand={f.hand} weapon={f.weapon} gear={f.player3d ? { weaponItem: f.weaponItem, armor: f.armor, armorItem: f.armorItem, headItem: f.headItem } : undefined} hooded={f.hooded} encased={f.encased} waxCaked={f.waxCaked && !f.dead} dead={!!f.dead} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {headFlames.has(f.id) && <FlameAnchor id={f.id} x={headFlames.get(f.id)![0] - box.x} y={headFlames.get(f.id)![1] - box.y} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}

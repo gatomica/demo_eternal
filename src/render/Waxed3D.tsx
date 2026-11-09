@@ -8,15 +8,15 @@
  * It draws into the same 100 × 120 box a flat figure does (the scene's `figureBox`), so the scene's click target,
  * haze and animations work as they always did; limbs may reach outside it.
  */
-import { type ReactNode, useContext, useMemo } from "react";
+import { useContext, useMemo } from "react";
 import type { Side, WeaponTier } from "../core/types";
-import { type Cam, facingVec, HORIZON, METERS_PER_UNIT as U, right as rightOf, type Vec } from "./camera";
+import { type Cam, METERS_PER_UNIT as U, type Vec } from "./camera";
 import { DebugLimbsContext } from "./debugLimbs";
-import { type Hold, type Joint, liftPose, type P3, placeRig, ribcageOf, type Seen, swingArc, weaponFrame, weaponHold } from "./rig3d";
+import { arcPart, canvas3d, Figure3DSvg, ribcagePart, weaponParts } from "./figure3d";
+import { type Hold, type Joint, liftPose, type P3, placeRig, type Seen, swingArc, weaponHold } from "./rig3d";
 import { ALL_POSES, type PoseName } from "./poses";
-import { drawGear, modelOfWeapon, type V3 } from "./gear3d";
-import { GearShape } from "./GearShape";
-import { HeldWeapon, Prop, WEAPON_REACH } from "./StickFigure";
+import { modelOfWeapon } from "./gear3d";
+import { Prop, WEAPON_REACH } from "./StickFigure";
 
 /** The Waxed's bodily thickness, in figure units (a pose's drawing is 100 × 120 units), before perspective. */
 const LIMB = 5, BIND = 10, SHELL = 13;
@@ -109,26 +109,11 @@ export function Waxed3D({ pose, hand = "right", weapon, encased, meldLegs, hideF
       ? swingArc(before.joints.handR, rig.joints.handR)
       : swingArc(weaponHold(before, reach, holdOf(windUp), plane).tip, weaponHold(rig, reach, holdOf(pose), plane).tip, model && model.damage * U);
   }, [windUp, pose, hand, rig, weapon, reach, model, plane]);
-  const { seen, see, prop, origin } = placeRig(rig, at, yaw, cam, w, h, scale);
-
-  // Screen pixels to the box's own units (its drawing is 100 × 120), and a size to what it is at the figure's feet.
-  const ux = box.w / 100, uy = box.h / 120;
-  const X = (p: Seen) => (p.sx - box.x) / ux, Y = (p: Seen) => (p.sy - box.y) / uy;
-  const scaleAt = (...ps: Seen[]) => ps.reduce((n, p) => n + p.ppm, 0) / ps.length / origin.ppm;
-  const depthOf = (...ps: Seen[]) => ps.reduce((n, p) => n + p.depth, 0) / ps.length;
-  // Anything farther than the middle of the body is in its shade.
-  const mid = seen.pelvis.depth;
-
-  const parts: { key: string; depth: number; node: ReactNode }[] = [];
+  // (A part of the Wax Blob: its legs melt into the pool, never in the far tone.)
+  const c = canvas3d(placeRig(rig, at, yaw, cam, w, h, scale), box, { unshaded: key => !!meldLegs && key.startsWith("shell-leg") });
+  const { seen, see, prop, X, Y, scaleAt, depthOf, parts, behind } = c;
   /** A run of bones through these joints, `width` units thick at the figure's own distance. */
-  const bones = (key: string, js: (Joint | Seen)[], cls: string, width = LIMB, extra = 0) => {
-    const ps = js.map(j => (typeof j === "string" ? seen[j] : j));
-    const depth = depthOf(...ps);
-    parts.push({
-      key, depth: depth - extra,
-      node: <polyline key={key} points={ps.map(p => `${X(p)},${Y(p)}`).join(" ")} className={`${cls}${depth > mid + 0.02 && (cls === "fig-limb" || cls === "fig-wax-shell") && !(meldLegs && key.startsWith("shell-leg")) ? " fig-far" : ""}`} style={{ strokeWidth: width * scaleAt(...ps) }} />,
-    });
-  };
+  const bones = (key: string, js: (Joint | Seen)[], cls: string, width = LIMB, extra = 0) => c.bones(key, js, cls, width, extra);
   const red = (side: "R" | "L") => (debug && side === "R" ? " dbg-red" : "");
 
   // The spine is three parts, each drawn on its own: the lower spine here, the ribcage (an ellipsoid standing on the waist-to-neck
@@ -169,48 +154,8 @@ export function Waxed3D({ pose, hand = "right", weapon, encased, meldLegs, hideF
     bones("shell-neck", [chestTop, "neck"], "fig-wax-shell", SHELL - 3);
   }
 
-  // The ribcage, as the sleepwalkers have: a skinny ellipsoid (an oblate spheroid) standing along the spine, with two columns
-  // of rib moons lying on its front. It is a real solid in space, so it turns and narrows with the body, it follows a bent
-  // spine, and the ribs on the half that faces away disappear.
-  if (!encased) {
-    const rc = ribcageOf(rig);
-    /** A point on its surface: `th` round it (0 = straight ahead of the body), `up` as a share of its half height (-1 to 1). */
-    const at3 = (th: number, up: number, deep = 1): Seen => {
-      const ring = Math.sqrt(Math.max(0, 1 - up * up));
-      const a = rc.halfWidth * ring * Math.sin(th), b = rc.halfDepth * ring * Math.cos(th) * deep, c = rc.halfHeight * up;
-      const p: P3 = [0, 1, 2].map(i => rc.centre[i] + rc.side[i] * a + rc.fwd[i] * b + rc.up[i] * c) as unknown as P3;
-      return see(p);
-    };
-    const centre = see(rc.centre as P3);
-    // An ellipsoid seen from anywhere has an ellipse for its outline: worked out from where its three axes land on the screen.
-    const axisOnScreen = (v: readonly number[], len: number): [number, number] => {
-      const e = see([0, 1, 2].map(i => rc.centre[i] + v[i] * len) as unknown as P3);
-      return [X(e) - X(centre), Y(e) - Y(centre)];
-    };
-    const axes = [axisOnScreen(rc.side, rc.halfWidth), axisOnScreen(rc.fwd, rc.halfDepth), axisOnScreen(rc.up, rc.halfHeight)];
-    const sxx = axes.reduce((n, v) => n + v[0] * v[0], 0), syy = axes.reduce((n, v) => n + v[1] * v[1], 0), sxy = axes.reduce((n, v) => n + v[0] * v[1], 0);
-    const mean = (sxx + syy) / 2, spread = Math.sqrt(((sxx - syy) / 2) ** 2 + sxy * sxy);
-    const outline = { rx: Math.sqrt(mean + spread), ry: Math.sqrt(Math.max(0, mean - spread)), angle: (Math.atan2(2 * sxy, sxx - syy) * 90) / Math.PI };
-    const crescents: ReactNode[] = [];
-    const COLUMNS: [number, number][] = [[0.1, 1.08], [-1.08, -0.1]]; // the radians of each half, either side of the breastbone
-    for (const [lo, hi] of COLUMNS) {
-      for (const row of [0.55, 0.05, -0.45]) {
-        const steps = Array.from({ length: 13 }, (_, i) => lo + ((hi - lo) * i) / 12);
-        // Only the part of the rib on the near side of the ribcage shows.
-        const shown = steps.map((t, i) => ({ t, i, front: at3(t, row).depth <= centre.depth + 1e-4 })).filter(s => s.front);
-        if (shown.length < 2) continue;
-        const top = shown.map(s => at3(s.t, row));
-        // A flat bowl: the lower edge sags in the middle and meets the upper at the ends.
-        const low = shown.map(s => at3(s.t, row - (1.6 * U * Math.sin((Math.PI * s.i) / 12)) / rc.halfHeight, 0.92));
-        const pts = [...top, ...low.reverse()].map(p => `${X(p)},${Y(p)}`).join(" ");
-        crescents.push(<polygon key={`${row}:${lo}`} points={pts} className="fig-rib" />);
-      }
-    }
-    parts.push({
-      key: "ribcage", depth: centre.depth - 0.004,
-      node: <g key="ribcage"><ellipse cx={X(centre)} cy={Y(centre)} rx={outline.rx} ry={outline.ry} transform={`rotate(${outline.angle} ${X(centre)} ${Y(centre)})`} className="fig-ribcage" />{crescents}</g>,
-    });
-  }
+  // The ribcage, as the sleepwalkers have (figure3d.tsx).
+  if (!encased) parts.push(ribcagePart(c, rig));
 
   // The head: a lump of wax, a sphere in space.
   const head = seen.head, kh = scaleAt(head);
@@ -225,14 +170,7 @@ export function Waxed3D({ pose, hand = "right", weapon, encased, meldLegs, hideF
   });
 
   // The arch the strike's swing leaves (it fades as the strike ends: `fig-trail`).
-  if (arc) {
-    const STEPS = 20, ts = Array.from({ length: STEPS + 1 }, (_, i) => i / STEPS);
-    const edge = [...ts.map(t => see(arc.outer(t))), ...ts.map(t => see(arc.inner(t))).reverse()];
-    parts.push({
-      key: "swing", depth: Math.min(...edge.map(p => p.depth)) - 0.05,
-      node: <polygon key="swing" points={edge.map(p => `${X(p)},${Y(p)}`).join(" ")} className="fig-trail" />,
-    });
-  }
+  if (arc) parts.push(arcPart(c, arc));
 
   // Debug: a dot on the front of the face, level, straight ahead of the head, to tell where it looks. Hidden when it is on the far side.
   if (debug) {
@@ -262,50 +200,20 @@ export function Waxed3D({ pose, hand = "right", weapon, encased, meldLegs, hideF
   // along that line: as long as it looks from where we are (foreshortened pointing toward us), as thick as the figure's own size there.
   if (weapon !== "baseline") {
     const held = weaponHold(rig, reach - slide, holdOf(pose), plane);
-    if (model) {
-      // The model is drawn in its own space (x along the weapon from the grip, y across its broad face, z its thickness) turned to the hand: along the
-      // forearm, its broad face as upright as that lets it be. Body space is a mirror of the weapon's, so its third axis is the cross product turned round.
-      // The blade (or brick) lies in the plane of the swing it is about to make or has made (so its edge leads through the arch); on the ground it lies flat.
-      const ax = held.axis;
-      let face: P3 | undefined = holdOf(pose) === "ground" ? [0, 1, 0] : undefined;
-      const swing = HELD.has(weapon) ? SWING_OF[pose] : undefined;
-      if (swing) {
-        const tipOf = (name: PoseName) => weaponHold(liftPose(ALL_POSES[name], hand), reach, holdOf(name), plane).tip;
-        face = swingArc(tipOf(swing[0]), tipOf(swing[1])).normal;
-      }
-      const { ay, az } = weaponFrame(ax, face);
-      const bodyF = facingVec(yaw), bodyR = rightOf(yaw), camR = rightOf(cam.yaw), camF = facingVec(cam.yaw);
-      // View space (as in the Gear viewer): x to the camera's right, y down, z away, in figure units, the figure's feet the origin; the lens does the rest.
-      const view = (q: V3): V3 => {
-        const m = [0, 1, 2].map(i => held.hand[i] + (ax[i] * (q[0] - slide) + ay[i] * q[1] + az[i] * q[2]) * U);
-        const fx = bodyR.x * m[0] + bodyF.x * m[2], fz = bodyR.z * m[0] + bodyF.z * m[2];
-        return [(fx * camR.x + fz * camR.z) / U, -m[1] / U, (fx * camF.x + fz * camF.z) / U];
-      };
-      const F = origin.ppm * origin.depth, u0 = (origin.sx - w / 2) / origin.ppm;
-      const lens = (v: V3) => {
-        const d = Math.max(origin.depth + v[2] * U * scale, 0.05);
-        return { d, sx: w / 2 + (F * (u0 + v[0] * U * scale)) / d, sy: HORIZON * h + ((origin.sy - HORIZON * h) * origin.depth + F * v[1] * U * scale) / d };
-      };
-      const project = (v: V3): readonly [number, number] => { const l = lens(v); return [+((l.sx - box.x) / ux).toFixed(2), +((l.sy - box.y) / uy).toFixed(2)]; };
-      const drawn = drawGear(model.prims, { view, project, scale: v => (origin.depth / lens(v).d) * scale });
-      const shapes = drawn.map((d, i) => <GearShape key={i} d={d} />);
-      const nearest = origin.depth + (drawn.length ? Math.min(...drawn.map(d => d.depth)) : 0) * U * scale;
-      drawn.forEach((d, i) => parts.push({ key: `weapon-${i}`, depth: origin.depth + d.depth * U * scale - 0.005, node: shapes[i] }));
-      if (eternalFlash) {
-        parts.push({ key: "weapon-flash", depth: nearest - 0.02, node: <g key={eternalFlash} className={`fig-eternal-flash ${eternalFlash.startsWith("death|") ? "is-death" : ""}`} aria-hidden="true">{shapes}</g> });
-      }
-    } else {
-      const grip = see(held.hand), tip = see(held.tip);
-      const dx = X(tip) - X(grip), dy = Y(tip) - Y(grip);
-      parts.push({
-        key: "weapon", depth: grip.depth - 0.02,
-        node: (
-          <g key="weapon" transform={`translate(${X(grip)} ${Y(grip)}) rotate(${(Math.atan2(dy, dx) * 180) / Math.PI}) scale(${Math.hypot(dx, dy) / reach} ${scaleAt(grip)})`}>
-            <HeldWeapon tier={weapon} flash={eternalFlash} />
-          </g>
-        ),
-      });
+    // The blade (or brick) lies in the plane of the swing it is about to make or has made (so its edge leads through the arch); on the ground it lies flat.
+    // Its edge side (the chisel's edge, the brick's striking end) leads: facing where the swing goes, from the wind-up, and where it went, at the strike.
+    let face: P3 | undefined = holdOf(pose) === "ground" ? [0, 1, 0] : undefined;
+    const pair = HELD.has(weapon) ? SWING_OF[pose] : undefined;
+    let swing: { arc: ReturnType<typeof swingArc>; at: 0 | 1 } | undefined;
+    if (pair) {
+      const tipOf = (name: PoseName) => weaponHold(liftPose(ALL_POSES[name], hand), reach, holdOf(name), plane).tip;
+      const arch = swingArc(tipOf(pair[0]), tipOf(pair[1]));
+      face = arch.normal;
+      swing = { arc: arch, at: pose === pair[1] ? 1 : 0 };
     }
+    // (out of a swing its edge side faces away from the body, never toward it)
+    const wielder = [0, 1, 2].map(i => (rig.joints.neck[i] + rig.joints.pelvis[i]) / 2) as unknown as P3;
+    parts.push(...weaponParts(c, { weapon, model, reach, held, face, swing, wielder, slide, yaw, cam, w, h, scale, box, eternalFlash }));
   }
 
   // Dead: the wax runs. A puddle of it spreads on the floor round the base; a rim of it slumps up over the bottom of the body in front, so he melds a little
@@ -359,20 +267,8 @@ export function Waxed3D({ pose, hand = "right", weapon, encased, meldLegs, hideF
 
   // Joined to the ribcage and the head, never over them: the bar of the shoulders is drawn under the ribcage, and the neck under it
   // and under the head, whichever way the body is seen.
-  const behind = (key: string, ...of: string[]) => {
-    const p = parts.find(x => x.key === key);
-    if (p) p.depth = Math.max(p.depth, ...of.map(k => parts.find(x => x.key === k)?.depth ?? 0)) + 0.001;
-  };
   behind("shoulders", "ribcage");
   behind("neck", "ribcage", "head");
 
-  parts.sort((a, b) => b.depth - a.depth); // far first
-
-  return (
-    <svg viewBox="0 0 100 120" className="figure figure-front" role="img" aria-label={title}>
-      {title && <title>{title}</title>}
-      {parts.map(p => p.node)}
-    </svg>
-  );
+  return <Figure3DSvg parts={parts} title={title} />;
 }
-
