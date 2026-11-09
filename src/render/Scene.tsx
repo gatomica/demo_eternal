@@ -5,7 +5,7 @@ import { StringAura } from "./StringCounter";
 import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Variant } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
-import { type Cam, darkAt, ease, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, focusOf, NEAR, planningCamera, project, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec, yawOf } from "./camera";
+import { BODY_FORWARD, BODY_RADIUS, BODY_SIDE_SLOT, type Cam, darkAt, floorDisc, SHADE_RADIUS, ease, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, facingVec, focusOf, NEAR, planningCamera, project, projectPoint, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec, yawOf } from "./camera";
 import { ClangBurst, EternityHalo, FlameHit, HaloBurst, ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
 import type { Pt } from "./geom";
 import { Blood, Shards } from "./HealthBar";
@@ -14,11 +14,11 @@ import { ALL_POSES, flameOf, type PoseName } from "./poses";
 import { CloakRemains, GuideRemains, Remains } from "./Remains";
 import { StickFigure } from "./StickFigure";
 import { AMBIENT } from "./shade";
-import { facingYaw, liftPose, placeRig } from "./rig3d";
+import { facingYaw, liftPose, type P3, placeRig, ribcageOf } from "./rig3d";
 import { LittleFlame } from "./LittleFlame";
 import { FlameAnchor, HeadFlame } from "./HeadFlame";
 import { HEAD_TOP, Waxed3D } from "./Waxed3D";
-import { BlobBack, BlobFront, type BlobBox } from "./WaxBlob";
+import { BlobPool, type BlobBox } from "./WaxBlob";
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "../warden/arena";
 import { IGNITE } from "../warden/scenes";
 import type { CandleArm, WardenPoseName } from "../warden/skeleton";
@@ -112,7 +112,7 @@ const rand = (seed: number, i: number) => {
  * Draws the floor and every figure through the camera. When a new shot arrives, everyone (and
  * the camera) moves from wherever they are right now to the new spots, over the shot's duration.
  */
-export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [], arena, arenaLit, ignite, light, shade = true }: {
+export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [], arena, arenaLit, ignite, light, shade = true, onSelectedBox }: {
   figures: SceneFigure[];
   shot: SceneShot;
   projectiles?: Projectile[];
@@ -131,6 +131,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   ignite?: { who: string; start?: number; seed: number };
   /** A fight's limited light: only the floor near the player is lit, the back line just inside its edge. */
   light?: boolean;
+  /** Told, every time it moves on the screen, where the selected figure is right now (its box, and the screen's size): null when none is selected. The target ring follows it, camera move and all. */
+  onSelectedBox?: (box: { x: number; y: number; w: number; h: number; hudW: number; hudH: number; markY: number } | null) => void;
   /** The ambient shade: everything a little darker than it really is (default on; the Model viewer can turn it off to check the real colours). */
   shade?: boolean;
 }) {
@@ -171,12 +173,17 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   const camNow = (k = ease(progress())): Cam => {
     const { from, to, fromYaw, tracking } = cam.current;
     if ("between" in to) {
-      // Centered between the two wherever they are right now: pushed, knocked back or dodging.
+      // Centered between the two wherever they are right now: pushed, knocked back or dodging. (One that is several parts, the Wax Blob, is
+      // framed whole: all its parts count, not only the one in the action.)
+      const whole = (id: string): Vec[] => {
+        const body = figures.find(f => f.id === id)?.body;
+        return (body ? figures.filter(f => f.body === body).map(f => f.id) : [id]).map(i => posNow(i, k)).filter((p): p is Vec => !!p);
+      };
       const a = posNow(to.between[0], k), b = posNow(to.between[1], k);
       if (!a || !b) return from;
       // (Backing off as far as it takes to show the two whole.)
       const scale = (id: string) => figures.find(f => f.id === id)?.scale ?? 1;
-      const centered = trackingCamera(to.yaw, a, b, size.h ? { aspect: size.w / size.h, scales: [scale(to.between[0]), scale(to.between[1])] } : undefined);
+      const centered = trackingCamera(to.yaw, whole(to.between[0]), whole(to.between[1]), size.h ? { aspect: size.w / size.h, scales: [scale(to.between[0]), scale(to.between[1])] } : undefined);
       return tracking ? centered : lerpCam(from, centered, k);
     }
     if (!("follow" in to)) return lerpCam(from, to, k);
@@ -229,12 +236,12 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
 
   const { w, h } = size;
   const c = camNow();
-  const placed = figures
+  let placed = figures
     .map(f => {
       const p = posNow(f.id);
-      return p && w ? { f, box: figureBox(c, p, w, h, f.scale), at: p } : null;
+      return p && w ? { f, box: figureBox(c, p, w, h, f.scale), at: p, raw: p } : null;
     })
-    .filter((x): x is { f: SceneFigure; box: ReturnType<typeof figureBox>; at: Vec } => !!x && x.box.depth > NEAR)
+    .filter((x): x is { f: SceneFigure; box: ReturnType<typeof figureBox>; at: Vec; raw: Vec } => !!x && x.box.depth > NEAR)
     .sort((a, b) => b.box.depth - a.box.depth); // far first, so nearer figures draw on top
   // The arena's sealed sleepwalkers, fixed in the world.
   // (Only in the Warden's arena; never right on top of the camera.)
@@ -273,6 +280,30 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     const { dir, retreat } = f.dodge;
     return retreat ? { x: -dir.x, z: -dir.z } : dir;
   };
+  // The parts of a body (the Wax Blob) stand in the line as three separate enemies would; its pool lies behind the middle one.
+  const poolCentre = (parts: { f: SceneFigure; raw: Vec }[]): Vec => {
+    // The middle waxed is the reference: the pool lies behind it, along the line from it to you, far enough back that its knees (the one
+    // farthest toward you, as the pose holds them) are on the rim. So the pool shifts a little with the middle one's pose; the sides stay
+    // where they are on the line, and the wax links stretch to them. (A middle one with no rig, fallen, has the pool `BODY_FORWARD` behind it.)
+    const mid = parts.find(({ f }) => f.part === "mid") ?? parts[0], m = mid.raw;
+    const you = posNow("player") ?? m, d = Math.hypot(you.x - m.x, you.z - m.z) || 1, u = { x: (you.x - m.x) / d, z: (you.z - m.z) / d };
+    const pose = ALL_POSES[mid.f.pose];
+    let back = BODY_FORWARD;
+    if (mid.f.variant === "waxed" && !mid.f.dead && pose) {
+      const yaw = figureYaw(mid.f, m), fwd = facingVec(yaw), rgt = right(yaw), k = mid.f.scale ?? 1, joints = liftPose(pose, mid.f.hand).joints;
+      const reach = Math.max(...(["kneeR", "kneeL"] as const).map(j => {
+        const [x, , z] = joints[j];
+        return ((rgt.x * x + fwd.x * z) * u.x + (rgt.z * x + fwd.z * z) * u.z) * k;
+      }));
+      back = BODY_RADIUS - reach;
+    }
+    return { x: m.x - u.x * back, z: m.z - u.z * back };
+  };
+  const centres = new Map<string, Vec>();
+  for (const body of new Set(placed.map(({ f }) => f.body).filter((b): b is string => !!b))) {
+    centres.set(body, poolCentre(placed.filter(({ f }) => f.body === body)));
+  }
+
   /**
    * Where a figure's own flame burns, in screen pixels: the flame it holds, or else on top of its head (`onHead`: on its head, whatever it
    * holds). A waxed drawn in 3D: from its rig, where its head (or the flame in its hands) really is.
@@ -312,18 +343,69 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   }
 
   /** Whether this piece of the arena stands between the camera and a fighter it overlaps (it goes see-through, so nobody is hidden). */
-  // The heaps of multi-target enemies: where each body's parts stand on screen.
+  // The pools of multi-target enemies: a disc on the floor under each body's parts, centred on them (the middle one is out at its
+  // near edge, the sides a little behind it, so the pool is a little behind their mean), as wide as the parts stand round it.
   const blobs = [...new Set(placed.map(({ f }) => f.body).filter((b): b is string => !!b))].flatMap(body => {
     const parts = placed.filter(({ f }) => f.body === body);
     const mid = parts.find(({ f }) => f.part === "mid") ?? parts[0];
-    const box: BlobBox = { parts: parts.map(({ box: b }) => ({ x: b.x, y: b.y, w: b.w, h: b.h })), slumped: parts.every(({ f }) => !!f.dead) };
-    const zs = parts.map(({ box: b }) => 1000 - Math.round(b.depth * 10));
-    return [{ body, box, lo: Math.min(...zs) - 1, hi: Math.max(...zs) + 1, filter: `brightness(${Math.max(0.68, Math.min(1, 1.12 - mid.box.depth * 0.06)) * lightAt(mid.at)})` }];
+    const centre = centres.get(body)!;
+    const disc = floorDisc(c, centre, BODY_RADIUS, w, h);
+    // The wax that holds each part to the pool: it comes out of the pool's middle square to the way the body faces (along the line the parts
+    // stand on), then curves round toward the front as it reaches the part, ending at its bound feet. A part that lunges or dodges away from
+    // its slot stretches it (it thins as it stretches), so the part never comes apart from the pool.
+    const links: BlobBox["links"] = [];
+    const you = posNow("player") ?? mid.raw, dm = Math.hypot(you.x - mid.raw.x, you.z - mid.raw.z) || 1;
+    const facing = { x: (you.x - mid.raw.x) / dm, z: (you.z - mid.raw.z) / dm }, across = { x: -facing.z, z: facing.x };
+    const ground = (p: Vec) => projectPoint(c, p, 0, w, h);
+    for (const { f, raw, at, box: pb } of parts) {
+      const pose = ALL_POSES[f.pose];
+      if (f.variant !== "waxed" || f.dead || !pose || w <= 0) continue;
+      const out = { x: raw.x - centre.x, z: raw.z - centre.z }, d = Math.hypot(out.x, out.z) || 1, isMid = f.part === "mid";
+      // The bound feet, in the world; the bend is where the line out along the line of parts meets the line in toward the feet.
+      const yaw = figureYaw(f, at), fwd = facingVec(yaw), rgt = right(yaw), k = f.scale ?? 1, joints = liftPose(pose, f.hand).joints;
+      const foot = { x: at.x, z: at.z };
+      for (const j of ["footR", "footL"] as const) {
+        const [x, , z] = joints[j];
+        foot.x += ((rgt.x * x + fwd.x * z) * k) / 2; foot.z += ((rgt.z * x + fwd.z * z) * k) / 2;
+      }
+      const sideways = (foot.x - centre.x) * across.x + (foot.z - centre.z) * across.z;
+      const bend = { x: centre.x + across.x * sideways, z: centre.z + across.z * sideways };
+      const a = ground(centre), b = ground(bend), t = ground(foot);
+      const stretch = isMid ? 0 : Math.max(0, d - BODY_SIDE_SLOT);
+      const base = pb.w * 0.34;
+      links.push({ ax: a.sx, ay: a.sy, kx: b.sx, ky: b.sy, tx: t.sx, ty: t.sy, width: Math.max(base * 0.3, base / (1 + 0.6 * stretch)) });
+    }
+    const box: BlobBox = { cx: disc.cx, cy: disc.cy, rx: disc.rx, ry: disc.ry, tall: mid.box.h, slumped: parts.every(({ f }) => !!f.dead), links };
+    // Below every figure, whatever the parts' own depths.
+    const lo = Math.min(...parts.map(({ box: b }) => 1000 - Math.round(b.depth * 10))) - 20;
+    return [{ body, box, lo, filter: `brightness(${Math.max(0.68, Math.min(1, 1.12 - mid.box.depth * 0.06)) * lightAt(mid.at)})` }];
   });
   // Where each flame on a head burns (a lit waxed's, the candles of the waxed remains): its marker goes inside the figure, so the flame follows it.
   const headFlames = new Map(placed.filter(({ f }) => f.candle || f.headFlame).map(({ f, box, at }) => [f.id, flameSpot(f, box, at, true)]));
   const coversFigure = (box: ReturnType<typeof figureBox>) => placed.some(({ box: b }) =>
     b.depth > box.depth && b.x < box.x + box.w && b.x + b.w > box.x && b.y < box.y + box.h && b.y + b.h > box.y);
+
+  // The selected figure's box as the camera has it this frame (the camera may still be moving), for the ring over it.
+  const selectedItem = placed.find(({ f }) => f.selected), selectedBox = selectedItem?.box;
+  // The small mark sits on the figure's ribcage: from the 3D rig where there is one (a waxed), else halfway between the neck and the hips of its pose.
+  const markY = (() => {
+    if (!selectedItem) return 0;
+    const { f, box, at } = selectedItem, pose = ALL_POSES[f.pose];
+    if (!pose) return box.y + box.h * 0.5;
+    if (f.variant === "waxed" && !f.dead && w > 0) {
+      const rig = liftPose(pose, f.hand);
+      return placeRig(rig, at, figureYaw(f, at), c, w, h, f.scale).see(ribcageOf(rig).centre as P3).sy;
+    }
+    return box.y + (box.h * (((pose.for3d?.neck ?? pose.neck)[1] + (pose.for3d?.hip ?? pose.hip)[1]) / 2)) / 120;
+  })();
+  const lastSelected = useRef<string>("");
+  useEffect(() => {
+    if (!onSelectedBox) return;
+    const key = selectedBox ? [selectedBox.x, selectedBox.y, selectedBox.w, selectedBox.h, markY, w, h].map(n => Math.round(n * 2)).join(",") : "";
+    if (key === lastSelected.current) return;
+    lastSelected.current = key;
+    onSelectedBox(selectedBox ? { x: selectedBox.x, y: selectedBox.y, w: selectedBox.w, h: selectedBox.h, hudW: w, hudH: h, markY } : null);
+  });
 
   return (
     <div className="scene" ref={boxRef}>
@@ -336,10 +418,14 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
           <SealedSleeper kind={pr.kind} flip={pr.flip} lit={propLit} />
         </div>
       ))}
+      {/* The shade under each figure: one disc on the floor, the same for all (not the Wax Blob's parts: they crawl out of their pool). */}
+      {w > 0 && placed.filter(({ f }) => !f.body && !f.dead).map(({ f, at }) => {
+        const d = floorDisc(c, at, SHADE_RADIUS * (f.scale ?? 1), w, h);
+        return <div key={`shade-${f.id}`} className="floor-shade" style={{ left: d.cx - d.rx, top: d.cy - d.ry, width: d.rx * 2, height: d.ry * 2, zIndex: 1000 - Math.round(d.depth * 10) - 5 }} />;
+      })}
       {blobs.map(b => (
         <Fragment key={`blob-${b.body}`}>
-          <div className="blob-slot" style={{ zIndex: b.lo, filter: b.filter }}><BlobBack box={b.box} /></div>
-          <div className="blob-slot" style={{ zIndex: b.hi, filter: b.filter }}><BlobFront box={b.box} /></div>
+          <div className="blob-slot" style={{ zIndex: b.lo, filter: b.filter }}><BlobPool box={b.box} /></div>
         </Fragment>
       ))}
       {placed.map(({ f, box, at }) => (
@@ -357,16 +443,13 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
             width: box.w,
             height: box.h,
             zIndex: 1000 - Math.round(box.depth * 10),
-            // The outer parts of a heap lean out of it.
-            transform: f.part === "left" ? "rotate(-7deg)" : f.part === "right" ? "rotate(7deg)" : undefined,
-            transformOrigin: "50% 90%",
             // Distance haze: the further away, the dimmer. (The parts of one body, the Wax Blob, share the heap's: they are one lump of wax.)
             filter: (f.body && blobs.find(b => b.body === f.body)?.filter) || `brightness(${Math.max(0.68, Math.min(1, 1.12 - box.depth * 0.06)) * lightAt(at)})`,
           }}
         >
           {f.holdsString && !f.dead && <StringAura layer="back" spread={f.body ? 2.4 : 1} />}
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : f.variant === "waxed" && w > 0 ? <Waxed3D pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
+            {f.dead === "pieces" ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {headFlames.has(f.id) && <FlameAnchor id={f.id} x={headFlames.get(f.id)![0] - box.x} y={headFlames.get(f.id)![1] - box.y} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}

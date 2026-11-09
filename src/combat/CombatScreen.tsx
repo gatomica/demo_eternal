@@ -537,17 +537,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Where the selected figure will be on screen once the camera settles, for the ring (the mark over it, and the wheel). */
+  /** Where the selected figure is on screen right now, for the ring (the mark over it, and the wheel): the scene tells us every time it moves, so the ring rides along with the camera as it turns to show the new target, instead of going straight to where the target will end up. */
   const [anchor, setAnchor] = useState<Anchor | null>(null);
-  useLayoutEffect(() => {
-    if (busy) return;
-    const p = shot.positions[selId];
-    const { w, h } = viewport;
-    if (!p || !w) return setAnchor(null);
-    const foe = fight.enemies.find(e => e.id === selId);
-    const b = figureBox(shotCamera(shot), p, w, h, foe && kindOf(foe).scale);
-    setAnchor({ x: b.x, y: b.y, w: b.w, h: b.h, hudW: w, hudH: h });
-  }, [busy, selId, shot, viewport]);
 
   /* ---------- moving the cursor ----------
    * W/S move between depths. A/D walk the whole lineup as it appears on screen, left to right:
@@ -1417,8 +1408,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         onPick: () => { if (playSignal === undefined) openWheel({ kind: "enemy", id: e.id }); },
         // While you plan, the bar of whoever you're targeting, right below it (mid-turn it sits on the black strip instead).
         // (A part of a body, the Wax Blob: the bar always hangs below its middle part, whichever part is the target.)
-        bar: playing && !busy && e.id === barHolder && e.alive
-          ? <HealthBar fighter={shownEnemy ?? e} before={shownBefore && barValues(shownBefore)} mirrored />
+        // (Mid-turn too: the bar of whoever the turn is about hangs below it, with what is changing flashing as it lands, not in the corner of the screen.)
+        bar: playing && e.id === barHolder && (e.alive || busy)
+          ? <HealthBar fighter={barsOf(shownEnemy ?? e)} before={shownBefore && barValues(shownBefore)} mirrored eternalFlash={busy && shownEnemy ? barFlashOf(shownEnemy.id) : undefined} />
           // Mid-turn, whoever is Resting shows a bar below them from the moment the turn starts, as the Rest winds up, so you can see what the Rest changes
           // when it lands (it flashes white then). (A body of several parts has one bar, below its middle part.)
           : busy && e.alive && restingBar(e)
@@ -1487,6 +1479,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           figures={figures} shot={shot} projectiles={projectiles} usurpTrails={usurpTrails} arenaLit={candlesLit}
           arena={fight.enemies.some(e => kindOf(e).arena)}
           light={light} shade={shade}
+          onSelectedBox={b => { if (!busy) setAnchor(b); }}
           dark={wakeDark ?? (ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark)}
           ignite={ignite ? { who: ignite.who, start: ignite.start, seed: ignite.seed } : undefined}
         />
@@ -1503,17 +1496,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       )}
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
 
-      {/* Your health bar sits in a fixed slot, so nothing else on screen can push it around. The target's hangs right below it, in the scene. */}
+      {/* Your health bar sits in a fixed slot, so nothing else on screen can push it around. The target's hangs right below it, in the scene, planning or not. */}
       <PlayerBars knot={knotOwned} eternalFlash={{ health: barFlashOf("player"), eternity: eternalHere.some(ev => ev.attacker === "player" && ev.spent > 0) ? stepKey : undefined }} player={barsOf(p)} preview={previewCost} recover={previewRecover} string={carried + landed} stringPops={pops} eternalString={eternalString} />
-
-      {/* While a turn plays, the target's bar sits bottom right, mirroring yours (in planning it hangs below the enemy). */}
-      {busy && (
-        <div className="bar-slot bar-slot-target">
-          {shownEnemy && (
-            <TargetPanel key={shownEnemy.id} enemy={barsOf(shownEnemy)} before={shownBefore && barValues(shownBefore)} eternalFlash={barFlashOf(shownEnemy.id)} />
-          )}
-        </div>
-      )}
 
       {/* The ring over whoever you have selected: a small mark while you plan, grown into the wheel when you focus. */}
       {playing && !forced && !busy && !waking && (
@@ -1553,15 +1537,6 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-/** One health bar for whoever the turn's action involves. Always in the same spot. */
-function TargetPanel({ enemy, before, eternalFlash }: { enemy: Enemy; before?: BarValues; eternalFlash?: string }) {
-  return (
-    <div className="hud-target">
-      <HealthBar fighter={enemy} before={before} mirrored eternalFlash={eternalFlash} />
     </div>
   );
 }

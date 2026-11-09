@@ -66,6 +66,8 @@ export interface Waxed3DProps {
   weapon: WeaponTier;
   /** Wax sealing the whole body. */
   encased?: boolean;
+  /** The legs are never shaded for being on the far side (a part of the Wax Blob: its legs melt into the pool). */
+  meldLegs?: boolean;
   /** The flame in its hands is not drawn (lit, the flame it gathers to burst is the one on its head). */
   hideFlame?: boolean;
   eternalFlash?: string;
@@ -82,7 +84,7 @@ export interface Waxed3DProps {
   box: { x: number; y: number; w: number; h: number };
 }
 
-export function Waxed3D({ pose, hand = "right", weapon, encased, hideFlame, eternalFlash, title, cam, at, yaw, scale = 1, w, h, box }: Waxed3DProps) {
+export function Waxed3D({ pose, hand = "right", weapon, encased, meldLegs, hideFlame, eternalFlash, title, cam, at, yaw, scale = 1, w, h, box }: Waxed3DProps) {
   const debug = useContext(DebugLimbsContext);
   const rig = useMemo(() => liftPose(ALL_POSES[pose], hand), [pose, hand]);
   const windUp = SWINGS[pose];
@@ -119,12 +121,12 @@ export function Waxed3D({ pose, hand = "right", weapon, encased, hideFlame, eter
 
   const parts: { key: string; depth: number; node: ReactNode }[] = [];
   /** A run of bones through these joints, `width` units thick at the figure's own distance. */
-  const bones = (key: string, js: Joint[], cls: string, width = LIMB, extra = 0) => {
-    const ps = js.map(j => seen[j]);
+  const bones = (key: string, js: (Joint | Seen)[], cls: string, width = LIMB, extra = 0) => {
+    const ps = js.map(j => (typeof j === "string" ? seen[j] : j));
     const depth = depthOf(...ps);
     parts.push({
       key, depth: depth - extra,
-      node: <polyline key={key} points={ps.map(p => `${X(p)},${Y(p)}`).join(" ")} className={`${cls}${depth > mid + 0.02 && cls === "fig-limb" ? " fig-far" : ""}`} style={{ strokeWidth: width * scaleAt(...ps) }} />,
+      node: <polyline key={key} points={ps.map(p => `${X(p)},${Y(p)}`).join(" ")} className={`${cls}${depth > mid + 0.02 && (cls === "fig-limb" || cls === "fig-wax-shell") && !(meldLegs && key.startsWith("shell-leg")) ? " fig-far" : ""}`} style={{ strokeWidth: width * scaleAt(...ps) }} />,
     });
   };
   const red = (side: "R" | "L") => (debug && side === "R" ? " dbg-red" : "");
@@ -158,10 +160,13 @@ export function Waxed3D({ pose, hand = "right", weapon, encased, hideFlame, eter
   if (encased) {
     // The shell takes the place of the whole body: the lower spine, the chest, the shoulders and hips, and the neck (the chest's shell is thicker, as wide as the ribcage).
     bones("shell-lumbar", ["pelvis", "waist"], "fig-wax-shell", SHELL);
-    bones("shell-ribs", ["waist", "neck"], "fig-wax-shell", SHELL + 4);
+    // The chest's thick shell stops short of the neck (its round end would reach well up into the head), and the neck's own is a thin stub from there.
+    const along = (a: Seen, b: Seen, t: number): Seen => ({ sx: a.sx + (b.sx - a.sx) * t, sy: a.sy + (b.sy - a.sy) * t, ppm: a.ppm + (b.ppm - a.ppm) * t, depth: a.depth + (b.depth - a.depth) * t });
+    const chestTop = along(seen.waist, seen.neck, 0.8);
+    bones("shell-ribs", ["waist", chestTop], "fig-wax-shell", SHELL + 4);
     bones("shell-shoulders", ["shoulderR", "shoulderL"], "fig-wax-shell", SHELL);
     bones("shell-hips", ["hipR", "hipL"], "fig-wax-shell", SHELL);
-    bones("shell-neck", ["neck", "head"], "fig-wax-shell", SHELL);
+    bones("shell-neck", [chestTop, "neck"], "fig-wax-shell", SHELL - 3);
   }
 
   // The ribcage, as the sleepwalkers have: a skinny ellipsoid (an oblate spheroid) standing along the spine, with two columns
@@ -245,8 +250,10 @@ export function Waxed3D({ pose, hand = "right", weapon, encased, hideFlame, eter
   // What it holds: a wax lump or a flame, in front of its hand.
   if (prop && !rig.propHidden && !(hideFlame && prop.kind === "flame")) {
     const kp = scaleAt(prop.at);
+    // It is always drawn over the arms that hold it, whatever the angle: the wax shell round a hand (and the rest of the arm) never covers it.
+    const arms = (["R", "L"] as const).map(side => depthOf(seen[`shoulder${side}`], seen[`elbow${side}`], seen[`hand${side}`]));
     parts.push({
-      key: "prop", depth: prop.at.depth - 0.02,
+      key: "prop", depth: Math.min(prop.at.depth - 0.02, ...arms.map(d => d - 0.001)),
       node: <g key="prop" transform={`translate(${X(prop.at)} ${Y(prop.at)}) scale(${kp})`}><Prop prop={{ kind: prop.kind, at: [0, 0] }} /></g>,
     });
   }
@@ -364,7 +371,6 @@ export function Waxed3D({ pose, hand = "right", weapon, encased, hideFlame, eter
   return (
     <svg viewBox="0 0 100 120" className="figure figure-front" role="img" aria-label={title}>
       {title && <title>{title}</title>}
-      <ellipse cx={50} cy={115} rx={26} ry={3} className="fig-shadow" />
       {parts.map(p => p.node)}
     </svg>
   );

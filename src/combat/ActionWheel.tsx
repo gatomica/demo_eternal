@@ -6,12 +6,20 @@
  * direction (W above, A to the left, S below, D to the right); the piece being selected turns solid
  * white. The ring has no outline, and its fill fades out away from its center.
  */
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { polar, R_IN, R_OUT, RingFade, RingLines } from "../render/ring";
 import type { Wheel, WheelOption } from "./selection";
 import type { Dir } from "../ui/input";
 
 /** A figure's box on screen, relative to the HUD, plus the HUD's size for keeping the wheel on-screen. */
-export interface Anchor { x: number; y: number; w: number; h: number; hudW: number; hudH: number }
+export interface Anchor {
+  x: number; y: number; w: number; h: number; hudW: number; hudH: number;
+  /** Where the figure's middle is on screen (y), by how high or low its pose holds it: the small mark sits there, and slides back to the box's middle when the wheel opens. */
+  markY?: number;
+}
+
+/** How fast the ring chases its place (per second): faster than the camera turns, so it can get there first. */
+const CHASE = 16;
 
 /** How big the ring is on screen (the same for every target): a share of the screen's height, and never wider than this share of its width. */
 const SIZE_OF_HEIGHT = 0.92;
@@ -49,15 +57,43 @@ export function ActionWheel({ wheel, open, highlight, center, anchor, onHighligh
   onHighlight: (d: Dir) => void;
   onCommit: (o: WheelOption) => void;
 }) {
-  if (!anchor) return null;
+  const ref = useRef<HTMLDivElement>(null);
+  const target = useRef<{ x: number; y: number } | null>(null);
+  const shown = useRef<{ x: number; y: number } | null>(null);
   // The wheel's center comes first: the big ring is centered on the target, nudged just enough to keep every option on-screen.
-  // The small mark sits on that very same center, so the two grow into and shrink out of each other.
-  const big = Math.min(anchor.hudH * SIZE_OF_HEIGHT, anchor.hudW * SIZE_OF_WIDTH);
-  const clamp = (v: number, max: number) => Math.max(big / 2, Math.min(max - big / 2, v));
-  const cx = clamp(anchor.x + anchor.w / 2, anchor.hudW), cy = clamp(anchor.y + anchor.h * 0.5, anchor.hudH);
+  // The small mark sits on that very same center (at the figure's own height while it is only a mark), so the two grow into and shrink out of each other.
+  const big = anchor ? Math.min(anchor.hudH * SIZE_OF_HEIGHT, anchor.hudW * SIZE_OF_WIDTH) : 0;
+  // (Only the wheel is kept on-screen by its size: the small mark may sit anywhere, at the figure's own height.)
+  const reach = (open ? big : MARK_SIZE) / 2;
+  const clamp = (v: number, max: number) => Math.max(reach, Math.min(max - reach, v));
+  target.current = anchor && {
+    x: clamp(anchor.x + anchor.w / 2, anchor.hudW),
+    y: clamp(open ? anchor.y + anchor.h * 0.5 : anchor.markY ?? anchor.y + anchor.h * 0.5, anchor.hudH),
+  };
+  if (!anchor) shown.current = null;
+  const place = () => { const el = ref.current, at = shown.current; if (el && at) { el.style.left = `${at.x}px`; el.style.top = `${at.y}px`; } };
+  // It appears on its target, then keeps moving toward wherever the target is, every frame (the camera may still be turning).
+  useLayoutEffect(() => { if (target.current && !shown.current) { shown.current = { ...target.current }; place(); } });
+  useEffect(() => {
+    let raf = 0, last = performance.now();
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000), to = target.current;
+      last = now;
+      if (to && shown.current) {
+        const k = 1 - Math.exp(-dt * CHASE);
+        shown.current.x += (to.x - shown.current.x) * k;
+        shown.current.y += (to.y - shown.current.y) * k;
+        place();
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  if (!anchor) return null;
   const size = open ? big : MARK_SIZE;
   return (
-    <div className={`wheel-overlay ${open ? "is-open" : ""}`} style={{ left: cx - size / 2, top: cy - size / 2, width: size, height: size }} role={open ? "menu" : undefined} aria-label={`Actions for ${center}`}>
+    <div ref={ref} className={`wheel-overlay ${open ? "is-open" : ""}`} style={{ width: size, height: size }} role={open ? "menu" : undefined} aria-label={`Actions for ${center}`}>
       <svg className="wheel-ring" viewBox={`${-R_OUT - 2} ${-R_OUT - 2} ${2 * R_OUT + 4} ${2 * R_OUT + 4}`}>
         {/* The ring fades to nothing quickly; the piece you are on fades more slowly, and starts solid. */}
         <RingFade id="wheel-fade" stops={[[0, 0.6], [0.4, 0.2], [0.85, 0], [1, 0]]} />

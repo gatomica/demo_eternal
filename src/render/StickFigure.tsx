@@ -491,6 +491,8 @@ function StrikeTrail({ s, tier }: { s: Skeleton; tier: WeaponTier }) {
 }
 
 interface StickFigureProps {
+  /** Draw no shade disc under it (the fight's scene draws one on the floor itself). */
+  noShade?: boolean;
   /** "back": the player, seen from behind, facing right.
    *  "front": an enemy, seen from the front, facing left toward the player. */
   view: "front" | "back";
@@ -633,7 +635,7 @@ const DEBUG_LIMB_COLORS = import.meta.env.DEV && false;
 const ACROSS_34 = 0.72;
 
 /** A figure, redrawn only when something about its look changes (the scene redraws every frame). */
-export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor, weaponItem, armorItem, headItem, trail, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, eternalFlash, hooded, encased, straight = false, foe, gearOnly = false, skeleton, hand = "right", sides = false }: StickFigureProps) {
+export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor, weaponItem, armorItem, headItem, trail, title, variant, arm, lingerFrom, smokeAgo, phase2Look, flailFire, waxCaked, eternalFlash, hooded, encased, straight = false, foe, gearOnly = false, skeleton, hand = "right", sides = false, noShade = false }: StickFigureProps) {
   // The Model viewer's Debug status: the right arm and the right leg red.
   const debugLimbs = useContext(DebugLimbsContext);
   const raw = skeleton ?? ALL_POSES[pose];
@@ -644,7 +646,7 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
     return (
       <svg viewBox="0 0 100 120" className={`figure figure-${view}`} role="img" aria-label={title}>
         {title && <title>{title}</title>}
-        <ellipse cx={50} cy={115} rx={own.shadow.rx} ry={own.shadow.ry} className="fig-shadow" />
+        {!noShade && <ellipse cx={50} cy={115} rx={own.shadow.rx} ry={own.shadow.ry} className="fig-shadow" />}
         <g transform={front && !straight ? "translate(100 0) scale(-1 1)" : undefined}>
           {own.draw({ s: raw, front, straight, sides, arm, lingerFrom, smokeAgo, phase2Look, flailFire })}
         </g>
@@ -805,7 +807,7 @@ export const StickFigure = memo(function StickFigure({ view, pose, weapon, armor
   return (
     <svg viewBox="0 0 100 120" className={`figure figure-${view}${armorItem ? ` armor-${armorItem}` : ""}`} role="img" aria-label={title}>
       {title && <title>{title}</title>}
-      <ellipse cx={50} cy={115} rx={26} ry={3} className="fig-shadow" />
+      {!noShade && <ellipse cx={50} cy={115} rx={26} ry={3} className="fig-shadow" />}
       {/* Enemies face left: mirror the whole drawing. */}
       <g transform={front && !straight ? "translate(100 0) scale(-1 1)" : undefined}>
        <g transform={fit.drop ? `translate(0 ${fit.drop})` : undefined}>

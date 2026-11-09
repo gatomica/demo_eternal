@@ -164,8 +164,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .string-aura { position: absolute; pointer-events: none; }
 .string-aura.is-back { z-index: -1; }
 /* While a turn plays, the target's bar sits bottom right: the same distance from the bottom edge as yours is from the top, and from the right as yours is from the left. */
-.bar-slot-target { bottom: var(--bar-inset-top); right: var(--bar-inset-x); justify-items: end; text-align: right; }
-.hud-target { display: grid; gap: 6px; justify-items: end; width: 100%; }
 /* While you plan, it hangs right below the enemy in the scene (see Scene's `bar`), the same size as in the strip. */
 .figure-bar { position: absolute; transform: translateX(-50%); z-index: 1900; pointer-events: none; }
 /* The knot beside your bar: its symbol, a red ball of yarn white towards the middle, with the revives you have left as a red Roman numeral over it
@@ -295,7 +293,9 @@ kbd {
  * fill fades out away from the center. */
 .wheel-overlay {
   position: absolute; z-index: 11; pointer-events: none;
-  transition: left 0.22s ease-out, top 0.22s ease-out, width 0.22s ease-out, height 0.22s ease-out;
+  /* (Its place is set every frame by ActionWheel.tsx, which chases the target as the camera moves; it is centred on that place, whatever its size.) */
+  transform: translate(-50%, -50%);
+  transition: width 0.22s ease-out, height 0.22s ease-out;
 }
 .wheel-ring { width: 100%; height: 100%; overflow: visible; }
 .wheel-piece { pointer-events: none; }
@@ -545,6 +545,8 @@ kbd {
 .fig-eyes { fill: var(--eyes); }
 /* Far limbs are a solid darker shade, so nothing shows through the body in front of them. */
 .fig-far { stroke: var(--ink-far); }
+/* The wax shell round a limb on the far side is shaded the same way: darker wax, never see-through. */
+.fig-wax-shell.fig-far { stroke: color-mix(in srgb, var(--wax) 76%, black); }
 .fig-trail { fill: var(--sleep); opacity: 0; animation: trail 0.45s ease-out; }
 @keyframes trail { 0% { opacity: 0.7; } 100% { opacity: 0; } }
 /* Flame Blast's punch trail, in the candle flame's colours. */
@@ -579,6 +581,8 @@ kbd {
 @media (prefers-reduced-motion: reduce) { .fig-trail-seq { animation: none; opacity: 0.25; } .fig-chain-blur { animation: none; opacity: 0.5; } }
 @media (prefers-reduced-motion: reduce) { .fig-trail { animation: none; opacity: 0.3; } }
 .fig-shadow { fill: #000; opacity: 0.35; }
+/* The shade under a figure in a fight: a disc on the floor (placed by `floorDisc`), darkest in the middle, fading to its edge. */
+.floor-shade { position: absolute; border-radius: 50%; pointer-events: none; background: radial-gradient(closest-side, rgb(0 0 0 / 0.45) 0, rgb(0 0 0 / 0.4) 55%, rgb(0 0 0 / 0) 100%); }
 
 /* ---------- Model viewer ---------- */
 .viewer-panel {

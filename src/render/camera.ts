@@ -159,41 +159,36 @@ export function planningCamera(anchor: Vec, yaw: number): Cam {
   return { x: p.x, z: p.z, yaw, look: anchor };
 }
 
-/** Slots in the formation for the enemies on each line, in order, relative to the player. */
+/**
+ * The ids on a line with a body's parts kept together, in order (left, middle, right), at the place of the body's first part: so nobody
+ * else gets in between them.
+ */
+function together(ids: string[], bodies: Record<string, BodyPart>): string[] {
+  const order = { left: 0, mid: 1, right: 2 } as const;
+  const out: string[] = [];
+  for (const id of ids) {
+    const body = bodies[id]?.body;
+    if (!body) { out.push(id); continue; }
+    if (out.some(o => bodies[o]?.body === body)) continue;
+    out.push(...ids.filter(o => bodies[o]?.body === body).sort((a, b) => order[bodies[a].part ?? "mid"] - order[bodies[b].part ?? "mid"]));
+  }
+  return out;
+}
+
+/**
+ * Slots in the formation for the enemies on each line, in order, relative to the player. The parts of a body (the Wax Blob) each take a slot of their
+ * own, side by side as three separate enemies would, left, middle, right.
+ */
 export function formation(anchor: Vec, yaw: number, front: string[], back: string[], bodies: Record<string, BodyPart> = {}): Map<string, Vec> {
   const spots = new Map<string, Vec>();
-  // The parts of one body (the Wax Blob) share one slot: only its first part is placed on the arc.
-  const firstOf = new Map<string, string>();
-  const slotted = (ids: string[]) => ids.filter(id => {
-    const b = bodies[id]?.body;
-    if (!b) return true;
-    if (firstOf.has(b)) return false;
-    firstOf.set(b, id);
-    return true;
-  });
-  const slots = { front: slotted(front), back: slotted(back) };
   // Each line stands on an arc around the player, all the same distance from them: its middle
   // where the line's slot is, the rest spread along the arc (`spacing` apart, along the arc).
-  for (const [line, ids] of [["front", slots.front], ["back", slots.back]] as const) {
+  for (const [line, ids] of [["front", together(front, bodies)], ["back", together(back, bodies)]] as const) {
     const { side, ahead, spacing } = LINES[line];
     const r = Math.hypot(side, ahead), mid = Math.atan2(side, ahead);
     ids.forEach((id, i) => {
       const a = mid + ((i - (ids.length - 1) / 2) * spacing) / r; // from straight ahead, toward your right
       spots.set(id, fromPlayer(anchor, yaw, r * Math.sin(a), r * Math.cos(a)));
-    });
-  }
-  // Then its parts spread across the slot: left, middle and right, close together. The middle one stands out of the heap toward you,
-  // at its near edge, not in its middle.
-  for (const [body, first] of firstOf) {
-    const centre = spots.get(first)!;
-    const parts = [...front, ...back].filter(id => bodies[id]?.body === body);
-    const d = Math.hypot(anchor.x - centre.x, anchor.z - centre.z) || 1;
-    const toYou: Vec = { x: (anchor.x - centre.x) / d, z: (anchor.z - centre.z) / d };
-    parts.forEach((id, i) => {
-      const part = bodies[id].part;
-      const across = part === "left" ? -1 : part === "right" ? 1 : part === "mid" ? 0 : i - (parts.length - 1) / 2;
-      const spot = add(centre, right(yaw), across * BODY_SPREAD);
-      spots.set(id, part === "mid" ? add(spot, toYou, BODY_FORWARD) : spot);
     });
   }
   return spots;
@@ -202,11 +197,14 @@ export function formation(anchor: Vec, yaw: number, front: string[], back: strin
 /** What a body's part is, for placing it: which body, and which part. */
 export interface BodyPart { body: string; part?: "left" | "mid" | "right" }
 
-/** How far apart the left, middle and right parts of one body stand, in meters. */
-export const BODY_SPREAD = 0.85;
+/** How far the pool's middle lies behind a middle part with no rig to take its knees from (meters), along the line from it to you. */
+export const BODY_FORWARD = 0.6;
 
-/** How far the middle part of a body stands out of it toward you (meters): at the heap's near edge. */
-export const BODY_FORWARD = 0.5;
+/** About how far the left and right parts stand from the pool's middle when the three are in their places in a line (meters): the wax joining them to it is at rest then. */
+export const BODY_SIDE_SLOT = 1.7;
+
+/** The pool of wax a body crawls out of: a disc on the floor of this radius (meters), centred on the slot. It lies behind the middle part; the parts stand on the line, joined to it by wax. */
+export const BODY_RADIUS = 1.5;
 
 /** The bodies in a fight: each part's body and place in it, by enemy id. */
 export function bodiesOfEnemies(enemies: { id: string; body?: string; part?: "left" | "mid" | "right" }[]): Record<string, BodyPart> {
@@ -325,20 +323,22 @@ export function shotCamera(shot: SceneShot): Cam {
   return c;
 }
 
-/** The camera centered between two fighters wherever they stand (an attack's shot follows them as they move). */
 /**
  * The camera centered between two fighters wherever they stand (an attack's shot follows them as they move).
  * With `fit` (the screen's shape and how big each fighter is), it also backs off as far as it takes for both to
  * be seen whole: head to feet within the part of the screen the black strips leave, and clear of the sides.
+ * A fighter that is several parts (the Wax Blob) is given as the list of its parts' places: it is centered by their middle and all of them are fitted.
  */
-export function trackingCamera(yaw: number, a: Vec, b: Vec, fit?: { aspect: number; scales: [number, number] }): Cam {
-  const base = actionCamera({ x: 0, z: 0, yaw }, a, b);
+export function trackingCamera(yaw: number, a: Vec | Vec[], b: Vec | Vec[], fit?: { aspect: number; scales: [number, number] }): Cam {
+  const groups = [a, b].map(g => (Array.isArray(g) ? g : [g]));
+  const centre = (ps: Vec[]): Vec => ({ x: ps.reduce((n, p) => n + p.x, 0) / ps.length, z: ps.reduce((n, p) => n + p.z, 0) / ps.length });
+  const base = actionCamera({ x: 0, z: 0, yaw }, centre(groups[0]), centre(groups[1]));
   if (!fit) return base;
   const mid = base.look!;
   const fwd = forward(yaw), rgt = right(yaw);
   // Each fighter's offset from the middle: ahead of it (+: nearer the far side of the shot) and to its right.
   let back = Math.hypot(base.x - mid.x, base.z - mid.z);
-  [a, b].forEach((p, i) => {
+  groups.forEach((ps, i) => ps.forEach(p => {
     const ahead = dot(sub(p, mid), fwd), across = dot(sub(p, mid), rgt), s = fit.scales[i];
     // Its feet must land above the bottom strip, its head below the top strip (the strips cover about 11% each).
     const feet = (FOCAL * EYE_HEIGHT) / (FIT_BOTTOM - HORIZON);
@@ -346,7 +346,7 @@ export function trackingCamera(yaw: number, a: Vec, b: Vec, fit?: { aspect: numb
     // And its sides inside the screen's width, with the figure's own half width.
     const sides = (FOCAL * (Math.abs(across) + 0.6 * s)) / (FIT_SIDE * fit.aspect);
     back = Math.max(back, Math.max(feet, head, sides) - ahead);
-  });
+  }));
   back = Math.min(back, FIT_MAX_BACK);
   const p = add(mid, fwd, -back);
   return { x: p.x, z: p.z, yaw, look: mid };
@@ -356,3 +356,18 @@ export function trackingCamera(yaw: number, a: Vec, b: Vec, fit?: { aspect: numb
 const FIT_TOP = 0.13, FIT_BOTTOM = 0.87, FIT_SIDE = 0.42;
 /** The farthest the camera backs off to fit them. */
 const FIT_MAX_BACK = 14;
+
+/** The radius of the shade disc under a standing figure, in meters (at a figure scale of 1). */
+export const SHADE_RADIUS = 0.42;
+
+/**
+ * A disc lying on the floor (a circle of `radius` meters round `centre`) as the camera sees it: the ellipse its four ends make on a
+ * screen of w × h. Every disc on the ground, the shade under a figure and the Wax Blob's pool, is drawn from this, so they all sit
+ * on the floor the same way.
+ */
+export function floorDisc(cam: Cam, centre: Vec, radius: number, w: number, h: number) {
+  const ahead = forward(cam.yaw), side = right(cam.yaw);
+  const at = (k: number, v: Vec) => projectPoint(cam, { x: centre.x + v.x * radius * k, z: centre.z + v.z * radius * k }, 0, w, h);
+  const near = at(-1, ahead), far = at(1, ahead), l = at(-1, side), r = at(1, side);
+  return { cx: (l.sx + r.sx) / 2, cy: (near.sy + far.sy) / 2, rx: Math.abs(r.sx - l.sx) / 2, ry: Math.abs(near.sy - far.sy) / 2, depth: projectPoint(cam, centre, 0, w, h).depth };
+}
