@@ -259,11 +259,11 @@ actions:
   Retreat:         maneuver, retreat, *Close
   Despair:         rest
 stances:
-  Recover, !Parry                > Idle          > Chase, Retreat
-  Chase, Swing Right, !Parry     > Charging      > Chase, Swing Left
-  Swing Left                     > Shoulder In   > Swing Right, Parry
-  Swing Left, Swing Right, Parry > Arms Overhead > Overhead Strike
-  Recover, Retreat, Parry        > Struggling    > Despair
+  Recover, !Parry                         > Idle          > Chase, Retreat
+  Chase, Swing Right, !Parry              > Charging      > Chase, Swing Left
+  Swing Left, Retreat                     > Shoulder In   > Swing Right, Parry
+  Swing Left, Swing Right, Parry, Retreat > Arms Overhead > Overhead Strike
+  Recover, Retreat, Parry                 > Struggling    > Despair
 ```
 
 | Stance | Look | Does | Safe answer |

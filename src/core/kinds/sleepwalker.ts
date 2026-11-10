@@ -25,11 +25,11 @@ export const SLEEPWALKER: EnemyKind = {
       Retreat:         maneuver, retreat, *Close
       Despair:         rest
     stances:
-      Recover, !Parry                > Idle          > Chase, Retreat
-      Chase, Swing Right, !Parry     > Charging      > Chase, Swing Left
-      Swing Left                     > Shoulder In   > Swing Right, Parry
-      Swing Left, Swing Right, Parry > Arms Overhead > Overhead Strike
-      Recover, Retreat, Parry        > Struggling    > Despair
+      Recover, !Parry                         > Idle          > Chase, Retreat
+      Chase, Swing Right, !Parry              > Charging      > Chase, Swing Left
+      Swing Left, Retreat                     > Shoulder In   > Swing Right, Parry
+      Swing Left, Swing Right, Parry, Retreat > Arms Overhead > Overhead Strike
+      Recover, Retreat, Parry                 > Struggling    > Despair
   `),
   // Each swing ends turned the way it swings, into the stance that is turned that way: Swing Left into Shoulder In (turned to its left, the right
   // shoulder presented), Swing Right into Charging (turned to its right). The Parry's own pose (`sw-parry`) is only the one it takes as a blow lands
