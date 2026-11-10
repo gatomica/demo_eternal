@@ -61,7 +61,7 @@ export interface GearModel {
 
 const WOOD = "#8a6b4a";
 const WAX = "#b9a14e", WAX_DARK = "#85733a", BRICK = "#85838d", BRICK_EDGE = "#5d5b66";
-const BRONZE = "#b9854a", BRONZE_DARK = "#8a5f2c", BRONZE_SHADE = "#a2733d", IRON = "#8f93a3", IRON_DARK = "#6b6f80";
+const BRONZE = "#5e9a78", BRONZE_DARK = "#3d6b53", BRONZE_SHADE = "#4f8366", IRON = "#8f93a3", IRON_DARK = "#6b6f80";
 /** Black iron (the axe's head), and the dark wood of its haft. */
 const BLACK_IRON = "#2e2d33", BLACK_IRON_DARK = "#1d1c21", DARK_WOOD = "#5b3f2b";
 
@@ -174,11 +174,11 @@ function chisel(): Prim[] {
     });
     return [
       poly([[root, 0, T], [END, 0, T], [END, H, 0], [10.5, H, 0], [10.25, 2, plane(2)], [10, H, 0], [7, H, 0], [6.65, 1.85, plane(1.85)], [6.3, H, 0], [root, H, 0]], BRONZE, 1),
-      poly([[root, 0, T], [END, 0, T], [END, -H, 0], [12.5, -H, 0], [12.2, -1.95, plane(1.95)], [11.9, -H, 0], [8.7, -H, 0], [8.4, -2, plane(2)], [8.1, -H, 0], [root, -H, 0]], "#a2733d", -1),
+      poly([[root, 0, T], [END, 0, T], [END, -H, 0], [12.5, -H, 0], [12.2, -1.95, plane(1.95)], [11.9, -H, 0], [8.7, -H, 0], [8.4, -2, plane(2)], [8.1, -H, 0], [root, -H, 0]], "#4f8366", -1),
     ];
   };
   return [
-    { k: "ball", c: [-5.4, 0, 0], rx: R, ry: R, rz: R, color: WOOD },
+    { k: "ball", c: [-5.4, 0, 0], rx: R, ry: R, rz: R, color: BRONZE_DARK },
     { k: "cyl", a: [gripBack, 0, 0], b: [gripFront, 0, 0], r, color: WOOD },
     { k: "ball", c: [guard.x, 0, 0], rx: guard.rx, ry: guard.ry, rz: guard.rz, color: BRONZE_DARK },
     ...face(1, 11), ...face(-1, 23),
@@ -431,7 +431,7 @@ function sickle(): Prim[] {
  * the shortsword's +y edge, the axe's bit (its head stands out along +y), the sickle's inner, hollow edge (toward -y, the handle's line), the torch's side with the carved mark (+y).
  */
 export const GEAR_WEAPONS: GearModel[] = [
-  { id: "chisel", name: "Jagged Chisel", tier: "light", reach: 15, damage: 11.4, edge: [0, 1, 0], note: "Light. Bronze: a ridged grip, an oval guard, a broad blade ground square, nicked and chipped, waxed from the carving.", prims: chisel() },
+  { id: "chisel", name: "Jagged Chisel", tier: "light", reach: 15, damage: 11.4, edge: [0, 1, 0], note: "Light. Bronze, rusted green: a ridged grip, an oval guard, a broad blade ground square, nicked and chipped, waxed from the carving.", prims: chisel() },
   { id: "hammer", name: "Brick Hammer", tier: "heavy", reach: 41, damage: 11.5, edge: [0, 1, 0], note: "Heavy. A straight haft and a head of bricks, laid in a running bond.", prims: hammer() },
   { id: "torch", name: "Waxed Torch", tier: "normal", reach: 35, damage: 12.4, edge: [0, 1, 0], note: "Normal. A torch sealed in a bulb of wax, the sealing king's mark carved into it, the wax run down its handle.", prims: torch() },
   { id: "shortsword", name: "Bronze Shortsword", tier: "normal", item: "shortsword", reach: 34, damage: 29.6, edge: [0, 1, 0], note: "The Soldier's. The chisel made whole: a ball pommel, a plain grip, an oval guard and a long ridged blade coming to a point.", prims: shortsword() },

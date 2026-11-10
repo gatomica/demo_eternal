@@ -5,7 +5,7 @@ import type { KindId } from "./bestiary";
 
 export type Tier = "light" | "normal" | "heavy";
 
-/** Weights an action can have. "baseline" is bare hands (no weapon): the fastest and weakest. */
+/** Weights an action can have. "baseline" is bare hands (no weapon): the weakest. */
 export type WeaponTier = "baseline" | Tier;
 
 export type ArmorTier = "none" | Tier;
@@ -210,8 +210,6 @@ export type CombatEvent =
       fatigue: number;
       /** A ranged attack: the attacker didn't close in. */
       ranged: boolean;
-      /** The attacker was already dropped or staggered by a tied attack, and grits through to finish its own. */
-      grit: boolean;
       /** A fire attack (`#fire`): where it hits, flames lick the target. */
       fire?: boolean;
       /** Your attack: how it swings (from your stance). */
@@ -270,7 +268,7 @@ export interface FighterView {
 }
 
 /**
- * A beat of the turn: each attack is its own beat, fastest first. Then come rests and other
+ * A beat of the turn: each attack is its own beat, yours first and the enemy you aimed at next, then the rest at random. Then come rests and other
  * end-of-turn effects, then movement.
  */
 export interface Step {

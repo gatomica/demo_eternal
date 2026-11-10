@@ -1,13 +1,13 @@
 /**
- * attacks.ts — a turn's first phase: attacks, fastest weapon first (bare hands, light, normal,
- * heavy). Each is answered by the target's Block or dodge, if it has one. Attacks of the same
- * speed play one at a time in random order, but all of them land: a fighter dropped or staggered
- * by a tied attack grits through to finish its own. After each speed group, anyone killed or
- * staggered loses whatever they hadn't done yet: a slower attack, a Block for later attacks, a
- * Rest, a move.
+ * attacks.ts — a turn's first phase: attacks, the player first. Your action goes first: your
+ * attack lands, or your Block or dodge (aimed at an enemy) meets the attack of the enemy you
+ * aimed it at, which follows at once (every part of its body, for a multi-part one). The other
+ * enemies' attacks then play one at a time in random order. Each is answered by the target's
+ * Block or dodge, if it has one. After every blow, anyone killed or staggered loses whatever
+ * they hadn't done yet: their attack, a Block for later attacks, a Rest, a move.
  */
 import { kindOf } from "../bestiary";
-import { attackCost, attackDamage, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, ITEM_SHARE, resistance, sixteenths, spendEternity, WEAPONS } from "../rules";
+import { attackCost, attackDamage, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, ITEM_SHARE, resistance, sixteenths, spendEternity } from "../rules";
 import type { Enemy, Fighter, Player, Rng, WeaponTier } from "../types";
 import { bodyOf } from "../body";
 import { waxOn } from "./statuses";
@@ -15,25 +15,29 @@ import type { Turn } from "./turn";
 
 export function resolveAttacks(t: Turn, rng: Rng) {
   const { p, fighters } = t;
-  const pending: { attacker: Fighter; target: Fighter }[] = [];
-  if (t.act?.type === "attack") pending.push({ attacker: p, target: t.byId(t.act.target)! });
-  for (const e of t.alive) if (e.intent.type === "attack") pending.push({ attacker: e, target: p });
-  const speeds = [...new Set(pending.map(a => WEAPONS[t.weightOf(a.attacker)].speed))].sort((a, b) => a - b);
-
-  for (const speed of speeds) {
-    // Ties play one at a time, in random order.
-    const group = pending.filter(a => WEAPONS[t.weightOf(a.attacker)].speed === speed);
-    for (let i = group.length - 1; i > 0; i--) {
+  const shuffled = <T,>(list: T[]): T[] => {
+    const a = [...list];
+    for (let i = a.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1));
-      [group[i], group[j]] = [group[j], group[i]];
+      [a[i], a[j]] = [a[j], a[i]];
     }
-    group.forEach(({ attacker, target }, n) => {
-      if (n > 0) t.endStep(); // each attack is its own beat
-      strike(t, attacker, target);
-      shockwave(t, attacker);
-    });
+    return a;
+  };
 
-    // After the group lands: falls and staggers take effect before the next, slower group.
+  // The enemy your action is aimed at (its whole body): its attack answers yours at once.
+  const aimedId = t.act && t.act.type !== "rest" && t.act.target !== "self" ? t.act.target : undefined;
+  const aimed = aimedId ? t.s.enemies.find(e => e.id === aimedId) : undefined;
+  const aimedBody = new Set(aimed ? bodyOf(t.s.enemies, aimed).map(m => m.id) : []);
+  const strikers = t.alive.filter(e => e.intent.type === "attack");
+
+  const queue: { attacker: Fighter; target: Fighter }[] = [];
+  if (t.act?.type === "attack") queue.push({ attacker: p, target: t.byId(t.act.target)! });
+  for (const e of [...shuffled(strikers.filter(e => aimedBody.has(e.id))), ...shuffled(strikers.filter(e => !aimedBody.has(e.id)))]) queue.push({ attacker: e, target: p });
+
+  queue.forEach(({ attacker, target }) => {
+    strike(t, attacker, target);
+    shockwave(t, attacker);
+    // After each blow, falls and staggers take effect before the next one.
     for (const f of fighters) {
       if (t.out.has(f.id)) continue;
       if (t.isReviving(f)) continue; // untouchable, and still at 0 until the revive lands
@@ -48,8 +52,8 @@ export function resolveAttacks(t: Turn, rng: Rng) {
       }
     }
     t.pinStaggered();
-    t.endStep();
-  }
+    t.endStep(); // each attack is its own beat
+  });
 }
 
 /** What an attack costs its attacker in Fatigue, and how much it deals: its action's own numbers when it sets them, otherwise its weight's. */
@@ -113,7 +117,6 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   }
   // (How your own blow swings, from your stance.)
   const swing = attacker === p ? t.swing : undefined;
-  const grit = attacker.hp <= 0 || (!attacker.staggered && attacker.fatigue >= attacker.hp);
   const weight = t.weightOf(attacker);
   const ranged = t.isRanged(attacker);
   const dmg = damageOf(attacker, weight);
@@ -139,14 +142,14 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
 
   if (t.isReviving(target)) {
     // The blow passes through someone reviving.
-    t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: 0, ranged, grit, swing });
+    t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: 0, ranged, swing });
     return;
   }
   if (t.isDodging(target, attacker)) {
     // Out of the way: no damage, only the effort of the dodge.
     const effort = dodgeFatigue(target, dmg);
     t.tire(target, effort);
-    t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: effort, ranged, grit, swing });
+    t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: effort, ranged, swing });
     return;
   }
   const blocking = t.isBlocking(target, attacker);
@@ -161,7 +164,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   loseHealth(t, target, through);
   const sentBack = blocking && ranged ? 0 : resisted;
   const self = attacker !== p ? (attacker as Enemy) : undefined;
-  t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, grit, fire: !!self?.intent.tags?.includes("fire"), swing });
+  t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, fire: !!self?.intent.tags?.includes("fire"), swing });
   eternalEffect(t, attacker, target, blocking ? "blocked" : "hit", ranged, weight, dmg);
   // A blocked melee blow can still leave something (the Warden's flail leaves its wax).
   const onBlocked = self && blocking && !ranged ? kindOf(self).onBlocked : undefined;

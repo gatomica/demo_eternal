@@ -8,11 +8,11 @@
  * It draws into the same 100 × 120 box a flat figure does (the scene's `figureBox`), so the scene's click target,
  * haze and animations work as they always did; limbs may reach outside it.
  */
-import { useContext, useMemo } from "react";
+import { memo, useContext, useMemo } from "react";
 import type { Side, WeaponTier } from "../core/types";
 import { type Cam, METERS_PER_UNIT as U, type Vec } from "./camera";
 import { DebugLimbsContext } from "./debugLimbs";
-import { arcPart, canvas3d, Figure3DSvg, ribcagePart, weaponParts } from "./figure3d";
+import { arcPart, canvas3d, Figure3DSvg, ribcagePart, sameDrawing, weaponParts } from "./figure3d";
 import { type Hold, type Joint, liftPose, type P3, placeRig, type Seen, swingArc, weaponHold } from "./rig3d";
 import { ALL_POSES, type PoseName } from "./poses";
 import { modelOfWeapon } from "./gear3d";
@@ -84,7 +84,7 @@ export interface Waxed3DProps {
   box: { x: number; y: number; w: number; h: number };
 }
 
-export function Waxed3D({ pose, hand = "right", weapon, encased, meldLegs, hideFlame, eternalFlash, title, cam, at, yaw, scale = 1, w, h, box }: Waxed3DProps) {
+function Waxed3DView({ pose, hand = "right", weapon, encased, meldLegs, hideFlame, eternalFlash, title, cam, at, yaw, scale = 1, w, h, box }: Waxed3DProps) {
   const debug = useContext(DebugLimbsContext);
   const rig = useMemo(() => liftPose(ALL_POSES[pose], hand), [pose, hand]);
   const windUp = SWINGS[pose];
@@ -272,3 +272,6 @@ export function Waxed3D({ pose, hand = "right", weapon, encased, meldLegs, hideF
 
   return <Figure3DSvg parts={parts} title={title} />;
 }
+
+/** The figure, worked out again only when something it is drawn from has changed (`sameDrawing`). */
+export const Waxed3D = memo(Waxed3DView, sameDrawing);

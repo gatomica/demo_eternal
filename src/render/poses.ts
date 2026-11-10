@@ -222,7 +222,7 @@ export type PoseName =
   | "strike" | "fallen" | "kneel" | "punch"
   | "t-pose" | "t-pose-b" | "w-t" | "w-t-b"
   | "sw-windup" | "sw-brace" | "sw-flinch" | "sw-down" | "sw-idle" | "sw-charging" | "sw-struggling" | "sw-shoulder-in"
-  | "sw-overhead" | "sw-overhead-leap" | "sw-dead" | "p3-idle" | "p3-low" | "sw-chop" | "sw-overhead-strike" | "sw-swing-l-windup" | "sw-swing-l" | "sw-swing-r-windup" | "sw-swing-r" | "sw-parry" | "sw-charge" | "sw-backstep" | "sw-despair"
+  | "sw-overhead" | "sw-overhead-leap" | "sw-dead" | "p3-idle" | "p3-low" | "sw-chop" | "sw-overhead-strike" | "sw-swing-l-windup" | "sw-swing-l" | "sw-swing-r-windup" | "sw-swing-r" | "sw-parry" | "sw-charge" | "sw-backstep" | "p3-backstep" | "sw-despair"
   | "w-idle" | "w-hands" | "w-scratch" | "w-wax-hand" | "w-hurl"
   | "w-staggered" | "w-dead" | "w-cower" | "w-reared" | "w-hurl-windup" | "w-clutch-eat" | "w-brace" | "w-brace-block" | "w-overhead-windup" | "w-overhead-strike" | "w-crawl" | "w-low-windup" | "w-low-strike" | "w-drag" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
   | WardenPoseName
@@ -761,6 +761,23 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
     rearLeg: { knee: [61.5, 98.4], foot: [72, 114] },
     weapon: { at: [50, 83], angle: 125 }, torso34: "front", leadSide: "right",
   },
+  // The player's Retreat in 3D (`p3-backstep`): the Backstep's throw back off the feet (the left leg planted, leaning toward the player, the right
+  // lifted with the knee bent across it), but the upper body is Shoulder In's, so it lands neatly in that stance: the chest turned to its left, the
+  // right arm crossed in front of the body with the weapon slanting up toward the left shoulder, the left hand pulled back, the body leaning away.
+  "p3-backstep": {
+    head: [47, 51], neck: [44, 62], hip: [52, 86],
+    adjust: { torso: 0.85, leadThigh: 0.75, leadShin: 0.7, rearThigh: 0.75, rearShin: 0.75 },
+    weaponArm: { elbow: [58, 79], hand: [41, 76] },
+    freeArm: { elbow: [33, 75], hand: [45, 71] },
+    leadLeg: { knee: [64, 93], foot: [54, 104] },
+    rearLeg: { knee: [61.5, 99], foot: [72, 114] },
+    weapon: { at: [41, 76], angle: -140 }, torso34: "front", leadSide: "right", weaponOver: true,
+    for3d: {
+      turn3: -40, pitch3: 14,
+      arms3: { right: { aim: { dir: [-0.7, -0.4, 0.6], reach: 0.8, bend: [0.3, 0, 1] } }, left: { aim: { dir: [-0.3, -0.55, -0.8], reach: 0.85 } } },
+      weapon3: [-0.8, -0.45, -0.3],
+    },
+  },
   // Despair: sinking down, his back arching: the lower torso leans back from the hips, the ribcage further, and the
   // neck and head thrown right back with the eyes turned up. Each hand clutches a side of his head. He still holds his
   // weapon in the right hand, which hangs down behind him, the blade pointing down. The body is turned like
@@ -1026,7 +1043,7 @@ export const PLAYER_3D_POSES: Partial<Record<PoseName, PoseName>> = {
   attack: "sw-overhead-leap", strike: "sw-overhead-strike", punch: "sw-overhead-strike",
   "swing-left-up": "sw-swing-l-windup", "swing-left": "sw-swing-l", "swing-right-up": "sw-swing-r-windup", "swing-right": "sw-swing-r",
   // a Block is a Parry, a dodge forward the Chase, back the Retreat; staggered, flinching, fallen
-  block: "sw-parry", "dodge-fwd": "sw-charge", "dodge-back": "sw-backstep", maneuver: "sw-charge",
+  block: "sw-parry", "dodge-fwd": "sw-charge", "dodge-back": "p3-backstep", maneuver: "sw-charge",
   kneel: "sw-down", flinch: "sw-flinch", fallen: "sw-dead",
 };
 export const player3dPose = (pose: PoseName): PoseName => PLAYER_3D_POSES[pose] ?? pose;

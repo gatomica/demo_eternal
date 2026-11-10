@@ -193,8 +193,12 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // would cut the first off and smear the two); except the flames, one for each unit they lick (up to three, a beat apart).
     const heard = new Map<string, number>();
     for (const ev of step.events) {
-      // An eternal effect taking hold has its own wisp, over the sound of the effect itself.
-      if (ev.kind === "eternal") { const w = eternalSfx(ev); playSfx(w.name, w.delay); }
+      // An eternal effect taking hold has its own wisp, over the sound of the effect itself. (Yours only: an enemy's weapon effect still happens, silently.)
+      if (ev.kind === "eternal") {
+        if (ev.attacker !== "player") continue;
+        const w = eternalSfx(ev);
+        playSfx(w.name, w.delay);
+      }
       const s = sfxFor(ev);
       if (!s) continue;
       const n = heard.get(s.name) ?? 0;
@@ -204,8 +208,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepKey]);
 
-  // Eternal effects happening in this step: they flash the bars they touch, light the weapon that carried them and show a halo where they take hold.
-  const eternalHere = impact && step ? step.events.filter((ev): ev is Extract<CombatEvent, { kind: "eternal" }> => ev.kind === "eternal") : [];
+  // Eternal effects happening in this step: they flash the bars they touch, light the weapon that carried them and show a halo where they take hold. Only yours
+  // do: Eternity is the player's, so an enemy's weapon effect takes place without any of that.
+  const eternalHere = impact && step ? step.events.filter((ev): ev is Extract<CombatEvent, { kind: "eternal" }> => ev.kind === "eternal" && ev.attacker === "player") : [];
   /** Whose bar an effect touches: the target's (extra Fatigue or damage), or the user's own (Fatigue saved). */
   const touchedBy = (ev: Extract<CombatEvent, { kind: "eternal" }>) => (ev.effect === "shortsword" ? ev.attacker : ev.target);
   const barFlashOf = (id: string) => (eternalHere.some(ev => touchedBy(ev) === id) ? stepKey : undefined);
@@ -1197,7 +1202,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         const to = ev.kind === "burned" ? ev.who : ev.target;
         projectiles.push({ from: to, to, kind: "flamehit", key: `${stepKey}-${to}-flamehit${flames++}` });
       }
-      if (ev.kind === "eternal") {
+      if (ev.kind === "eternal" && ev.attacker === "player") {
         // A halo where the effect took hold: where the blow met a Block, where it hit, or on the one who used it (Fatigue saved).
         const blocked = step.events.some(x => x.kind === "attack" && x.attacker === ev.attacker && x.target === ev.target && x.result === "blocked" && !x.ranged);
         const self = ev.effect === "shortsword";
@@ -1237,23 +1242,15 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    * Its remains lie where it fell, instead of the figure: it has fallen for good (this turn, once the
    * blow has landed, or in an earlier one), or it fell with a revive left and lies there until it rises.
    */
-  /**
-   * Its fall has shown: once the blow that drops it has landed. Under grit (it was dropped by a tied attack
-   * and finishes its own, in the step it falls) it stays up until that attack is over, and lies down after.
-   */
+  /** Its fall has shown: once the blow that drops it has landed. */
   const fellBy = (id: string): boolean => {
     const fall = stepOf("fall", id);
-    if (fall < 0) return false;
-    return stepOf("strike", id) === fall ? !!playback && playback.index > fall : reached(fall);
+    return fall >= 0 && reached(fall);
   };
   /** It has just lain down, in the beat showing now: its remains drop (see `.fx-die`). */
   const justFell = (id: string): boolean => {
     const fall = stepOf("fall", id);
-    if (!playback || fall < 0) return false;
-    if (stepOf("strike", id) !== fall) return playback.index === fall;
-    // After its own attack: the next step, in the first beat it shows (an attack's approach, or any other step's only beat).
-    const next = playback.steps[fall + 1];
-    return playback.index === fall + 1 && (isAttackStep(next) ? playback.phase === "approach" : true);
+    return !!playback && fall >= 0 && playback.index === fall;
   };
   const looksDead = (e: Enemy): boolean => {
     // Sealed in wax by the Warden (its flame taken), or because it died lit: its remains from that step on.
@@ -1322,10 +1319,18 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     if (pose === k.deathPose) return undefined;
     return k.blazePoses?.includes(pose) ? "blaze" : "lit";
   };
+  /** An enemy's blow being played, if it has one in the step now: at whom, and which blow (for `SceneFigure.faceToward`). */
+  const enemyBlow = (id: string) => {
+    const ev = playback?.steps[playback.index]?.events.find((x): x is Extract<typeof x, { kind: "attack" }> => x.kind === "attack" && x.attacker === id);
+    return ev && playback ? { id: ev.target, key: `${playback.from.turn}:${playback.index}:${id}` } : undefined;
+  };
+  /** Your own blow being played, if one is: whom it strikes (you face them, as you began, for all of it). */
+  const yourBlow = playback?.steps[playback.index]?.events.find((ev): ev is Extract<typeof ev, { kind: "attack" }> => ev.kind === "attack" && ev.attacker === "player");
   const figures: SceneFigure[] = [
     {
       id: "player",
       dodge: dodgeFor("player"),
+      faceToward: playback && yourBlow ? { id: yourBlow.target, key: `${playback.from.turn}:${playback.index}` } : undefined,
       view: playerAngle?.view ?? "back",
       straight: playerAngle?.straight,
       sides: playerAngle?.sides,
@@ -1390,6 +1395,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         lingerFrom: restJustOver(e) ? (e.intent.restPose as WardenPoseName) : strikeJustOver(e) ? (e.intent.strikePose as WardenPoseName) : undefined,
         smokeSince: smoke[e.id],
         eternalFlash: auraOf(e.id),
+        // Its own blow being played (at you): it faces you as it began, for all of it, whatever you do (dodge past or back off).
+        faceToward: playback ? enemyBlow(e.id) : undefined,
         // The fallen lie there, a little faded: they drop (instead of fading out), then stay.
         // (A unit that is about to lie down, but still has its own attack to finish, stays up and unfaded until then.)
         classes: looksDead(e)

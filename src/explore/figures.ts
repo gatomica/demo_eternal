@@ -39,7 +39,7 @@ const PLAYER_LOOK: Look = { ink: COLORS.ink, eye: COLORS.eye };
 export const playerLook = (gear: { weapon: WeaponTier; armor: ArmorTier; weaponItem?: WeaponItem; armorItem?: ArmorItem; headItem?: HeadItem }): Look => ({ ...PLAYER_LOOK, ...gear });
 
 /** Gear colors, the same as in a fight (index.css: --metal, --grip, --armor). */
-const METAL = "#b9bccb", GRIP = "#8a6b4a", ARMOR_INK = "#6f7489";
+const GRIP = "#8a6b4a", ARMOR_INK = "#6f7489";
 /** The demo's weapons, as the fight draws them (index.css): the torch's wax, the bedchamber brick, mortar, cord. */
 const WAX_INK = "#b9a14e", BRICK = "#85838d", MORTAR = "#c9c6bd", CORD = "#b39d73";
 
@@ -93,7 +93,7 @@ export function drawWalker(
   }
 
   /** What the armor is made of: a class's own armor has its own colour. */
-  const armorInk = look.armorItem === "bronze-chestplate" ? "#b4803f" : look.armorItem === "garb" ? "#1d1d24" : look.armorItem === "robe" ? "#ebe9f1" : ARMOR_INK;
+  const armorInk = look.armorItem === "bronze-chestplate" ? "#5a9475" : look.armorItem === "garb" ? "#1d1d24" : look.armorItem === "robe" ? "#ebe9f1" : ARMOR_INK;
   // A class's own armor covers the arms and legs too: they are drawn in its colour.
   const limbInk = look.armorItem === "bronze-chestplate" ? "#efece4" : look.armorItem === "robe" ? "#d6d4de" : look.armorItem ? armorInk : look.ink;
   g.strokeStyle = limbInk;
@@ -134,8 +134,8 @@ export function drawWalker(
     };
     if (look.weaponItem === "shortsword") { // the Bronze Shortsword: a bronze leaf blade, a short guard
       seg(GRIP, 0.035, at(-0.04), at(0.03));
-      seg("#8a5f2c", 0.03, at(0.03, -0.06), at(0.03, 0.06));
-      fill("#b9854a", [at(0.04, -0.03), at(0.15, -0.045), at(0.26, -0.03), at(0.34, 0), at(0.26, 0.03), at(0.15, 0.045), at(0.04, 0.03)]);
+      seg("#3d6b53", 0.03, at(0.03, -0.06), at(0.03, 0.06));
+      fill("#5e9a78", [at(0.04, -0.03), at(0.15, -0.045), at(0.26, -0.03), at(0.34, 0), at(0.26, 0.03), at(0.15, 0.045), at(0.04, 0.03)]);
     } else if (look.weaponItem === "axe") { // the Barbarian's Axe: a long haft, a broad iron head
       seg(GRIP, 0.04, at(-0.06), at(0.46));
       // (The head on the haft's side near its end: its edge alongside the haft, two lobes.)
@@ -146,8 +146,8 @@ export function drawWalker(
       fill("#8f93a3", [at(0.06, 0), at(0.065, -0.06), at(0.09, -0.115), at(0.13, -0.14), at(0.17, -0.115), at(0.195, -0.06), at(0.2, 0), at(0.185, -0.055), at(0.165, -0.1), at(0.13, -0.122), at(0.095, -0.1), at(0.075, -0.055)]);
     } else if (tier === "light") { // the Jagged Chisel: a broad short sword snapped off and ground square
       seg(GRIP, 0.035, at(-0.04), at(0.02));
-      seg(METAL, 0.03, at(0.02, -0.04), at(0.02, 0.04));
-      fill(METAL, [at(0.03, -0.028), at(0.135, -0.028), at(0.145, -0.018), at(0.145, 0.028), at(0.03, 0.028)]);
+      seg("#5e9a78", 0.03, at(0.02, -0.04), at(0.02, 0.04));
+      fill("#5e9a78", [at(0.03, -0.028), at(0.135, -0.028), at(0.145, -0.018), at(0.145, 0.028), at(0.03, 0.028)]);
     } else if (tier === "normal") { // the Waxed Torch: a shaft, its head a bulb of sealing wax
       seg(GRIP, 0.032, at(-0.04), at(0.26));
       seg(WAX_INK, 0.014, at(0.15, 0.014), at(0.26, 0.016));
@@ -241,7 +241,7 @@ export function drawWalker(
     if (look.headItem === "helm") {
       g.fillStyle = "#a63a2e";
       g.beginPath(); g.moveTo(HX(-r * 0.8), Y(headY - r * 0.5)); g.quadraticCurveTo(HX(0), Y(headY - r * 2.1), HX(r * 0.8), Y(headY - r * 0.5)); g.closePath(); g.fill();
-      g.fillStyle = "#b4803f";
+      g.fillStyle = "#5a9475";
       g.beginPath(); g.arc(HX(0), Y(headY + 0.01 * hk), r * 1.12 * T, Math.PI, Math.PI * 2); g.fill();
       g.fillRect(HX(-r * 1.12), Y(headY - 0.02 * hk), r * 2.24 * T, 0.045 * hk * T);
     } else if (look.headItem === "hood") {

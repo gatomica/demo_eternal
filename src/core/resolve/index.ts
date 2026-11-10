@@ -5,7 +5,7 @@
  * the UI only has to call it and render whatever comes back.
  *
  * Positions lock at the start: what the player saw during planning is what they fight.
- * 1. Attacks, fastest weapon first (attacks.ts).
+ * 1. Attacks, yours first, then the enemy you aimed at, then the rest at random (attacks.ts).
  * 2. Revives land and Rests settle (rests.ts).
  * 3. Movement (movement.ts).
  * 4. End of turn: decay, falls and staggers, each kind's own rules (endTurn.ts). Then every

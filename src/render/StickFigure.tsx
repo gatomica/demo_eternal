@@ -62,7 +62,7 @@ function SealingMark({ x, r, side, mid }: { x: number; r: number; side: number; 
  */
 /** The starting classes' weapons, drawn like the rest: along +x from the grip. */
 function ItemWeapon({ item }: { item: WeaponItem }) {
-  const bronze = "#b9854a", bronzeDark = "#8a5f2c", iron = "#8f93a3";
+  const bronze = "#5e9a78", bronzeDark = "#3d6b53", iron = "#8f93a3";
   switch (item) {
     case "shortsword": // Bronze Shortsword: a leaf blade, a short bar for a guard, a wrapped grip and a round pommel
       return (
@@ -105,17 +105,17 @@ export function Weapon({ tier, item }: { tier: WeaponTier; item?: WeaponItem }) 
     case "light": // the Jagged Chisel
       return (
         <g>
-          <circle cx={-5.4} cy={0} r={2.1} className="fig-wood-fill" />
+          <circle cx={-5.4} cy={0} r={2.1} fill="#3d6b53" />
           <line x1={-4} y1={0} x2={1.4} y2={0} className="fig-grip" strokeWidth={2.6} />
           {/* Finger ridges on the grip. */}
           <path d="M-2.6 -1.2 v2.4 M-0.8 -1.2 v2.4" className="fig-wood-line" />
           {/* The oval guard, edge-on. */}
-          <ellipse cx={2.2} cy={0} rx={1.3} ry={3.3} className="fig-metal-fill" />
+          <ellipse cx={2.2} cy={0} rx={1.3} ry={3.3} fill="#3d6b53" />
           {/* The broad blade, ground square at the break like a chisel: small nicks along its edges, a chipped corner. */}
-          <path d="M3.4 -2.3 L6.3 -2.3 L6.65 -1.85 L7 -2.3 L10 -2.3 L10.25 -2 L10.5 -2.3 L14 -2.3 L14.7 -1.6 L14.7 0.4 L14.35 0.7 L14.7 1 L14.7 2.3 L12.5 2.3 L12.2 1.95 L11.9 2.3 L8.7 2.3 L8.4 2 L8.1 2.3 L3.4 2.3 Z" className="fig-blade" />
-          <line x1={4.4} y1={0} x2={11.4} y2={0} className="fig-fuller" />
+          <path d="M3.4 -2.3 L6.3 -2.3 L6.65 -1.85 L7 -2.3 L10 -2.3 L10.25 -2 L10.5 -2.3 L14 -2.3 L14.7 -1.6 L14.7 0.4 L14.35 0.7 L14.7 1 L14.7 2.3 L12.5 2.3 L12.2 1.95 L11.9 2.3 L8.7 2.3 L8.4 2 L8.1 2.3 L3.4 2.3 Z" fill="#5e9a78" />
+          <line x1={4.4} y1={0} x2={11.4} y2={0} stroke="#3d6b53" strokeWidth={0.7} strokeLinecap="round" />
           {/* The bevel ground across its end. */}
-          <line x1={13.3} y1={-2.1} x2={13.3} y2={2.1} className="fig-bevel" />
+          <line x1={13.3} y1={-2.1} x2={13.3} y2={2.1} stroke="#8fc4a6" strokeWidth={0.6} strokeLinecap="round" />
           {/* Wax smeared on the blade from carving it, in streaks like paint. */}
           <path d="M4.8 -1.3 Q7.6 -0.85 10.6 -1.45 M5.9 1.15 Q8.9 1.6 12.3 1.05" className="fig-wax-paint" />
         </g>
@@ -255,14 +255,14 @@ function Armor({ tier, s, near, item, frontShown = false, turn = 0 }: { tier: Ar
     // The Bronze Chestplate
     return (
       <g>
-        <line x1={nx} y1={ny + 2} x2={ex} y2={ey} stroke="#b4803f" strokeWidth={ARMOR_WIDTH[tier]} strokeLinecap="round" />
+        <line x1={nx} y1={ny + 2} x2={ex} y2={ey} stroke="#5a9475" strokeWidth={ARMOR_WIDTH[tier]} strokeLinecap="round" />
         {/* The muscles are worked into the front; the back is plain, with only the spine's ridge. */}
-        <g stroke="#7d5424" strokeWidth={0.9} strokeLinecap="round" fill="none">
+        <g stroke="#3a6650" strokeWidth={0.9} strokeLinecap="round" fill="none">
           <line x1={fr(0.12, 0)[0]} y1={fr(0.12, 0)[1]} x2={fr(0.82, 0)[0]} y2={fr(0.82, 0)[1]} />
           {frontShown && <path d={`M${fr(0.28, -5.4)[0]} ${fr(0.28, -5.4)[1]} Q${fr(0.4, 0)[0]} ${fr(0.4, 0)[1]} ${fr(0.28, 5.4)[0]} ${fr(0.28, 5.4)[1]}`} />}
           {frontShown && [0.52, 0.66].map(k => <line key={k} x1={fr(k, -4.2)[0]} y1={fr(k, -4.2)[1]} x2={fr(k, 4.2)[0]} y2={fr(k, 4.2)[1]} />)}
         </g>
-        <circle cx={near[0]} cy={near[1]} r={3.6} fill="#b4803f" stroke="#7d5424" strokeWidth={0.7} />
+        <circle cx={near[0]} cy={near[1]} r={3.6} fill="#5a9475" stroke="#3a6650" strokeWidth={0.7} />
       </g>
     );
   }
@@ -403,10 +403,10 @@ export function HeadGear({ item, x, y, front }: { item: HeadItem; x: number; y: 
     return (
       <g strokeLinejoin="round">
         <path d={`M${x - 7} ${y - 5} Q${x} ${y - 19} ${x + 7} ${y - 5} Z`} fill="#a63a2e" stroke="#7a261d" strokeWidth={0.6} />
-        <path d={`M${x - 8.8} ${y + 1.5} A8.8 8.8 0 0 1 ${x + 8.8} ${y + 1.5} L${x + 8.8} ${y + 4} L${x - 8.8} ${y + 4} Z`} fill="#b4803f" stroke="#7d5424" strokeWidth={0.8} />
+        <path d={`M${x - 8.8} ${y + 1.5} A8.8 8.8 0 0 1 ${x + 8.8} ${y + 1.5} L${x + 8.8} ${y + 4} L${x - 8.8} ${y + 4} Z`} fill="#5a9475" stroke="#3a6650" strokeWidth={0.8} />
         {/* The hanging cheek guard, on the side of the head that shows: seen from behind it is the near side toward the way the figure faces (the right); turned 3/4 to the camera it is the figure's own right (the page's left). */}
-        <path d={front ? `M${x - 4.6} ${y + 3} L${x - 9} ${y + 3} L${x - 7.4} ${y + 10} L${x - 4.2} ${y + 8} Z` : `M${x + 4.6} ${y + 3} L${x + 9} ${y + 3} L${x + 7.4} ${y + 10} L${x + 4.2} ${y + 8} Z`} fill="#a9763a" stroke="#7d5424" strokeWidth={0.7} />
-        <line x1={x - 8.8} y1={y + 1.8} x2={x + 8.8} y2={y + 1.8} stroke="#7d5424" strokeWidth={0.7} />
+        <path d={front ? `M${x - 4.6} ${y + 3} L${x - 9} ${y + 3} L${x - 7.4} ${y + 10} L${x - 4.2} ${y + 8} Z` : `M${x + 4.6} ${y + 3} L${x + 9} ${y + 3} L${x + 7.4} ${y + 10} L${x + 4.2} ${y + 8} Z`} fill="#549070" stroke="#3a6650" strokeWidth={0.7} />
+        <line x1={x - 8.8} y1={y + 1.8} x2={x + 8.8} y2={y + 1.8} stroke="#3a6650" strokeWidth={0.7} />
       </g>
     );
   }

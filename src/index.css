@@ -20,6 +20,7 @@
   --eyes: #15141b;
   --flesh: #a2505a;     /* health left to fill */
   --flesh-lost: #e7a3aa; /* health just lost, fading away */
+  --flesh-missing: #2b1216; /* health missing: the empty part of a bar, a faint dark red, to tell it from the jet black of Death */
   --sleep: #f3f1f8;     /* Fatigue, white */
   --void: #040406;      /* Death, black */
   --bar-track: min(38vw, 540px);  /* full length of a health bar at BAR_FULL_HP */
@@ -341,10 +342,10 @@ kbd {
 .menu-volume { width: min(280px, 80vw); }
 .volume-slider input { width: 100%; accent-color: var(--accent); cursor: pointer; }
 
-/* ---------- Health bar: waking room, white Fatigue, black Death ----------
+/* ---------- Health bar: waking room, white Fatigue, black Death, and the missing health, a faint dark red, where the bar is empty ----------
  * Two stacked layers: the current values cut instantly on top, and a lighter trail
  * underneath that waits a beat, then slides to the new values. */
-.bar { position: relative; height: var(--bar-h); border: 1px solid var(--line); border-radius: 3px; overflow: visible; background: var(--bg); }
+.bar { position: relative; height: var(--bar-h); border: 1px solid var(--line); border-radius: 3px; overflow: visible; background: var(--flesh-missing); }
 .bar-layer { position: absolute; inset: 0; display: flex; overflow: hidden; border-radius: 2px; }
 .bar.is-mirrored .bar-layer { flex-direction: row-reverse; }
 .bar-layer > i { display: block; height: 100%; flex: none; }
@@ -434,23 +435,42 @@ kbd {
 /* The starting classes' armor covers the arms and legs too: the Soldier's white cloth (leather over the hands and feet is drawn on top), the Hunter's black, the Nomad's pale gray cloth. Round ends all. */
 .armor-bronze-chestplate .fig-limb { stroke: #efece4; stroke-width: 5.4; }
 .armor-garb .fig-limb { stroke: #17171c; stroke-width: 5.2; }
+/* The Hunter's gloves, legs, pelvis and spine: a shade blacker than the garb. */
+.armor-garb .fig-limb.fig-black { stroke: #08070b; }
+.fig-spine-black { fill: #08070b; }
+/* The Hunter's coat's front edges: a black line from the front start of the tail on his left up to the shoulder line, going on to the right side of the neck. */
+.fig-coat-line { fill: none; stroke: #08070b; stroke-width: 0.7; stroke-linecap: round; stroke-linejoin: round; }
+/* The Hunter's cloak: the garb's own black (a hairline in its own colour, so no seam shows between its near and far walls). */
+.fig-hunter-cloak { fill: #17171c; stroke: #17171c; stroke-width: 0.5; stroke-linejoin: round; }
 .armor-robe .fig-limb { stroke: #d6d4de; stroke-width: 4.8; }
+/* The Nomad's robe in 3D: the white robe over the shoulders, hips and spine, the sash, the V of the collar, the puffy gray trousers gathered at the knee by a band, the soft wraps on the arms and shins. */
+.armor-robe .fig-limb.fig-robe { stroke: #ebe9f1; }
+.fig-robe-body { fill: #ebe9f1; }
+.fig-sash { fill: #8e8aa0; stroke: #8e8aa0; stroke-width: 0.3; stroke-linejoin: round; }
+.fig-collar { fill: none; stroke: #b9b5c6; stroke-width: 0.9; stroke-linecap: round; stroke-linejoin: round; }
+.fig-puff { fill: #cfcdd6; stroke: none; }
+.fig-knee-band { fill: #9c99ab; stroke: #9c99ab; stroke-width: 0.3; stroke-linejoin: round; }
+.fig-limb-wrap { fill: none; stroke: #8d899c; stroke-opacity: 0.34; stroke-width: 0.55; stroke-linecap: round; }
 /* The player in 3D (Sleepwalker3D's `gear`): its armor over the ribcage, the Soldier's leather, its helm and mask, its black hood. */
-.fig-chest-bronze { fill: #b4803f; }
+.fig-chest-bronze { fill: #5a9475; }
 .fig-chest-garb { fill: #17171c; }
 .fig-chest-robe { fill: #ebe9f1; }
 .fig-limb.fig-leather, .armor-bronze-chestplate .fig-limb.fig-leather { stroke: #7a5232; }
-.fig-limb.fig-bronze, .armor-bronze-chestplate .fig-limb.fig-bronze { stroke: #b4803f; }
+.fig-limb.fig-bronze, .armor-bronze-chestplate .fig-limb.fig-bronze { stroke: #5a9475; }
 /* The bronze chestplate's indents: the line between the pecs, and the abs: a darker bronze. */
-.fig-chest-line { fill: none; stroke: #8c5f2a; stroke-width: 0.9; stroke-linecap: round; stroke-linejoin: round; }
+.fig-chest-line { fill: none; stroke: #3a6650; stroke-width: 0.9; stroke-linecap: round; stroke-linejoin: round; }
 /* The chestplate's skirt: flat strips of leather, a little darker than the rest (a hairline in their own colour, so no seam shows between them). */
 .fig-strip { fill: #6a4429; stroke: #6a4429; stroke-width: 0.3; stroke-linejoin: round; }
 .fig-strip.fig-strip-inside { fill: #553620; stroke: #553620; }
-.fig-helm-bronze { fill: #b4803f; stroke: #b4803f; stroke-width: 0.3; stroke-linejoin: round; }
+.fig-helm-bronze { fill: #5a9475; stroke: #5a9475; stroke-width: 0.3; stroke-linejoin: round; }
 /* The inside of a helm's plate (seen past its edge): a darker bronze. */
-.fig-helm-bronze.fig-helm-inside { fill: #8a5f2c; stroke: #8a5f2c; }
+.fig-helm-bronze.fig-helm-inside { fill: #3d6b53; stroke: #3d6b53; }
 .fig-helm-crest { fill: none; stroke: #a63a2e; stroke-linecap: round; stroke-linejoin: round; }
-.fig-head.fig-mask { fill: #e3d9be; }
+.fig-head.fig-mask { fill: #cfcdd6; stroke: none; }
+/* The Nomad's mask: its eye opening (the face beneath shows through), the turns of cloth round the head, the knot and the braid of wrappings behind. */
+.fig-mask-hole { fill: var(--ink); stroke: #a8a5b5; stroke-width: 0.6; stroke-linejoin: round; }
+.fig-mask-wrap { fill: none; stroke: #b4b1c0; stroke-width: 0.7; stroke-linecap: round; stroke-linejoin: round; }
+.fig-mask-tail { fill: #cfcdd6; stroke: #a8a5b5; stroke-width: 0.5; stroke-linejoin: round; }
 .fig-hood.fig-hood-black { fill: #17171c; stroke: none; }
 .fig-limb.dbg-red { stroke: #e0201b !important; }
 .fig-limb.dbg-far { stroke: #3b82f6; }

@@ -77,6 +77,11 @@ export interface SceneFigure {
   encased?: boolean;
   /** It has fallen: its body in "pieces" on the floor (drawn instead of the figure), or sealed in "wax". */
   dead?: "pieces" | "wax" | "cloak" | "guide";
+  /**
+   * It is striking this one (`key`: which blow, the same for every beat of it): it faces the way it faced it when the blow began, and does not turn from
+   * there, whatever the target does (knocked back, dodging past, backing off) until the blow is over.
+   */
+  faceToward?: { id: string; key: string };
   /** It fell as the turn now playing plays: the player still faces it (as it struck it) until the turn is over. */
   fellThisTurn?: boolean;
   /** The Warden's remains in his second form: the wax is burnt black. */
@@ -144,6 +149,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   shade?: boolean;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
+  /** The way each figure faced as its blow began (`SceneFigure.faceToward`), kept for the whole blow. */
+  const faceLock = useRef(new Map<string, { key: string; yaw: number; target: string }>());
   const [size, setSize] = useState({ w: 0, h: 0 });
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -271,6 +278,23 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   /** The way a figure faces on the floor: along its dodge, else toward the player. */
   const figureYaw = (f: SceneFigure, at: Vec) => {
     if (dodgeFacing(f)) return yawOf(dodgeFacing(f)!);
+    if (!f.faceToward) {
+      // No blow now. One that defeated its target is still faced: for the rest of the turn it fell in (the others being attacked meanwhile do not turn you away from it),
+      // and, once none is left up, after the fight is won too (you do not turn to the default way, or to where another lies). Otherwise nothing is held.
+      const held = faceLock.current.get(f.id), foe = held && figures.find(g => g.id === held.target);
+      const over = !!foe && (!!foe.fellThisTurn || (!!foe.dead && figures.every(g => g.id === f.id || g.dead)));
+      if (held && over && f.player3d && !f.straight) return held.yaw;
+      faceLock.current.delete(f.id);
+    } else if (!f.straight) {
+      // (worked out the first time it is asked in a blow, from where the two stand then, and held until the blow is over)
+      if (faceLock.current.get(f.id)?.key !== f.faceToward.key) {
+        const me = posNow(f.id), foe = posNow(f.faceToward.id);
+        if (me && foe) faceLock.current.set(f.id, { key: f.faceToward.key, yaw: facingYaw(c, me, foe, f.player3d ? "front" : f.view, false), target: f.faceToward.id });
+        else faceLock.current.delete(f.id);
+      }
+      const held = faceLock.current.get(f.id);
+      if (held) return held.yaw;
+    }
     // The player in 3D faces the enemies (the middle of those still up), unless the viewer shows it straight on. One that falls to its blow still
     // counts until the turn is over (it does not turn away mid-strike), and with none left up it goes on facing where they lie.
     if (f.player3d && !f.straight) {
@@ -466,7 +490,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         >
           {f.holdsString && !f.dead && <StringAura layer="back" spread={f.body ? 2.4 : 1} />}
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" && !((f.sleepwalker3d || f.player3d) && w > 0) ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : (f.sleepwalker3d || f.player3d) && w > 0 ? <Sleepwalker3D pose={f.pose} hand={f.hand} weapon={f.weapon} gear={f.player3d ? { weaponItem: f.weaponItem, armor: f.armor, armorItem: f.armorItem, headItem: f.headItem } : undefined} hooded={f.hooded} encased={f.encased} waxCaked={f.waxCaked && !f.dead} dead={!!f.dead} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
+            {f.dead === "pieces" && !((f.sleepwalker3d || f.player3d) && w > 0) ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : (f.sleepwalker3d || f.player3d) && w > 0 ? <Sleepwalker3D pose={f.pose} hand={f.hand} weapon={f.weapon} gear={f.player3d ? { weaponItem: f.weaponItem, armor: f.armor, armorItem: f.armorItem, headItem: f.headItem } : undefined} hooded={f.hooded} encased={f.encased} waxCaked={f.waxCaked && !f.dead} dead={!!f.dead} eternalFlash={f.eternalFlash} swayId={f.id} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {headFlames.has(f.id) && <FlameAnchor id={f.id} x={headFlames.get(f.id)![0] - box.x} y={headFlames.get(f.id)![1] - box.y} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}

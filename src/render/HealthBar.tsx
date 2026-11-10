@@ -19,7 +19,10 @@ const BAR_FULL_HP = 60;
 /** What a Rest would give back (see `restRecovery`), shown on the bar before you take it. */
 export interface Recovery {
   fatigue: number;
+  /** The Death cleared (the black going back to waking room). */
   heal: number;
+  /** The Health restored after that (the bar's health growing). */
+  health?: number;
 }
 
 export interface BarValues {
@@ -39,6 +42,8 @@ function Segments({ v, maxHP, preview = 0, recover }: { v: BarValues; maxHP: num
   // A Rest about to be taken: the Fatigue it clears and the Health it returns flicker where they are now.
   const gone = Math.min(Math.max(0, recover?.fatigue ?? 0), fatigue);
   const healed = Math.min(Math.max(0, recover?.heal ?? 0), Math.max(0, v.death));
+  // ...and, once the Death is all cleared, the Health that is restored: it flickers where the bar's health will grow into, just after.
+  const restored = Math.min(Math.max(0, recover?.health ?? 0), Math.max(0, maxHP - hp - (v.death - healed)));
   return (
     <>
       <i className="bar-room" style={{ width: barPct(hp - fatigue - cost, maxHP) }} />
@@ -47,6 +52,7 @@ function Segments({ v, maxHP, preview = 0, recover }: { v: BarValues; maxHP: num
       <i className="bar-fatigue" style={{ width: barPct(fatigue - gone, maxHP) }} />
       {healed > 0 && <i className="bar-heal" style={{ width: barPct(healed, maxHP) }} />}
       <i className="bar-death" style={{ width: barPct(v.death - healed, maxHP) }} />
+      {restored > 0 && <i className="bar-heal" style={{ width: barPct(restored, maxHP) }} />}
     </>
   );
 }

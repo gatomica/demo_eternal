@@ -3,13 +3,30 @@
  * between them, the ribcage (a real solid in space, as the sleepwalkers and the waxed have), the weapon modelled in 3D in its hand, and the
  * depth sort that draws what is far first. `Waxed3D` and `Sleepwalker3D` are built from these.
  */
-import type { ReactNode } from "react";
+import { isValidElement, type ReactNode, type Ref } from "react";
 import type { WeaponTier } from "../core/types";
 import { type Cam, eyeSpace, facingVec, METERS_PER_UNIT as U, onScreen, right as rightOf, toCamera, type Vec } from "./camera";
 import { type Joint, type P3, type placeRig, ribcageOf, type Rig3, type Seen, type swingArc, weaponFrame } from "./rig3d";
 import { drawGear, type GearModel, type V3 } from "./gear3d";
 import { GearShape } from "./GearShape";
 import { HeldWeapon } from "./StickFigure";
+
+/**
+ * Whether two sets of props of a 3D figure draw the same picture, so it need not be worked out again (`memo`): every prop equal, or an object (a camera, a spot, a
+ * box, the gear it wears) whose own fields are. The scene redraws every figure on every frame of a shot and on every change in the fight, and a figure that has not
+ * moved is the same picture each time.
+ */
+export function sameDrawing(a: object, b: object): boolean {
+  const x = a as Record<string, unknown>, y = b as Record<string, unknown>;
+  for (const k of new Set([...Object.keys(x), ...Object.keys(y)])) {
+    const p = x[k], q = y[k];
+    if (p === q) continue;
+    if (!p || !q || typeof p !== "object" || typeof q !== "object" || Array.isArray(p) || isValidElement(p) || isValidElement(q)) return false;
+    const u = p as Record<string, unknown>, v = q as Record<string, unknown>;
+    for (const f of new Set([...Object.keys(u), ...Object.keys(v)])) if (u[f] !== v[f]) return false;
+  }
+  return true;
+}
 
 /** One thing drawn, and how far from the camera it is (far first). */
 export interface Part { key: string; depth: number; node: ReactNode }
@@ -21,7 +38,8 @@ export type Box = { x: number; y: number; w: number; h: number };
 export function canvas3d(placed: ReturnType<typeof placeRig>, box: Box, opts: { unshaded?: (key: string) => boolean } = {}) {
   const { seen, see, origin } = placed;
   const ux = box.w / 100, uy = box.h / 120;
-  const X = (p: Seen) => (p.sx - box.x) / ux, Y = (p: Seen) => (p.sy - box.y) / uy;
+  // (To hundredths of a drawing unit: a figure is some thousand points a frame, and their digits are most of its markup, which the browser parses every frame.)
+  const X = (p: Seen) => Math.round(((p.sx - box.x) / ux) * 100) / 100, Y = (p: Seen) => Math.round(((p.sy - box.y) / uy) * 100) / 100;
   /** A size there, relative to what it is at the figure's feet. */
   const scaleAt = (...ps: Seen[]) => ps.reduce((n, p) => n + p.ppm, 0) / ps.length / origin.ppm;
   const depthOf = (...ps: Seen[]) => ps.reduce((n, p) => n + p.depth, 0) / ps.length;
@@ -97,7 +115,7 @@ function across(n: P3): [P3, P3] {
   return [u, [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]]];
 }
 /** The ellipse a circle looks like, from where two of its radii (square to each other) land on the screen: its half-sizes and its tilt (degrees). */
-function ellipseOf(axes: [number, number][]): { rx: number; ry: number; angle: number } {
+export function ellipseOf(axes: [number, number][]): { rx: number; ry: number; angle: number } {
   const sxx = axes.reduce((n, v) => n + v[0] * v[0], 0), syy = axes.reduce((n, v) => n + v[1] * v[1], 0), sxy = axes.reduce((n, v) => n + v[0] * v[1], 0);
   const mean = (sxx + syy) / 2, spread = Math.sqrt(((sxx - syy) / 2) ** 2 + sxy * sxy);
   return { rx: Math.sqrt(mean + spread), ry: Math.sqrt(Math.max(0, mean - spread)), angle: (Math.atan2(2 * sxy, sxx - syy) * 90) / Math.PI };
@@ -152,6 +170,22 @@ export function ribcagePart(c: Canvas3D, rig: Rig3, look: { cls?: string; ribs?:
     key: "ribcage", depth: centre.depth - 0.004,
     node: <g key="ribcage"><ellipse cx={X(centre)} cy={Y(centre)} rx={outline.rx} ry={outline.ry} transform={`rotate(${outline.angle} ${X(centre)} ${Y(centre)})`} className={look.cls ?? "fig-ribcage"} />{crescents}</g>,
   };
+}
+
+/**
+ * A solid ellipsoid in space (like the ribcage, a body part that is wider one way than the other), drawn as the ellipse its outline is from where the
+ * viewer is: round at both ends, turning and narrowing with the body. `side`, `fwd` and `up` are its three axes (unit ways, in body space) and `halfW`,
+ * `halfD`, `halfH` its half sizes along them (meters).
+ */
+export function ellipsoidPart(c: Canvas3D, key: string, centre: P3, side: P3, fwd: P3, up: P3, halfW: number, halfD: number, halfH: number, cls: string): Part {
+  const { see, X, Y } = c;
+  const mid = see(centre);
+  const onScreen = (v: readonly number[], len: number): [number, number] => {
+    const e = see([0, 1, 2].map(i => centre[i] + v[i] * len) as unknown as P3);
+    return [X(e) - X(mid), Y(e) - Y(mid)];
+  };
+  const o = ellipseOf([onScreen(side, halfW), onScreen(fwd, halfD), onScreen(up, halfH)]);
+  return { key, depth: mid.depth, node: <ellipse key={key} cx={X(mid)} cy={Y(mid)} rx={o.rx} ry={o.ry} transform={`rotate(${o.angle} ${X(mid)} ${Y(mid)})`} className={cls} /> };
 }
 
 /** A swing's arch (`swingArc`), drawn as it fades when the strike ends (`fig-trail`), in front of the figure. */
@@ -267,10 +301,10 @@ function frameWithEdge(ax: P3, e: P3, edge: V3): { ay: P3; az: P3 } {
 }
 
 /** The figure's drawing: every part, far first. (Its shadow is the scene's, a shade disc on the floor under it.) */
-export function Figure3DSvg({ parts, title, className }: { parts: Part[]; title?: string; className?: string }) {
+export function Figure3DSvg({ parts, title, className, rootRef }: { parts: Part[]; title?: string; className?: string; rootRef?: Ref<SVGSVGElement> }) {
   const sorted = [...parts].sort((a, b) => b.depth - a.depth);
   return (
-    <svg viewBox="0 0 100 120" className={`figure figure-front${className ? ` ${className}` : ""}`} role="img" aria-label={title}>
+    <svg ref={rootRef} viewBox="0 0 100 120" className={`figure figure-front${className ? ` ${className}` : ""}`} role="img" aria-label={title}>
       {title && <title>{title}</title>}
       {sorted.map(p => p.node)}
     </svg>

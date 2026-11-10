@@ -11,13 +11,12 @@ import type { ArmorTier, Fighter, Player, Tier, WeaponTier } from "./types";
  * Tuning tables (sixteenths of max health)
  * ============================================================ */
 
-/** `speed` orders attacks within a turn: lower goes first, equal speeds land together. */
 /** `name`: the weapon of that weight in this demo (its eternal version is "Eternal <name>"). */
-export const WEAPONS: Record<WeaponTier, { weight: number; cost: number; damage: number; block: number; speed: number; label: string; name: string }> = {
-  baseline: { weight: 0, cost: 1, damage: 1, block: 0, speed: 0, label: "None", name: "Bare hands" },
-  light:  { weight: 0.5, cost: 1, damage: 2, block: 0.5, speed: 1, label: "Light", name: "Jagged Chisel" },
-  normal: { weight: 1, cost: 3, damage: 3, block: 1, speed: 2, label: "Normal", name: "Waxed Torch" },
-  heavy:  { weight: 1.5, cost: 5, damage: 4, block: 1.5, speed: 3, label: "Heavy", name: "Brick Hammer" },
+export const WEAPONS: Record<WeaponTier, { weight: number; cost: number; damage: number; block: number; label: string; name: string }> = {
+  baseline: { weight: 0, cost: 1, damage: 1, block: 0, label: "None", name: "Bare hands" },
+  light:  { weight: 0.5, cost: 1, damage: 2, block: 0.5, label: "Light", name: "Jagged Chisel" },
+  normal: { weight: 1, cost: 3, damage: 3, block: 1, label: "Normal", name: "Waxed Torch" },
+  heavy:  { weight: 1.5, cost: 5, damage: 4, block: 1.5, label: "Heavy", name: "Brick Hammer" },
 };
 
 /**
@@ -80,13 +79,15 @@ export const restAmount = (f: Fighter) => sixteenths(REST_CLEARS, f.maxHP);
 
 /**
  * What a Rest would give back right now (for the preview on the bar): the Fatigue it clears, and
- * the Health that returns if it clears more than there is (half the excess; the lost Health, shown black).
+ * what returns if it clears more than there is (half the excess): the Death it clears first (the lost Health, shown black), then the Health it restores.
  */
-export function restRecovery(f: Fighter): { fatigue: number; heal: number } {
+export function restRecovery(f: Fighter): { fatigue: number; heal: number; health: number } {
   const amount = restAmount(f);
   const fatigue = Math.min(f.fatigue, amount);
   const excess = amount - f.fatigue;
-  return { fatigue, heal: excess > 0 ? Math.min(excess / 2, f.death) : 0 };
+  // Healing clears Death first (`heal` below), and what is left of it restores Health (`health`, as far as there is Health missing).
+  const healing = excess > 0 ? excess / 2 : 0, heal = Math.min(healing, f.death);
+  return { fatigue, heal, health: Math.min(healing - heal, Math.max(0, f.maxHP - f.hp)) };
 }
 
 /**

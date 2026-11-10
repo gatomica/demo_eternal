@@ -104,7 +104,7 @@ export const WAXED: EnemyKind = {
 
 /**
  * A waxed carrying a weapon in its free hand: the same kneeling wretch, but its two clawing
- * attacks are blows of the weapon (its weight's numbers and speed, and its effect, free for it),
+ * attacks are blows of the weapon (its weight's numbers, and its effect, free for it),
  * and beaten, it drops the ordinary weapon. Hurl Wax is thrown with its other hand, as ever, and
  * carries no effect; its Brace is still bare. (No Waxed Torch: that is the wardens' own.)
  */
