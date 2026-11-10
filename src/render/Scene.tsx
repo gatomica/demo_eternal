@@ -77,6 +77,8 @@ export interface SceneFigure {
   encased?: boolean;
   /** It has fallen: its body in "pieces" on the floor (drawn instead of the figure), or sealed in "wax". */
   dead?: "pieces" | "wax" | "cloak" | "guide";
+  /** It fell as the turn now playing plays: the player still faces it (as it struck it) until the turn is over. */
+  fellThisTurn?: boolean;
   /** The Warden's remains in his second form: the wax is burnt black. */
   charred?: boolean;
   /** The Warden: phase two's look (black wax, burning inside) whatever his arm. */
@@ -269,9 +271,11 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   /** The way a figure faces on the floor: along its dodge, else toward the player. */
   const figureYaw = (f: SceneFigure, at: Vec) => {
     if (dodgeFacing(f)) return yawOf(dodgeFacing(f)!);
-    // The player in 3D faces the enemies (the middle of those still up), unless the viewer shows it straight on.
+    // The player in 3D faces the enemies (the middle of those still up), unless the viewer shows it straight on. One that falls to its blow still
+    // counts until the turn is over (it does not turn away mid-strike), and with none left up it goes on facing where they lie.
     if (f.player3d && !f.straight) {
-      const foes = figures.filter(g => g.id !== "player" && !g.dead).map(g => posNow(g.id)).filter((p): p is Vec => !!p);
+      const all = figures.filter(g => g.id !== "player"), up = all.filter(g => !g.dead || g.fellThisTurn);
+      const foes = (up.length ? up : all).map(g => posNow(g.id)).filter((p): p is Vec => !!p);
       if (foes.length) return facingYaw(c, at, { x: foes.reduce((n, p) => n + p.x, 0) / foes.length, z: foes.reduce((n, p) => n + p.z, 0) / foes.length }, "front", false);
     }
     return facingYaw(c, at, posNow("player"), f.view, !!f.straight);

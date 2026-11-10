@@ -440,7 +440,15 @@ kbd {
 .fig-chest-garb { fill: #17171c; }
 .fig-chest-robe { fill: #ebe9f1; }
 .fig-limb.fig-leather, .armor-bronze-chestplate .fig-limb.fig-leather { stroke: #7a5232; }
-.fig-helm-bronze { fill: #b4803f; stroke: #7d5424; stroke-width: 0.6; stroke-linejoin: round; }
+.fig-limb.fig-bronze, .armor-bronze-chestplate .fig-limb.fig-bronze { stroke: #b4803f; }
+/* The bronze chestplate's indents: the line between the pecs, and the abs: a darker bronze. */
+.fig-chest-line { fill: none; stroke: #8c5f2a; stroke-width: 0.9; stroke-linecap: round; stroke-linejoin: round; }
+/* The chestplate's skirt: flat strips of leather, a little darker than the rest (a hairline in their own colour, so no seam shows between them). */
+.fig-strip { fill: #6a4429; stroke: #6a4429; stroke-width: 0.3; stroke-linejoin: round; }
+.fig-strip.fig-strip-inside { fill: #553620; stroke: #553620; }
+.fig-helm-bronze { fill: #b4803f; stroke: #b4803f; stroke-width: 0.3; stroke-linejoin: round; }
+/* The inside of a helm's plate (seen past its edge): a darker bronze. */
+.fig-helm-bronze.fig-helm-inside { fill: #8a5f2c; stroke: #8a5f2c; }
 .fig-helm-crest { fill: none; stroke: #a63a2e; stroke-linecap: round; stroke-linejoin: round; }
 .fig-head.fig-mask { fill: #e3d9be; }
 .fig-hood.fig-hood-black { fill: #17171c; stroke: none; }
@@ -616,6 +624,11 @@ kbd {
 .gear-viewer .gear-panel { top: 12px; }
 .gear-stage { width: min(100%, 150vh); height: 100%; max-height: 100%; cursor: grab; touch-action: none; user-select: none; }
 .gear-stage:active { cursor: grabbing; }
+/* The Wearing viewer: you alone in the middle, the shade under your feet and your figure laid over each other, as tall as a figure box is wide. */
+.wear-stage { position: relative; height: 100%; aspect-ratio: 100 / 120; max-width: 100%; cursor: grab; touch-action: none; user-select: none; overflow: hidden; }
+.wear-stage:active { cursor: grabbing; }
+.wear-figure { position: absolute; inset: 0; transform-origin: 50% 50%; }
+.wear-figure > svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 
 /* ---------- Projectiles: thrown across the field as a ranged attack lands ---------- */
 .projectile {

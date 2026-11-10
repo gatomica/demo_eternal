@@ -213,7 +213,7 @@ export function Waxed3D({ pose, hand = "right", weapon, encased, meldLegs, hideF
     }
     // (out of a swing its edge side faces away from the body, never toward it)
     const wielder = [0, 1, 2].map(i => (rig.joints.neck[i] + rig.joints.pelvis[i]) / 2) as unknown as P3;
-    parts.push(...weaponParts(c, { weapon, model, reach, held, face, swing, wielder, slide, yaw, cam, w, h, scale, box, eternalFlash }));
+    parts.push(...weaponParts(c, { weapon, model, reach, held, face, swing, wielder, slide, at, yaw, cam, w, h, scale, box, eternalFlash }));
   }
 
   // Dead: the wax runs. A puddle of it spreads on the floor round the base; a rim of it slumps up over the bottom of the body in front, so he melds a little

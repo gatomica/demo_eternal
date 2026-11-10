@@ -5,7 +5,7 @@
  */
 import type { ReactNode } from "react";
 import type { WeaponTier } from "../core/types";
-import { type Cam, facingVec, HORIZON, METERS_PER_UNIT as U, right as rightOf } from "./camera";
+import { type Cam, eyeSpace, facingVec, METERS_PER_UNIT as U, onScreen, right as rightOf, toCamera, type Vec } from "./camera";
 import { type Joint, type P3, type placeRig, ribcageOf, type Rig3, type Seen, type swingArc, weaponFrame } from "./rig3d";
 import { drawGear, type GearModel, type V3 } from "./gear3d";
 import { GearShape } from "./GearShape";
@@ -31,15 +31,46 @@ export function canvas3d(placed: ReturnType<typeof placeRig>, box: Box, opts: { 
   /**
    * A run of bones through these joints (or points already on the screen), `width` units thick at the figure's own distance. A limb or a wax
    * shell behind the middle of the body is in the far tone, unless `opts.unshaded` says that part never is.
+   *
+   * `cut`: which of its ends are cut across the limb instead of rounded, where it meets another run end to end (an arm and its glove): each given as
+   * the point in space where it is cut and the way the limb runs there. A limb is a cylinder, so a cut end is the circle across it, an ellipse seen
+   * from anywhere (as the end of a rod is in the gear viewer): the run stops square there and the ellipse is laid over its end, in its colour. Of the
+   * two runs that meet there, the one nearer the viewer is drawn over the other (`meet`), so the line between them is the near half of that circle.
    */
-  const bones = (key: string, js: (Joint | Seen)[], cls: string, width: number, extra = 0) => {
+  const bones = (key: string, js: (Joint | Seen)[], cls: string, width: number, extra = 0, cut?: { start?: Cut; end?: Cut }) => {
     const ps = js.map(j => (typeof j === "string" ? seen[j] : j));
     const depth = depthOf(...ps);
     const far = depth > mid + 0.02 && (cls.startsWith("fig-limb") || cls === "fig-wax-shell") && !opts.unshaded?.(key);
-    parts.push({
-      key, depth: depth - extra,
-      node: <polyline key={key} points={ps.map(p => `${X(p)},${Y(p)}`).join(" ")} className={`${cls}${far ? " fig-far" : ""}`} style={{ strokeWidth: width * scaleAt(...ps) }} />,
-    });
+    const className = `${cls}${far ? " fig-far" : ""}`, strokeWidth = width * scaleAt(...ps);
+    const line = (pts: Seen[], k: string, cap?: "butt") => <polyline key={k} points={pts.map(p => `${X(p)},${Y(p)}`).join(" ")} className={className} style={{ strokeWidth, strokeLinecap: cap }} />;
+    /** A round end: a dot. A cut one: the circle across the limb there, as the ellipse it looks like (a dot squashed and turned to it). */
+    const end = (p: Seen, c: Cut | undefined, k: string) => {
+      if (!c) return line([p, p], k);
+      const r = (strokeWidth / scaleAt(p) / 2) * U, ax = norm3(c.axis), [u, w] = across(ax);
+      const onScreen = (v: P3): [number, number] => { const q = see([0, 1, 2].map(i => c.at[i] + v[i] * r) as unknown as P3); return [X(q) - X(p), Y(q) - Y(p)]; };
+      const e = ellipseOf([onScreen(u), onScreen(w)]), x = X(p), y = Y(p);
+      return <polyline key={k} points={`${x},${y} ${x},${y}`} className={className} style={{ strokeWidth: 2 * e.rx }} transform={`rotate(${e.angle} ${x} ${y}) translate(${x} ${y}) scale(1 ${e.rx > 1e-6 ? e.ry / e.rx : 1}) translate(${-x} ${-y})`} />;
+    };
+    const node = !cut ? line(ps, key) : (
+      <g key={key} className={className}>
+        {line(ps, "run", "butt")}
+        {end(ps[0], cut.start, "start")}
+        {end(ps[ps.length - 1], cut.end, "end")}
+      </g>
+    );
+    parts.push({ key, depth: depth - extra, node });
+  };
+  /**
+   * Two runs of a limb meeting end to end at a cut (`bones`' `cut`): the one whose end there is nearer the viewer is drawn over the other, as the
+   * nearer half of a cylinder hides the cut face of the farther. `a` runs into the cut from `aFrom`, `b` out of it toward `bTo` (points in space).
+   * Only the smaller (`b`, the glove, the boot) is moved in the order, just over or under the other.
+   */
+  const meet = (a: string, b: string, aFrom: P3, bTo: P3) => {
+    const pa = parts.find(x => x.key === a), pb = parts.find(x => x.key === b);
+    if (!pa || !pb) return;
+    const bNearer = see(bTo).depth < see(aFrom).depth;
+    if (bNearer && pb.depth >= pa.depth) pb.depth = pa.depth - 0.0001;
+    if (!bNearer && pb.depth <= pa.depth) pb.depth = pa.depth + 0.0001;
   };
   /** A ball in space, `r` units across at the figure's own distance. */
   const ball = (key: string, at: P3, r: number, cls: string, extra = 0) => {
@@ -51,15 +82,32 @@ export function canvas3d(placed: ReturnType<typeof placeRig>, box: Box, opts: { 
     const p = parts.find(x => x.key === key);
     if (p) p.depth = Math.max(p.depth, ...of.map(k => parts.find(x => x.key === k)?.depth ?? 0)) + 0.001;
   };
-  return { ...placed, ux, uy, X, Y, scaleAt, depthOf, mid, parts, bones, ball, behind };
+  return { ...placed, ux, uy, X, Y, scaleAt, depthOf, mid, parts, bones, ball, behind, meet };
 }
 export type Canvas3D = ReturnType<typeof canvas3d>;
+
+/** Where a limb is cut across (`bones`): the point in space (body space), and the way the limb runs there. */
+export interface Cut { at: P3; axis: P3 }
+
+const norm3 = (v: P3): P3 => { const l = Math.hypot(...v) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+/** Two ways square to `n` (a unit way) and to each other. */
+function across(n: P3): [P3, P3] {
+  const helper: P3 = Math.abs(n[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+  const u = norm3([n[1] * helper[2] - n[2] * helper[1], n[2] * helper[0] - n[0] * helper[2], n[0] * helper[1] - n[1] * helper[0]]);
+  return [u, [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]]];
+}
+/** The ellipse a circle looks like, from where two of its radii (square to each other) land on the screen: its half-sizes and its tilt (degrees). */
+function ellipseOf(axes: [number, number][]): { rx: number; ry: number; angle: number } {
+  const sxx = axes.reduce((n, v) => n + v[0] * v[0], 0), syy = axes.reduce((n, v) => n + v[1] * v[1], 0), sxy = axes.reduce((n, v) => n + v[0] * v[1], 0);
+  const mean = (sxx + syy) / 2, spread = Math.sqrt(((sxx - syy) / 2) ** 2 + sxy * sxy);
+  return { rx: Math.sqrt(mean + spread), ry: Math.sqrt(Math.max(0, mean - spread)), angle: (Math.atan2(2 * sxy, sxx - syy) * 90) / Math.PI };
+}
 
 /**
  * The ribcage: a skinny ellipsoid (an oblate spheroid) standing along the spine, with two columns of rib moons lying on its front. It is a
  * real solid in space, so it turns and narrows with the body, it follows a bent spine, and the ribs on the half that faces away disappear.
  */
-export function ribcagePart(c: Canvas3D, rig: Rig3, look: { cls?: string; ribs?: boolean } = {}): Part {
+export function ribcagePart(c: Canvas3D, rig: Rig3, look: { cls?: string; ribs?: boolean; sternum?: string } = {}): Part {
   const { see, X, Y } = c;
   const rc = ribcageOf(rig);
   /** A point on its surface: `th` round it (0 = straight ahead of the body), `up` as a share of its half height (-1 to 1). */
@@ -94,6 +142,12 @@ export function ribcagePart(c: Canvas3D, rig: Rig3, look: { cls?: string; ribs?:
       crescents.push(<polygon key={`${row}:${lo}`} points={pts} className="fig-rib" />);
     }
   }
+  // A breastplate's one indent (`sternum`, its class): a line down the middle of its front, from high on the chest to below the pecs, splitting them;
+  // only what is on the near side shows.
+  if (look.sternum) {
+    const line = Array.from({ length: 9 }, (_, i) => 0.72 - (0.7 * i) / 8).map(up => at3(0, up)).filter(p => p.depth <= centre.depth + 1e-4);
+    if (line.length >= 2) crescents.push(<polyline key="sternum" points={line.map(p => `${X(p)},${Y(p)}`).join(" ")} className={look.sternum} />);
+  }
   return {
     key: "ribcage", depth: centre.depth - 0.004,
     node: <g key="ribcage"><ellipse cx={X(centre)} cy={Y(centre)} rx={outline.rx} ry={outline.ry} transform={`rotate(${outline.angle} ${X(centre)} ${Y(centre)})`} className={look.cls ?? "fig-ribcage"} />{crescents}</g>,
@@ -120,10 +174,11 @@ export function weaponParts(c: Canvas3D, o: {
   swing?: { arc: ReturnType<typeof swingArc>; at: 0 | 1 };
   /** Where the wielder's body is (its middle, body space): out of a swing, the edge side is turned away from it, so it never faces the wielder. */
   wielder?: P3;
-  yaw: number; cam: Cam; w: number; h: number; scale: number; box: Box; eternalFlash?: string;
+  /** Where the wielder stands on the floor, the yaw it faces, and the camera and screen it is seen on (as its rig was placed). */
+  at: Vec; yaw: number; cam: Cam; w: number; h: number; scale: number; box: Box; eternalFlash?: string;
 }): Part[] {
   const { see, X, Y, ux, uy, origin, scaleAt } = c;
-  const { model, held, slide = 0, yaw, cam, w, h, scale, box, eternalFlash } = o;
+  const { model, held, slide = 0, at, yaw, cam, w, h, scale, box, eternalFlash } = o;
   const out: Part[] = [];
   if (model) {
     // The model is drawn in its own space (x along the weapon from the grip, y across its broad face, z its thickness) turned to the hand.
@@ -132,22 +187,22 @@ export function weaponParts(c: Canvas3D, o: {
     // (in a swing, its edge side leads; out of one, it faces away from the wielder, the side it swings with: never toward them)
     const { ay, az } = edgeFrame(ax, model.edge, o.swing) ?? awayFrame(ax, model.edge, held, o.wielder) ?? weaponFrame(ax, o.face);
     const bodyF = facingVec(yaw), bodyR = rightOf(yaw), camR = rightOf(cam.yaw), camF = facingVec(cam.yaw);
-    // View space (as in the Gear viewer): x to the camera's right, y down, z away, in figure units, the figure's feet the origin; the lens does the rest.
+    // View space (as in the Gear viewer): x to the eye's right, y down, z away along where it looks, in figure units from the eye, through the same
+    // camera as the rig (its eye height and tilt, `eyeSpace`); the lens (`onScreen`) puts it on the screen.
+    const feet = toCamera(cam, at);
     const view = (q: V3): V3 => {
       const m = [0, 1, 2].map(i => held.hand[i] + (ax[i] * (q[0] - slide) + ay[i] * q[1] + az[i] * q[2]) * U);
-      const fx = bodyR.x * m[0] + bodyF.x * m[2], fz = bodyR.z * m[0] + bodyF.z * m[2];
-      return [(fx * camR.x + fz * camR.z) / U, -m[1] / U, (fx * camF.x + fz * camF.z) / U];
+      const fx = (bodyR.x * m[0] + bodyF.x * m[2]) * scale, fz = (bodyR.z * m[0] + bodyF.z * m[2]) * scale;
+      const e = eyeSpace(cam, feet.u + fx * camR.x + fz * camR.z, m[1] * scale, feet.v + fx * camF.x + fz * camF.z);
+      return [e.u / U, -e.up / U, e.ahead / U];
     };
-    const F = origin.ppm * origin.depth, u0 = (origin.sx - w / 2) / origin.ppm;
-    const lens = (v: V3) => {
-      const d = Math.max(origin.depth + v[2] * U * scale, 0.05);
-      return { d, sx: w / 2 + (F * (u0 + v[0] * U * scale)) / d, sy: HORIZON * h + ((origin.sy - HORIZON * h) * origin.depth + F * v[1] * U * scale) / d };
-    };
+    const lens = (v: V3) => onScreen({ u: v[0] * U, up: -v[1] * U, ahead: v[2] * U }, w, h);
     const project = (v: V3): readonly [number, number] => { const l = lens(v); return [+((l.sx - box.x) / ux).toFixed(2), +((l.sy - box.y) / uy).toFixed(2)]; };
-    const drawn = drawGear(model.prims, { view, project, scale: v => (origin.depth / lens(v).d) * scale });
+    // (a figure unit is a box unit at the figure's feet, and smaller the farther it is)
+    const drawn = drawGear(model.prims, { view, project, scale: v => (origin.depth / Math.max(v[2] * U, 0.05)) * scale });
     const shapes = drawn.map((d, i) => <GearShape key={i} d={d} />);
-    const nearest = origin.depth + (drawn.length ? Math.min(...drawn.map(d => d.depth)) : 0) * U * scale;
-    drawn.forEach((d, i) => out.push({ key: `weapon-${i}`, depth: origin.depth + d.depth * U * scale - 0.005, node: shapes[i] }));
+    const nearest = (drawn.length ? Math.min(...drawn.map(d => d.depth)) * U : origin.depth);
+    drawn.forEach((d, i) => out.push({ key: `weapon-${i}`, depth: d.depth * U - 0.005, node: shapes[i] }));
     if (eternalFlash) {
       out.push({ key: "weapon-flash", depth: nearest - 0.02, node: <g key={eternalFlash} className={`fig-eternal-flash ${eternalFlash.startsWith("death|") ? "is-death" : ""}`} aria-hidden="true">{shapes}</g> });
     }

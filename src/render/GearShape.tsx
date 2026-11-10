@@ -20,14 +20,23 @@ export function GearShape({ d }: { d: Drawn }) {
           <GearEnd e={d.near} stroke={d.stroke} />
         </g>
       );
-    case "line":
-      // (a darker line a little wider underneath is its outline)
+    case "line": {
+      // A piece of a rod: a darker line a little wider underneath is its outline. Its ends are square, so the pieces meet edge to edge, its fill reaching
+      // a little past where it meets the next one (over the next piece's fill, never its outline's end, so no seam shows); the rod's own two ends are
+      // round, a disc each.
+      const len = Math.hypot(d.x2 - d.x1, d.y2 - d.y1) || 1, ux = (d.x2 - d.x1) / len, uy = (d.y2 - d.y1) / len;
+      const [r1, r2] = d.ends, o1 = r1 ? 0 : d.overlap, o2 = r2 ? 0 : d.overlap;
       return (
-        <g strokeLinecap="round">
+        <g strokeLinecap="butt">
           <line x1={d.x1} y1={d.y1} x2={d.x2} y2={d.y2} stroke={d.stroke} strokeWidth={d.width + 0.8} />
-          <line x1={d.x1} y1={d.y1} x2={d.x2} y2={d.y2} stroke={d.fill} strokeWidth={d.width} />
+          {r1 && <circle cx={d.x1} cy={d.y1} r={d.width / 2 + 0.4} fill={d.stroke} />}
+          {r2 && <circle cx={d.x2} cy={d.y2} r={d.width / 2 + 0.4} fill={d.stroke} />}
+          <line x1={d.x1 - ux * o1} y1={d.y1 - uy * o1} x2={d.x2 + ux * o2} y2={d.y2 + uy * o2} stroke={d.fill} strokeWidth={d.width} />
+          {r1 && <circle cx={d.x1} cy={d.y1} r={d.width / 2} fill={d.fill} />}
+          {r2 && <circle cx={d.x2} cy={d.y2} r={d.width / 2} fill={d.fill} />}
         </g>
       );
+    }
     case "ellipse":
       return <ellipse cx={d.cx} cy={d.cy} rx={Math.max(d.rx, 0.01)} ry={Math.max(d.ry, 0.01)} transform={`rotate(${d.angle} ${d.cx} ${d.cy})`} fill={d.fill} stroke={d.stroke} strokeWidth={d.ring ?? 0.4} />;
     case "stroke":

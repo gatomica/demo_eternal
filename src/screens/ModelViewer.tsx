@@ -16,6 +16,7 @@ import { ITEMS } from "../explore/items";
 import type { PoseName } from "../render/poses";
 import { applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, variantToggles, type EnemySubject, figureAngleOf, LINE_TOGGLE, MODEL, MODEL_ANGLES, type ModelAngle, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow, type Wear, WEARABLES, wearOf } from "./viewerModel";
 import { GearViewer } from "./GearViewer";
+import { WearViewer } from "./WearViewer";
 import { GEAR_WEAPONS, type GearId } from "../render/gear3d";
 import { cycle, useKeys } from "../ui/input";
 import { Picker } from "../ui/Picker";
@@ -102,7 +103,8 @@ export function ModelViewer({ onExit }: { onExit: () => void }) {
   const [run, setRun] = useState(0);
   if (!viewing) return <ViewerSetup kind={kind} gear={gear} wear={wear} row={row} onChange={setKind} onGear={setGear} onWear={setWear} onRow={setRow} onStart={() => { setRun(r => r + 1); setViewing(row); }} onExit={onExit} />;
   if (viewing === "gear") return <GearViewer id={gear} onChange={setGear} onBack={() => setViewing(false)} />;
-  if (viewing === "wear") return <PlayerViewerFight key={`wear-${wear}-${run}`} wearing={wearOf(wear)} onBack={() => setViewing(false)} onRetry={() => setRun(r => r + 1)} onExit={onExit} />;
+  // (what you wear is looked at on you alone, turned round by dragging: no fight)
+  if (viewing === "wear") return <WearViewer key={`wear-${wear}-${run}`} wearing={wearOf(wear)} onBack={() => setViewing(false)} />;
   if (kind === "player") return <PlayerViewerFight key={`player-${run}`} onBack={() => setViewing(false)} onRetry={() => setRun(r => r + 1)} onExit={onExit} />;
   return <ViewerFight key={`${kind}-${run}`} subject={kind} onBack={() => setViewing(false)} onRetry={() => setRun(r => r + 1)} onExit={onExit} />;
 }

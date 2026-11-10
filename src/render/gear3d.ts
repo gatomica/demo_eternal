@@ -20,8 +20,10 @@ export type Prim =
   /**
    * A flat face (a plate's sides, its two broad faces), with the thin lines lying on it, drawn with it. `out` is the way it faces, out of the solid it
    * belongs to (in weapon space): when that points away from the viewer the face is not drawn at all (nor what lies on it), since it can't be seen.
+   * `at`: the point it is sorted by, far to near, when the middle of all its points would mislead (a big face whose only overlap with another shape is
+   * at one end of it); none: that middle.
    */
-  | { k: "poly"; pts: V3[]; color: string; marks?: { pts: V3[]; w: number; color: string }[]; seamless?: boolean; out?: V3 }
+  | { k: "poly"; pts: V3[]; color: string; marks?: { pts: V3[]; w: number; color: string }[]; seamless?: boolean; out?: V3; at?: V3 }
   /** A thick line with round ends: a haft, a bar, `r` the radius. */
   | { k: "line"; a: V3; b: V3; r: number; color: string }
   /** A cylinder from `a` to `b`, `r` the radius: straight sides and flat ends (a grip). */
@@ -81,7 +83,7 @@ function plate(outline: readonly P2[], z0: number, z1: number, color: string, si
   let area = 0;
   for (let i = 0; i < outline.length; i++) { const [x0, y0] = outline[i], [x1, y1] = outline[(i + 1) % outline.length]; area += x0 * y1 - x1 * y0; }
   const turn = area >= 0 ? 1 : -1;
-  const prims: Prim[] = [{ k: "poly", pts: [...back].reverse(), color: side, marks: on(z0 - 0.03), out: [0, 0, -1] }];
+  const prims: Prim[] = [{ k: "poly", pts: [...back].reverse(), color, marks: on(z0 - 0.03), out: [0, 0, -1] }];
   for (let i = 0; i < outline.length; i++) {
     // (`open`: an edge that meets another plate, edge to edge in the same plane, has no face of its own there)
     if (open?.(i)) continue;
@@ -119,10 +121,6 @@ function seeded(seed: number): () => number {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-
-/** Points round part of an ellipse, from angle `a0` to `a1` (radians). */
-const arcPoints = (cx: number, cy: number, rx: number, ry: number, a0: number, a1: number, n = 12): P2[] =>
-  Array.from({ length: n + 1 }, (_, i) => { const a = a0 + ((a1 - a0) * i) / n; return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)] as P2; });
 
 /* ============================================================
  * The weapons
@@ -331,65 +329,86 @@ function shortsword(): Prim[] {
 }
 
 /**
- * The Barbarian's Axe: a long haft of dark wood, one plain rod, and the broad two-lobed head of black iron set on its side near the end, the haft
- * showing past it. Only its edge, a band round the curve of the bit (its edge side, +y, where the head stands out from the haft), is ground gray: a bevel
- * from the head's thickness down to a sharp edge.
+ * The Nomadic Sickle's crescent, in the sickle's own space (the handle along x, the collar at x = 6): the blade's two curves and its thickness. The
+ * Barbarian's Axe wears the same crescent as its edge, so both are made here.
+ *
+ * Its middle line is an arch from the collar (going straight up from it) over to near the far end of the moon's curve. The sickle's is `W` across at
+ * the collar, narrowing all the way to nothing at its point; with `thickEnds` (the axe's) it keeps its full width and thickness all the way, and ends
+ * in a flat cut at both ends. `back` is its outer, rounded curve, `edge` its inner, hollow one, both from the collar (index 0) to the far end (index
+ * `N`). `thick(i)` is half its thickness along `back` there.
+ */
+function crescent(thickEnds = false): { back: P2[]; edge: P2[]; thick: (i: number) => number; T: number; N: number } {
+  const W = 2.6, N = 32, A0 = Math.PI, A1 = 0.06, T = 0.6;
+  const mid = (t: number): P2 => [12.9 + 6.9 * Math.cos(t), 8.6 * Math.sin(t)];
+  const out = (t: number): P2 => { const n: P2 = [Math.cos(t) / 6.9, Math.sin(t) / 8.6], l = Math.hypot(...n); return [n[0] / l, n[1] / l]; };
+  const ts = Array.from({ length: N + 1 }, (_, i) => A0 + ((A1 - A0) * i) / N);
+  const taper = (i: number) => (thickEnds ? 1 : 1 - i / N);
+  const side = (k: 1 | -1) => ts.map((t, i) => {
+    const w = (W / 2) * taper(i) ** 0.85, m = mid(t), n = out(t);
+    return [m[0] + k * n[0] * w, m[1] + k * n[1] * w] as P2;
+  });
+  return { back: side(1), edge: side(-1), thick: (i: number) => T * Math.sqrt(taper(i)), T, N };
+}
+
+/**
+ * The Barbarian's Axe: a long haft of dark wood, one plain rod, and a head of black iron set on it near the end, the haft showing past it. Its edge is
+ * the Nomadic Sickle's crescent (`crescent`), ground gray, but thick at both ends, each a flat cut; set on the head's edge side (+y), its root toward
+ * the grip. As an axe's, it is sharp along its outer, rounded curve, where it cuts, and thick along its hollow one, where the black head meets it: its
+ * two faces slope from there down to that sharp curve, meeting along all of it. The black head narrows from the crescent's two ends down to a neck
+ * on the haft; the neck's foot sits in the haft and has no face of its own.
+ *
+ * Kept to a few faces, as the sickle is: each broad face is one face however many points its curve runs through.
  */
 function axe(): Prim[] {
-  // The sprite draws the head turned a quarter: its edge runs alongside the haft, its two lobes (a top and a beard) bulge out along it. In its own
-  // frame (a along the head's depth, b across): (28.5,-2) (28.5,2) (32,3.4) (36.5,10.5) curve to (41.5,0) curve (36.5,-10.5) (32,-3.4).
-  // The ground edge: the bit's curve from `END` (radians from its middle) round to the other side, `BAND` deep at the middle and coming to nothing at
-  // its two ends; the black head meets it along its inner line.
-  const END = (80 * Math.PI) / 180, BAND = 1.6, N = 24;
-  const bit = (t: number): P2 => [36.5 + 5 * Math.cos(t), 10.5 * Math.sin(t)];
-  const deep = (t: number) => BAND * (Math.cos(t) - Math.cos(END)) / (1 - Math.cos(END));
-  const ts = Array.from({ length: N + 1 }, (_, i) => END - (2 * END * i) / N); // (from the top round to the beard)
-  const outer = ts.map(bit), inner = ts.map(t => [bit(t)[0] - deep(t), bit(t)[1]] as P2);
-  const black: P2[] = [
-    [28.5, -2], [28.5, 2], [32, 3.4], [36.5, 10.5],
-    ...arcPoints(36.5, 0, 5, 10.5, Math.PI / 2, END, 4).slice(1, -1), ...inner,
-    ...arcPoints(36.5, 0, 5, 10.5, -END, -Math.PI / 2, 4).slice(1), [32, -3.4],
+  const { back, edge, thick, N } = crescent(true);
+  // (the crescent moved, not turned or resized: its baseline, the sickle's handle line, `Y0` above the haft, its middle over the head's)
+  const DX = 22.1, Y0 = 6.5, T = 0.8; // (T: half the head's thickness at the neck)
+  const at = ([x, y]: P2, z: number): V3 => [x + DX, y + Y0, z];
+  const lip = edge.map((q, i) => ({ q, t: thick(i) })); // the hollow curve, where the black head meets the crescent, at the crescent's thickness
+  const ROOT = lip[0], END = lip[N];
+  // The black head: its neck against the haft (the sprite's, turned as the old head was), at full thickness, out to the crescent's two ends.
+  const neck: P2[] = [[31.6, 4.7], [33, 1.2], [37, 1.2], [38.4, 4.7]];
+  const W = (q: P2, z: number): V3 => [q[0], q[1], z];
+  // Each broad face: round the neck from the root's end to the far end, and back along the crescent's hollow curve. It is sorted by where the neck
+  // stands on the haft, the top of the haft under its middle: seen from the head's side (from above, the head up) the neck is in front of the haft behind
+  // it, and from the other side the haft is in front of the neck, and that point's depth against the haft's centre line says which. (By the middle of
+  // all its points, mostly up along the crescent, it would be drawn over the haft seen from a little below too, or under it from a little above.)
+  const head: Prim[] = [1, -1].map(sgn => ({ ...facet([
+    at(ROOT.q, sgn * ROOT.t), ...neck.map(q => W(q, sgn * T)), at(END.q, sgn * END.t), ...lip.slice(1, -1).reverse().map(l => at(l.q, sgn * l.t)),
+  ], BLACK_IRON, [0, 0, sgn]), at: [35, 1.5, 0] as V3 }));
+  // Its sides, round the neck from the root's end to the far end: each a band through the thickness. The neck's foot (from its second corner to its
+  // third), down in the haft, has none.
+  const rim: [V3, V3][] = [
+    [at(ROOT.q, ROOT.t), at(ROOT.q, -ROOT.t)], ...neck.map(q => [W(q, T), W(q, -T)] as [V3, V3]), [at(END.q, END.t), at(END.q, -END.t)],
   ];
-  // (then turned a quarter and set against the haft: world x = 35 - b, y = 1.2 + (a - 28.5))
-  const place = (ps: P2[]) => ps.map(([a, b]) => [35 - b, 1.2 + (a - 28.5)] as P2);
-  // (the two meet along the inner line: neither has a side face there)
-  const firstInner = 4 + 3; // the black outline's index where the inner line starts (4 corners, 3 more points of the arc)
-  // The ground edge is a bevel: from the black head's full thickness along the inner line, down to nothing at the outer edge, on both faces, so the
-  // bit ends sharp.
-  const T = 0.8, inW = place(inner), outW = place(outer);
-  // (each side one smooth face: along the inner line at the head's thickness, back along the edge at none)
-  const bevel: Prim[] = [1, -1].map(sgn => facet([...inW.map(([x, y]) => [x, y, sgn * T] as V3), ...[...outW].reverse().map(([x, y]) => [x, y, 0] as V3)], IRON, [0, 0, sgn]));
+  const middle: P2 = [35, 5];
+  for (let i = 0; i + 1 < rim.length; i++) {
+    if (i === 2) continue; // (the foot)
+    const [a, a2] = rim[i], [b, b2] = rim[i + 1];
+    head.push(facet([a, b, b2, a2], BLACK_IRON_DARK, [(a[0] + b[0]) / 2 - middle[0], (a[1] + b[1]) / 2 - middle[1], 0]));
+  }
+  // The crescent: each face along its hollow curve at its thickness, and back along its rounded curve at none, sharp; and at each end a flat triangle.
+  const blade: Prim[] = [1, -1].map(sgn => facet([...lip.map(l => at(l.q, sgn * l.t)), ...[...back].reverse().map(q => at(q, 0))], IRON, [0, 0, sgn]));
+  for (const [l, b] of [[ROOT, back[0]], [END, back[N]]] as const) blade.push(facet([at(l.q, l.t), at(l.q, -l.t), at(b, 0)], IRON_DARK, [0, -1, 0]));
   return [
     { k: "line", a: [-6, 0, 0], b: [43, 0, 0], r: 1.5, color: DARK_WOOD },
-    ...plate(place(black), -T, T, BLACK_IRON, BLACK_IRON_DARK, [], i => i >= firstInner && i < firstInner + N),
-    ...bevel,
+    ...head,
+    ...blade,
   ];
 }
 
 /**
- * The Nomadic Sickle: a short handle with a round end, a small round iron collar no wider than the handle, and an iron blade curved like a crescent moon:
- * thickest where it leaves the collar, it arches up and forward and thins steadily to a single point on the handle's line; in section a wedge, its inner
- * edge sharp. The handle goes into the round end and the collar only as far as
- * it must (as the chisel's grip does its pommel and guard): none of its ends shows.
+ * The Nomadic Sickle: a short handle with a round end, a small round iron collar no wider than the handle, and an iron blade curved like a crescent moon
+ * (`crescent`): thickest where it leaves the collar, it arches up and forward and thins steadily to a single point on the handle's line; in section a
+ * wedge, its inner edge sharp. The handle goes into the round end and the collar only as far as it must (as the chisel's grip does its pommel and
+ * guard): none of its ends shows.
  */
 function sickle(): Prim[] {
   const R = 1.7, r = 1.3; // the round end, the handle
   const collar = { x: 6, rx: 1.2, ry: r, rz: r }; // (round, no wider than the handle)
   const gripBack = -4.8 + Math.sqrt(R * R - r * r);
   const gripFront = collar.x - collar.rx * Math.sqrt(1 - Math.max((r / collar.ry) ** 2, (r / collar.rz) ** 2));
-  // The blade's middle line: an arch from the collar (going straight up from it) over to its point near the far end of the moon's curve; it is `W`
-  // across at the collar, narrowing all the way to nothing at the point.
-  const W = 2.6, N = 32, A0 = Math.PI, A1 = 0.06;
-  const mid = (t: number): P2 => [12.9 + 6.9 * Math.cos(t), 8.6 * Math.sin(t)];
-  const out = (t: number): P2 => { const n: P2 = [Math.cos(t) / 6.9, Math.sin(t) / 8.6], l = Math.hypot(...n); return [n[0] / l, n[1] / l]; };
-  const ts = Array.from({ length: N + 1 }, (_, i) => A0 + ((A1 - A0) * i) / N);
-  const side = (k: 1 | -1) => ts.map((t, i) => {
-    const w = (W / 2) * (1 - i / N) ** 0.85, m = mid(t), n = out(t);
-    return [m[0] + k * n[0] * w, m[1] + k * n[1] * w] as P2;
-  });
-  const back = side(1), edge = side(-1); // the outer, back of the blade; the inner, its edge
-  // In section a wedge: its back `T` thick (thinning toward the point with the blade), its faces sloping down to the edge, sharp.
-  const T = 0.6, thick = (i: number) => T * Math.sqrt(1 - i / N);
+  const { back, edge, thick, T } = crescent(); // the outer, back of the blade; the inner, its edge
   const at = (q: P2, z: number): V3 => [q[0], q[1], z];
   // Each face one smooth shape (along the back at its thickness, back along the edge at none), and the back one narrow band round the outside of the
   // curve, drawn under the faces.
@@ -447,7 +466,11 @@ export function boundsOf(prims: readonly Prim[]): { lo: V3; hi: V3 } {
 export type Drawn =
   | { k: "poly"; points: string; fill: string; stroke: string; depth: number }
   | { k: "cyl"; body: string; sides: [string, string]; far: End; near: End; fill: string; stroke: string; depth: number }
-  | { k: "line"; x1: number; y1: number; x2: number; y2: number; width: number; fill: string; stroke: string; depth: number }
+  /**
+   * A piece of a rod. `ends`: which of its two ends are the rod's own (round); the others meet the next piece, square, its fill reaching `overlap`
+   * past them (on the page) so the pieces join without a seam.
+   */
+  | { k: "line"; x1: number; y1: number; x2: number; y2: number; width: number; fill: string; stroke: string; depth: number; ends: [boolean, boolean]; overlap: number }
   | { k: "ellipse"; cx: number; cy: number; rx: number; ry: number; angle: number; fill: string; stroke: string; ring?: number; depth: number }
   | { k: "stroke"; points: string; width: number; color: string; depth: number };
 
@@ -461,6 +484,9 @@ export interface GearView {
   project: (v: V3) => P2;
   scale: (v: V3) => number;
 }
+
+/** How long the pieces a rod is drawn in are, at most (figure units): short enough that each is sorted by about where it is. */
+const LINE_PIECE = 3;
 
 const hex = (c: string) => [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16));
 const tone = (c: string, k: number) => `rgb(${hex(c).map(v => Math.max(0, Math.min(255, Math.round(v * k)))).join(",")})`;
@@ -503,7 +529,7 @@ export function drawGear(prims: readonly Prim[], cam: GearView): Drawn[] {
           const a = vs[i], b = vs[(i + 1) % vs.length];
           n = [n[0] + (a[1] - b[1]) * (a[2] + b[2]), n[1] + (a[2] - b[2]) * (a[0] + b[0]), n[2] + (a[0] - b[0]) * (a[1] + b[1])];
         }
-        const k = Math.abs(unit3(n)[2]) > 0.55 ? 1 : 0.8, depth = vs.reduce((s, v) => s + v[2], 0) / vs.length;
+        const k = Math.abs(unit3(n)[2]) > 0.55 ? 1 : 0.8, depth = p.at ? cam.view(p.at)[2] : vs.reduce((s, v) => s + v[2], 0) / vs.length;
         // (A seamless face has no outline of its own, only a hairline in its colour so it meets its neighbours without a gap.)
         out.push({ k: "poly", points: vs.map(v => cam.project(v).join(",")).join(" "), fill: tone(p.color, k), stroke: tone(p.color, p.seamless ? k : k * 0.55), depth });
         // the lines lying on this face go with it, just over it
@@ -513,9 +539,18 @@ export function drawGear(prims: readonly Prim[], cam: GearView): Drawn[] {
         break;
       }
       case "line": {
-        const a = cam.view(p.a), b = cam.view(p.b), m: V3 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
-        const [x1, y1] = cam.project(a), [x2, y2] = cam.project(b);
-        out.push({ k: "line", x1, y1, x2, y2, width: 2 * p.r * cam.scale(m), fill: tone(p.color, 1), stroke: tone(p.color, 0.55), depth: m[2] });
+        // A long rod (the axe's haft) passes things at very different depths along its length: sorted as one shape, by its middle, it would be drawn
+        // wholly behind or wholly in front of a head near its end. So it is drawn in short pieces, each sorted by its own depth, at its centre line.
+        const pieces = Math.max(1, Math.ceil(Math.hypot(...sub3(p.b, p.a)) / LINE_PIECE));
+        const along = (t: number): V3 => [p.a[0] + (p.b[0] - p.a[0]) * t, p.a[1] + (p.b[1] - p.a[1]) * t, p.a[2] + (p.b[2] - p.a[2]) * t];
+        for (let i = 0; i < pieces; i++) {
+          const a = cam.view(along(i / pieces)), b = cam.view(along((i + 1) / pieces)), m: V3 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+          const [x1, y1] = cam.project(a), [x2, y2] = cam.project(b), s = cam.scale(m);
+          out.push({
+            k: "line", x1, y1, x2, y2, width: 2 * p.r * s, fill: tone(p.color, 1), stroke: tone(p.color, 0.55), depth: m[2],
+            ends: [i === 0, i === pieces - 1], overlap: 0.1 * s,
+          });
+        }
         break;
       }
       case "cyl": {

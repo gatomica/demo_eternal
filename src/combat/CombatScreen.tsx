@@ -1397,6 +1397,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           ? [...(fx.get(e.id)?.classes ?? []).filter(c => c !== "fx-fall"), ...(justFell(e.id) && e.intent.strikePose !== kindOf(e).deathPose ? ["fx-die"] : []), "is-remains"]
           : [...(fx.get(e.id)?.classes ?? []).filter(c => c !== "fx-fall"), ...(!e.alive && kindOf(e).remains ? ["is-remains"] : [])],
         dead: looksDead(e) ? kindOf(e).deathLook ?? "pieces" : undefined,
+        // (fallen as this turn plays: whoever struck it still faces it until the turn is over)
+        fellThisTurn: !!playback && looksDead(e) && !!playback.from.enemies.find(x => x.id === e.id)?.alive,
         // His second form: the wax he leaves is burnt black.
         charred: !!e.flags.phase2,
         // The fallen waxed burn as candles once the arena is lit (not the sealed ones); the lit ones, alive, carry theirs on their heads.

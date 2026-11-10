@@ -22,6 +22,12 @@ export interface Cam {
   yaw: number;
   /** The spot on the floor the shot is about (the player you ride behind, the middle of two fighters): the fight's light is centered on it. */
   look?: Vec;
+  /**
+   * A camera of its own, for a viewer that orbits one figure (the Wearing viewer): how high its eye is (meters; else the fight's `EYE_HEIGHT`) and
+   * how far it tilts down (radians; up if negative; else level). Only the 3D figures' lens (`projectPoint`) follows them; a fight's camera has neither.
+   */
+  eye?: number;
+  pitch?: number;
 }
 
 /** How far ahead of a camera with no subject of its own the light is centered, in meters. */
@@ -94,9 +100,28 @@ export function screenOf(u: number, v: number, w: number, h: number): Projected 
  */
 export function projectPoint(cam: Cam, p: Vec, height: number, w: number, h: number): Projected {
   const { u, v } = toCamera(cam, p);
+  return onScreen(eyeSpace(cam, u, height, v), w, h);
+}
+
+/** A point in the eye's own terms: `u` to its right, `up` above where it looks, `ahead` along where it looks (meters). */
+export interface EyePoint { u: number; up: number; ahead: number }
+
+/**
+ * A point given in camera terms (`u` to its right, `v` ahead on the floor, `height` off the floor) in the eye's own: from the camera's eye height,
+ * tilted by its pitch. (Level, at the fight's eye height: `up` is the height over the eye, and `ahead` is `v`.)
+ */
+export function eyeSpace(cam: Cam, u: number, height: number, v: number): EyePoint {
+  const y = height - (cam.eye ?? EYE_HEIGHT), p = cam.pitch ?? 0;
+  if (!p) return { u, up: y, ahead: v };
+  const c = Math.cos(p), s = Math.sin(p);
+  return { u, up: v * s + y * c, ahead: v * c - y * s };
+}
+
+/** Where a point in the eye's terms lands on a screen of the given size (the scene's lens), how far ahead it is, and how big a meter is there. */
+export function onScreen(e: EyePoint, w: number, h: number): Projected {
   const f = FOCAL * h;
-  const d = Math.max(v, 0.05);
-  return { sx: w / 2 + (f * u) / d, sy: HORIZON * h + (f * (EYE_HEIGHT - height)) / d, ppm: f / d, depth: v };
+  const d = Math.max(e.ahead, 0.05);
+  return { sx: w / 2 + (f * e.u) / d, sy: HORIZON * h - (f * e.up) / d, ppm: f / d, depth: e.ahead };
 }
 
 /** The unit vector a yaw faces along, on the floor. */
