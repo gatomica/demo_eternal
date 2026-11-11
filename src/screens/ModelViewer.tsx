@@ -14,12 +14,32 @@ import { ARMOR, WEAPONS } from "../core/rules";
 import type { ArmorItem, ArmorTier, HeadItem, WeaponTier } from "../core/types";
 import { ITEMS } from "../explore/items";
 import type { PoseName } from "../render/poses";
-import { applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, variantToggles, type EnemySubject, figureAngleOf, LINE_TOGGLE, MODEL, MODEL_ANGLES, type ModelAngle, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow, type Wear, WEARABLES, wearOf } from "./viewerModel";
+import { applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, variantToggles, type EnemySubject, LINE_TOGGLE, MODEL, MODEL_VIEW, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow, type Wear, WEARABLES, wearOf } from "./viewerModel";
 import { GearViewer } from "./GearViewer";
 import { WearViewer } from "./WearViewer";
 import { GEAR_WEAPONS, type GearId } from "../render/gear3d";
 import { cycle, useKeys } from "../ui/input";
 import { Picker } from "../ui/Picker";
+
+/** The Model stance's camera: where it is round the figure (degrees: 0 from in front) and over it, turned by dragging the scene. */
+const PITCH_MAX = 85, PITCH_MIN = -60;
+function useOrbit(focus: "foes" | "player") {
+  const [view, setView] = useState(MODEL_VIEW);
+  const onDrag = useCallback((dyaw: number, dpitch: number) => setView(v => ({ yaw: (v.yaw + dyaw) % 360, pitch: Math.max(PITCH_MIN, Math.min(PITCH_MAX, v.pitch + dpitch)) })), []);
+  return { orbit: { ...view, focus, onDrag }, reset: () => setView(MODEL_VIEW) };
+}
+/** The Model stance's control: dragging is the only way to look round, so it only says so, and puts the camera back. */
+function ViewControl({ onReset }: { onReset: () => void }) {
+  return (
+    <div className="viewer-section">
+      <span className="picker-label">View</span>
+      <div className="picker-options">
+        <button className="chip" onClick={onReset}>Reset view</button>
+      </div>
+      <p className="hint">Drag to turn it round, and over or under it.</p>
+    </div>
+  );
+}
 
 /** What the viewer looks at: an enemy (a multi-target one as a whole, all its parts at once), or you. */
 type Subject = EnemySubject | "player";
@@ -122,6 +142,7 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
   const [playSignal, setPlaySignal] = useState(0);
   const [lit, setLit] = useState(true);
   const [shade, setShade] = useState(true);
+  const { orbit, reset } = useOrbit("foes");
   const initial = useMemo(() => viewerFight(subject), [subject]);
   const override = useCallback((s: CombatState) => applyShow(s, show), [show]);
   const shown = useMemo(() => applyShow(initial, show), [initial, show]);
@@ -181,7 +202,7 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
     setShow(prev => {
       const on: Record<string, boolean> = { ...prev.on, back: s.enemies[0].line === "back" };
       for (const t of statuses) on[t.key] = s.enemies.some(e => !!e.flags[t.key]);
-      return { parts: prev.parts.map(p => ({ stance: p.next ?? p.stance, chosen: p.chosen })), on, turn: s.turn, angle: prev.angle };
+      return { parts: prev.parts.map(p => ({ stance: p.next ?? p.stance, chosen: p.chosen })), on, turn: s.turn };
     });
   };
   // The part the player's blow is aimed at, when a Block or Maneuver is played (or a Rest broken).
@@ -298,18 +319,7 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
           </div>
         </div>
       )}
-      {anyModel && (
-        <div className="viewer-section">
-          <span className="picker-label">Angle</span>
-          <div className="picker-options">
-            {MODEL_ANGLES.map(a => (
-              <button key={a.id} className="chip" aria-pressed={(show.angle ?? "front34") === a.id} onClick={() => setShow(prev => ({ ...prev, angle: a.id }))}>
-                {a.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {anyModel && <ViewControl onReset={reset} />}
       {kinds.map((_, i) => (
         <div key={i} className={multi ? "viewer-part" : undefined}>
           {multi && <h3 className="viewer-part-title">{partLabel(subject, i)}</h3>}
@@ -332,7 +342,7 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
       playTarget={playTarget}
       attackOnPlay={!!show.interrupt}
       restOnPlay={!!show.whiff}
-      figureAngle={anyModel ? figureAngleOf(show.angle ?? "front34") : undefined}
+      orbit={anyModel ? orbit : undefined}
       onTurnPlayed={afterTurn}
       onRetry={onRetry}
       onChangeLoadout={onBack}
@@ -356,7 +366,7 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
   const [armor, setArmor] = useState<ArmorTier>("light");
   /** The pose held still, or "model" for the T-pose. */
   const [held, setHeld] = useState<PoseName | "model" | "dead">("idle");
-  const [angle, setAngle] = useState<ModelAngle>("front34");
+  const { orbit, reset } = useOrbit("player");
   const [scenarioId, setScenarioId] = useState<string | undefined>();
   const [lit, setLit] = useState(true);
   const [shade, setShade] = useState(true);
@@ -369,7 +379,6 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
     [weapon, armor, scenario, armorItem, headItem],
   );
   const model = held === "model";
-  const seen = figureAngleOf(angle);
   const play = (id: string) => {
     setScenarioId(id);
     setPlaySignal(n => n + 1);
@@ -402,7 +411,7 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
       {chips("Body", ["none" as const, ...WEARABLES.filter(id => ITEMS[id].slot === "armor") as ArmorItem[]], armorItem, o => (o === "none" ? "Plain" : ITEMS[o].name), setArmorItem)}
       {chips("Head", ["none" as const, ...WEARABLES.filter(id => ITEMS[id].slot === "head") as HeadItem[]], headItem, o => (o === "none" ? "Bare" : ITEMS[o].name), setHeadItem)}
       {chips("Pose", [...PLAYER_POSES, "dead" as const, "model" as const], held, o => (o === "model" ? MODEL : o === "dead" ? "Dead" : o), o => { setHeld(o); setScenarioId(undefined); })}
-      {model && chips("Angle", MODEL_ANGLES.map(a => a.id), angle, o => MODEL_ANGLES.find(a => a.id === o)!.label, setAngle)}
+      {model && <ViewControl onReset={reset} />}
       {!model && held !== "dead" && (
         <div className="viewer-section">
           <span className="picker-label">Actions</span>
@@ -427,9 +436,9 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
       debugLimbs={debug}
       playSignal={playSignal}
       playerAction={scenario ? playerActionOf(scenario) : undefined}
-      playerHold={model ? (seen.view === "back" ? "t-pose-b" : "t-pose") : held === "dead" ? undefined : held}
+      playerHold={model ? "t-pose" : held === "dead" ? undefined : held}
       playerDead={held === "dead"}
-      playerAngle={model ? seen : undefined}
+      orbit={model ? orbit : undefined}
       onRetry={onRetry}
       onChangeLoadout={onBack}
       changeLabel="Change model"

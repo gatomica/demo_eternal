@@ -532,6 +532,9 @@ kbd {
 .fig-head-layer { fill: none; stroke: color-mix(in srgb, var(--wax) 70%, black); stroke-width: 1; stroke-linecap: round; }
 .fig-head-shine { fill: color-mix(in srgb, var(--wax) 55%, white); opacity: 0.7; }
 .fig-beak { fill: var(--wax); stroke: color-mix(in srgb, var(--wax) 65%, black); stroke-width: 0.8; stroke-linejoin: round; }
+.fig-beak-solid { stroke: none; }
+.fig-beak-line { fill: none; stroke: color-mix(in srgb, var(--wax) 55%, black); stroke-width: 0.9; stroke-linecap: round; stroke-linejoin: round; }
+.fig-beak-flat { fill: color-mix(in srgb, var(--wax) 76%, black); }
 .fig-chain { fill: none; stroke: var(--metal); stroke-width: 1.6; stroke-dasharray: 2 1.4; stroke-linecap: round; }
 .fig-arm-wax { fill: none; stroke: var(--wax); stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
 .fig-arm-burnt { fill: none; stroke: #1b1315; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }

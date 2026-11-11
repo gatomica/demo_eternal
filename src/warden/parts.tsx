@@ -6,7 +6,7 @@ import { add, lerp, limb, type Pt } from "../render/geom";
 import { type CandleArm, fanSweep, FlailFire, flailOf, frontSide, HEM_Y, ripArmpit, ripSide, type WardenSkeleton } from "./skeleton";
 
 /** A teardrop flame standing on (x, y), `s` times the base size. */
-function Flame({ at, s = 1, className = "" }: { at: Pt; s?: number; className?: string }) {
+export function Flame({ at, s = 1, className = "" }: { at: Pt; s?: number; className?: string }) {
   const [x, y] = at;
   const h = 11 * s, w = 4.2 * s;
   return (

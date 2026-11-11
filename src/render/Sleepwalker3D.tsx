@@ -16,6 +16,7 @@ import { arcPart, canvas3d, ellipsoidPart, Figure3DSvg, ribcagePart, sameDrawing
 import { held as heldAlong, type Joint, liftPose, type P3, placeRig, poseWeaponAxis, type Rig3, ribcageOf, type Seen, swingArc } from "./rig3d";
 import { ALL_POSES, type PoseName } from "./poses";
 import { modelOfWeapon } from "./gear3d";
+import { visibleCap } from "./hoodCap";
 import { useSway } from "./sway";
 import { WEAPON_REACH } from "./StickFigure";
 
@@ -626,25 +627,32 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, hooded: hooded
     const tilt = blackHood ? OPENING_TIP : 0, half = blackHood ? OPENING_HALF : 0.62, tall = blackHood ? 1 : 1.25;
     const gaze3 = unit(plus(f.map(v => v * Math.cos(tilt)) as unknown as P3, upA, -Math.sin(tilt)));
     const sideC = unit(cross(way([0, 1, 0]), gaze3)), upC = unit(cross(gaze3, sideC));
-    const centre = see(plus(headAt, gaze3, HOOD_R * U));
-    if (centre.depth < head.depth) {
-      const ring = Array.from({ length: 72 }, (_, i) => (i / 72) * Math.PI * 2).map(a => {
-        const d = plus(plus(gaze3, sideC, Math.tan(half) * Math.cos(a)), upC, Math.tan(half) * tall * Math.sin(a));
-        return see(plus(headAt, unit(d), HOOD_R * U));
-      });
-      parts.push({ key: "hood-dark", depth: head.depth - 0.012, node: <polygon key="hood-dark" points={ring.map(p => `${X(p)},${Y(p)}`).join(" ")} className="fig-hood-dark" /> });
-      // The black hood's opening is a real one: the hood's pitch-black inside, and the face sitting back in it, its eyes showing, the dark left as a rim
-      // round it (the face is cut to the opening, a little smaller than it).
+    // (Seen from the side the opening is still there: its edge is laid on the hood's ball, the part of it round the back pulled onto the ball's outline, so what
+    // shows is the part of the opening on the near side.)
+    const headLook = look3At(headAt);
+    const dirs = Array.from({ length: 72 }, (_, i) => (i / 72) * Math.PI * 2).map(a =>
+      unit(plus(plus(gaze3, sideC, Math.tan(half) * Math.cos(a)), upC, Math.tan(half) * tall * Math.sin(a))));
+    const inside = (v: P3) => { const g = dotP(v, gaze3); return g > 0 && (dotP(v, sideC) / g) ** 2 + (dotP(v, upC) / (g * tall)) ** 2 < Math.tan(half) ** 2; };
+    const capDirs = visibleCap(dirs, headLook, inside);
+    if (capDirs.length) {
+      /** The part of the opening that faces the viewer, laid on a ball round the head of this radius. */
+      const cap = (radius: number) => capDirs.map(d => see(plus(headAt, d, radius * U)));
+      const ring = cap(HOOD_R), outline = ring.map(p => `${X(p)},${Y(p)}`).join(" ");
+      // (all of it inside the hood's own outline: its edge is worked out for a ball seen from the middle of the head, and in perspective may stray a hair past it)
+      const hoodClip = `${openingId}-hood`;
+      parts.push({ key: "hood-dark", depth: head.depth - 0.012, node: <g key="hood-dark" clipPath={`url(#${hoodClip})`}><clipPath id={hoodClip}><circle cx={X(head)} cy={Y(head)} r={HOOD_R * kh} /></clipPath><polygon points={outline} className="fig-hood-dark" /></g> });
+      // The black hood's opening is a real one: the hood's pitch-black inside, and the face sitting back in it, its eyes showing. The face is a smaller ball
+      // inside the hood, the same opening laid on it, cut to the hood's opening: from in front it fills all of it but a rim of the dark, and from the side the two
+      // shift against each other and the dark inside shows between them.
       if (blackHood) {
-        const mid = ring.reduce((n, p) => [n[0] + X(p) / ring.length, n[1] + Y(p) / ring.length], [0, 0]);
-        const inset = ring.map(p => `${mid[0] + (X(p) - mid[0]) * 0.84},${mid[1] + (Y(p) - mid[1]) * 0.84}`).join(" ");
+        const faceCap = cap(HEAD_R);
         parts.push({
           key: "hood-face", depth: head.depth - 0.0125,
           node: (
-            <g key="hood-face">
-              <clipPath id={openingId}><polygon points={inset} /></clipPath>
+            <g key="hood-face" clipPath={`url(#${hoodClip})`}>
+              <clipPath id={openingId}><polygon points={outline} /></clipPath>
               <g clipPath={`url(#${openingId})`}>
-                <circle cx={X(head)} cy={Y(head)} r={HEAD_R * kh} className="fig-head" />
+                <polygon points={faceCap.map(p => `${X(p)},${Y(p)}`).join(" ")} className="fig-head" />
                 {eyeShapes(0).map(e => e.node)}
               </g>
             </g>

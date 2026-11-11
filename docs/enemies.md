@@ -311,7 +311,9 @@ stances:
 
 **Numbers (built):** 15 health per bar, two bars (one revive, to full health), normal armor, normal weapon. The player gets **one revive** in this fight. Playable now as "Penitent Warden" in Test combat, drawn as a placeholder figure until phase 4.
 
-### Look (built)
+### Look (built; being moved to the 3D rig)
+
+In fights he is now drawn on the 3D rig (`render/Warden3D.tsx`, first pass, untuned); the flat figure below is what the map and the trails still use. His 3D hips and shoulders turn as `WARDEN_STANCE` (`warden/pose3d.ts`) says, deduced from the robe's opening and the wax shoulder, not copied from the flat poses.
 - A tall figure (about 1.2× a normal figure) in a **gray cloak** reaching the ground, its hem crusted with wax. The cloak is **ripped along his waxed (left) side**: sealed with wax from the armpit to the hip, failing from the hip down, gaping open to show his left leg over a wax-caked lining.
 - **Hood** (one flat color, pointed at the back) hiding his face; only a **waxed, beak-like mask** pokes out. **Wax drool** runs from under the beak down the front of the cloak like a beard, over an older, duller **stain**; both only show while his front faces you.
 - **Right arm: the flail.** A long wooden handle held at its middle, the chain hanging from its tip, a wax-filled censer at the end (fixed chain length).

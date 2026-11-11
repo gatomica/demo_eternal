@@ -55,18 +55,8 @@ export const LINE_TOGGLE: StatusToggle = { key: "back", off: "Front line", on: "
 /** Debug, for every model: its right arm and right leg drawn red, to tell the sides apart. */
 export const DEBUG_TOGGLE: StatusToggle = { key: "debug", off: "Debug: off", on: "Debug: on" };
 
-/** How the Model stance sees the enemy: 3/4 (as enemies appear in a fight, and as you do) or straight on, from the front or behind. */
-export type ModelAngle = "front34" | "front" | "back34" | "back";
-
-export const MODEL_ANGLES: { id: ModelAngle; label: string }[] = [
-  { id: "front34", label: "3/4 front" },
-  { id: "front", label: "Front" },
-  { id: "back34", label: "3/4 back" },
-  { id: "back", label: "Back" },
-];
-
-/** The angle as the combat screen draws a figure. */
-export const figureAngleOf = (a: ModelAngle) => ({ view: a.startsWith("back") ? "back" as const : "front" as const, straight: !a.endsWith("34"), sides: true });
+/** The Model stance's camera when it starts (and "Reset view" puts it back): a little round from the front and a little above (degrees). */
+export const MODEL_VIEW = { yaw: -35, pitch: 12 };
 
 /** What one part of the enemy shows (an enemy with one part has one of these). */
 export interface PartShow {
@@ -82,8 +72,6 @@ export interface PartShow {
 export interface ViewerShow {
   /** One per part, left to right. */
   parts: PartShow[];
-  /** The Model stance: which way it's seen (default: 3/4 front). */
-  angle?: ModelAngle;
   /** Statuses that are on: "back" (shared), and the kinds' own flags. */
   on: Record<string, boolean>;
   /** The fight's turn as shown. Once it moves past this, the action has played. */
@@ -168,7 +156,7 @@ function applyPart(e: CombatState["enemies"][number], part: PartShow, show: View
   }
   if (stanceName === MODEL) {
     const poses = kind.modelPoses ?? { front: "t-pose", back: "t-pose-b" };
-    e.intent = { type: "rest", dir: e.line === "back" ? "advance" : "retreat", forced: false, pose: figureAngleOf(show.angle ?? "front34").view === "back" ? poses.back : poses.front };
+    e.intent = { type: "rest", dir: e.line === "back" ? "advance" : "retreat", forced: false, pose: poses.front };
     return;
   }
   const stance = kind.pattern.stances.find(x => x.name === stanceName);

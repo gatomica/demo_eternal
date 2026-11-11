@@ -40,7 +40,7 @@ const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 /** The player is drawn in 3D in a fight, on the Sleepwalker's body (`player3dPose`, Sleepwalker3D's `gear`). */
 const PLAYER_3D = true;
 
-export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, restOnPlay, shade = true, playerAction, playerHold, playerAngle, playerDead, light = true, debugLimbs = false, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, figureAngle, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
+export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, restOnPlay, shade = true, playerAction, playerHold, playerDead, light = true, debugLimbs = false, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, orbit, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
   initial: CombatState;
   /** A scene to play before the first turn (it leaves the fight as `initial`). */
   opening?: Opening;
@@ -58,14 +58,12 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   shade?: boolean;
   /** The model viewer: the player does nothing when an action is played, even against a Block or a Maneuver, so the Block has nothing to block (a "whiff"). */
   restOnPlay?: boolean;
-  /** The model viewer's Model stance: how the enemy is seen (3/4 or straight on, from the front or behind). */
-  figureAngle?: { view: "front" | "back"; straight: boolean; sides?: boolean };
+  /** The model viewer's Model stance: the camera orbits the enemy (or you), and dragging turns it round (see `Scene`'s `orbit`). */
+  orbit?: Parameters<typeof Scene>[0]["orbit"];
   /** The model viewer's player mode: each change plays this action for you (instead of a Rest or an Attack). */
   playerAction?: PlayerAction;
   /** The model viewer's player mode: the pose you hold while no turn is playing. */
   playerHold?: PoseName;
-  /** The model viewer's player mode: how you are seen (default: 3/4 from behind, as in a fight). */
-  playerAngle?: { view: "front" | "back"; straight: boolean; sides?: boolean };
   /** The model viewer's player mode: you lie where you fell (your remains), whatever the fight says. */
   playerDead?: boolean;
   /** The fight's limited light (default on). The Model viewer can turn it off to see everything. */
@@ -1331,9 +1329,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       id: "player",
       dodge: dodgeFor("player"),
       faceToward: playback && yourBlow ? { id: yourBlow.target, key: `${playback.from.turn}:${playback.index}` } : undefined,
-      view: playerAngle?.view ?? "back",
-      straight: playerAngle?.straight,
-      sides: playerAngle?.sides,
+      view: "back",
       // Staggered while Waxed (or with your flame taken), you are sealed whole in wax, and stay that way until you recover:
       // your own stagger pose (down on one knee), the wax over all of it. No flame burns on your head, except while the Warden
       // is about to take it (his Usurp Flame scene lights it itself).
@@ -1368,9 +1364,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       .map((e): SceneFigure => ({
         id: e.id,
         dodge: dodgeFor(e.id),
-        view: figureAngle?.view ?? "front",
-        straight: figureAngle?.straight,
-        sides: figureAngle?.sides,
+        view: "front",
         foe: true,
         hand: kindOf(e).weaponHand,
         pose: looksDead(e) && kindOf(e).deathLook === "wax" ? asPose(kindOf(e).deathPose, "w-idle") : !playback && walkOff?.[e.id] ? walkOff[e.id] : track(e.id, enemyPose(e)),
@@ -1379,6 +1373,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         variant: kindOf(e).variant,
         hooded: !!kindOf(e).hood,
         sleepwalker3d: kindOf(e).figure3d === "sleepwalker",
+        warden3d: kindOf(e).figure3d === "warden",
         // Waxed by a torch (a look only), still standing: wax caked on it.
         waxCaked: !!e.coated && !e.staggered && !kindOf(e).variant,
         // The outer parts of a Wax Blob stand a little smaller than the middle one.
@@ -1497,7 +1492,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         <Scene
           figures={figures} shot={shot} projectiles={projectiles} usurpTrails={usurpTrails} arenaLit={candlesLit}
           arena={fight.enemies.some(e => kindOf(e).arena)}
-          light={light} shade={shade}
+          light={light} shade={shade} orbit={orbit}
           onSelectedBox={b => { if (!busy) setAnchor(b); }}
           dark={wakeDark ?? (ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark)}
           ignite={ignite ? { who: ignite.who, start: ignite.start, seed: ignite.seed } : undefined}

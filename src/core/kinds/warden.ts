@@ -113,6 +113,7 @@ export const WARDEN: EnemyKind = {
       Recover / Flail Slam / Wax Punch > Kneeling                > Usurp Flame, Clutch Arm, Chain Guard
   `, { events: ["Second Phase"] }),
   variant: "warden",
+  figure3d: "warden",
   scale: 1.18,
   // When he falls for good: his cloak, draped over a thick pool of wax.
   deathLook: "cloak",

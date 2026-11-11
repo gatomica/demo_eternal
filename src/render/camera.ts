@@ -396,3 +396,19 @@ export function floorDisc(cam: Cam, centre: Vec, radius: number, w: number, h: n
   const near = at(-1, ahead), far = at(1, ahead), l = at(-1, side), r = at(1, side);
   return { cx: (l.sx + r.sx) / 2, cy: (near.sy + far.sy) / 2, rx: Math.abs(r.sx - l.sx) / 2, ry: Math.abs(near.sy - far.sy) / 2, depth: projectPoint(cam, centre, 0, w, h).depth };
 }
+
+/**
+ * A camera that orbits a spot (the Model viewer's Model stance, the Wearing viewer): it stands `dist` meters from `centre` on the floor's -z side, looking at
+ * a point `height` meters up it, raised over it and tilted down by `pitchDeg` (under it if negative). It is a camera of its own (`Cam.eye`, `Cam.pitch`), which only the
+ * 3D figures' lens follows. The figures turn instead of the camera (their yaw), so every view is the same camera.
+ */
+export function orbitCamera(centre: Vec, pitchDeg: number, height: number, dist: number): Cam {
+  const p = (pitchDeg * Math.PI) / 180;
+  return { x: centre.x, z: centre.z - dist * Math.cos(p), yaw: 0, look: centre, eye: height + dist * Math.sin(p), pitch: p };
+}
+
+/** A figure's drawing box seen through an orbiting camera: as `figureBox`, but from the camera's own lens (its tilt too), so the figure's thicknesses are right. */
+export function orbitBox(cam: Cam, p: Vec, w: number, h: number, scale = 1) {
+  const feet = projectPoint(cam, p, 0, w, h), unit = feet.ppm * METERS_PER_UNIT * scale;
+  return { x: feet.sx - 50 * unit, y: feet.sy - FEET_Y * unit, w: 100 * unit, h: 120 * unit, depth: feet.depth };
+}
