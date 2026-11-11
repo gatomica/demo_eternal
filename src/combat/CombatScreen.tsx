@@ -39,6 +39,8 @@ const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 
 /** The player is drawn in 3D in a fight, on the Sleepwalker's body (`player3dPose`, Sleepwalker3D's `gear`). */
 const PLAYER_3D = true;
+/** Whether the game itself (fights, not the Model viewer) draws the Warden from the 3D rig. Off while it is built. */
+const WARDEN_3D_IN_GAME = false;
 
 export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, restOnPlay, shade = true, playerAction, playerHold, playerDead, light = true, debugLimbs = false, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, orbit, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
   initial: CombatState;
@@ -1373,7 +1375,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         variant: kindOf(e).variant,
         hooded: !!kindOf(e).hood,
         sleepwalker3d: kindOf(e).figure3d === "sleepwalker",
-        warden3d: kindOf(e).figure3d === "warden",
+        // (the Warden's 3D figure is still being built: only the Model viewer, which rewrites the fight with `override`, shows it; the game draws the flat sprites)
+        warden3d: kindOf(e).figure3d === "warden" && (WARDEN_3D_IN_GAME || !!override),
         // Waxed by a torch (a look only), still standing: wax caked on it.
         waxCaked: !!e.coated && !e.staggered && !kindOf(e).variant,
         // The outer parts of a Wax Blob stand a little smaller than the middle one.
