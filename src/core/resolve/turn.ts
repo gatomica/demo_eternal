@@ -5,7 +5,7 @@
  */
 import { bodyOf } from "../body";
 import { swingFor } from "../stance";
-import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Player, PlayerAction, Step, Swing, WeaponTier } from "../types";
+import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Line, Player, PlayerAction, Step, Swing, WeaponTier } from "../types";
 
 /** The action the player is locked into this turn, if any. */
 export function forcedAction(state: CombatState): "rest" | "revive" | null {
@@ -52,6 +52,8 @@ export interface Turn {
   fallen: Set<string>;
   /** Pulled to the front line by a melee attack: enemy id -> who pulled it. */
   pulls: Map<string, string>;
+  /** Enemies trying to step onto an ally's line, to strike it (Usurp Flame): enemy id -> that line. Settled like a Maneuver of theirs. */
+  shifts: Map<string, Line>;
   /** Actions cancelled before they happened. */
   cancelled: Set<string>;
   /** Weapon blows this turn, however they went: attacker id -> whom it attacked (for the Jagged Chisel, next turn). */
@@ -108,7 +110,7 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
     act, reviving, foeReviving, resting,
     wasFlags: new Map(alive.map(e => [e.id, { ...e.flags }])),
     wasStaggered: new Set(fighters.filter(f => f.staggered).map(f => f.id)),
-    hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(),
+    hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(), shifts: new Map(),
     cancelled: new Set(), blocked: new Set(), attacked: new Map(), interrupted: new Set(), fellReviving: new Set(),
     swing: act?.type === "attack" ? swingFor(p.stance, alive.find(e => e.id === act.target)) : undefined,
     steps: [],
@@ -138,8 +140,8 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
     },
     /**
      * A Maneuver dodges attacks, whatever their line or range. Falling back dodges every attack; advancing on an enemy dodges only
-     * that enemy's (all the parts of its body, for a multi-part one). (Only you attack enemies, so an enemy's Maneuver, which
-     * advances on you, dodges you.)
+     * that enemy's (all the parts of its body, for a multi-part one). (An enemy's Maneuver, which advances on you or backs
+     * off, dodges only you: an ally's blow, aimed at it, still lands.)
      */
     isDodging: (f, attacker) => {
       if (t.out.has(f.id)) return false;

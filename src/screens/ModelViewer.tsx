@@ -14,7 +14,7 @@ import { ARMOR, WEAPONS } from "../core/rules";
 import type { ArmorItem, ArmorTier, HeadItem, WeaponTier } from "../core/types";
 import { ITEMS } from "../explore/items";
 import type { PoseName } from "../render/poses";
-import { applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, variantToggles, type EnemySubject, LINE_TOGGLE, MODEL, MODEL_VIEW, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow, type Wear, WEARABLES, wearOf } from "./viewerModel";
+import { actionPosesOf, applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, variantToggles, type EnemySubject, LINE_TOGGLE, MODEL, MODEL_VIEW, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow, type Wear, WEARABLES, wearOf } from "./viewerModel";
 import { GearViewer } from "./GearViewer";
 import { WearViewer } from "./WearViewer";
 import { GEAR_WEAPONS, type GearId } from "../render/gear3d";
@@ -164,6 +164,9 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
         }),
       };
     });
+  /** Holds one of an action's poses still (or, again, lets it go back to the stance's). */
+  const holdPose = (i: number, pose: string) =>
+    setShow(prev => ({ ...prev, acting: undefined, parts: prev.parts.map((p, j) => (j === i ? { ...p, action: undefined, next: undefined, pose: p.pose === pose ? undefined : pose } : p)) }));
   const setStance = (i: number, name: string) =>
     setShow(prev => ({ ...prev, acting: undefined, parts: prev.parts.map((p, j) => (j === i ? { stance: name } : p)) }));
   /** The same stance for every part (the whole body staggered, fallen or in its T-pose). */
@@ -181,7 +184,7 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
   /** One part does an action; the others of its body hold their stance. */
   const play = (i: number, action: string, interrupt = false, whiff = false) => {
     const next = nextOf(i, action, interrupt, whiff);
-    setShow(prev => ({ ...prev, interrupt, whiff, acting: multi ? i : undefined, parts: prev.parts.map((p, j) => (j === i ? { ...p, action, next, chosen: action } : { stance: p.stance, chosen: p.chosen })) }));
+    setShow(prev => ({ ...prev, interrupt, whiff, acting: multi ? i : undefined, parts: prev.parts.map((p, j) => (j === i ? { ...p, action, next, chosen: action, pose: undefined } : { stance: p.stance, chosen: p.chosen })) }));
     setPlaySignal(n => n + 1);
   };
   /** Every part does the action it has picked (the first its stance allows, otherwise), all in the same turn. */
@@ -191,7 +194,7 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
       parts: prev.parts.map((p, i) => {
         const stance = kinds[i].pattern.stances.find(x => x.name === p.stance);
         const action = p.chosen ?? stance?.actions[0].name;
-        return action ? { ...p, action, next: nextOf(i, action, false) } : { stance: p.stance };
+        return action ? { ...p, action, next: nextOf(i, action, false), pose: undefined } : { stance: p.stance };
       }),
     }));
     setPlaySignal(n => n + 1);
@@ -247,6 +250,18 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
                 >
                   ▶ {a.name} <span className="viewer-kind">{fixed ? "fixed rule" : a.type}</span>
                 </button>,
+                // Its poses, each held still (nothing plays): its wind-up, how it lands.
+                ...actionPosesOf(partKinds[i], part.stance, a.name).map(({ label, pose }) => (
+                  <button
+                    key={`${a.name}-pose-${label}`}
+                    className="chip viewer-action"
+                    aria-pressed={part.pose === pose}
+                    title={`Hold ${a.name}'s ${label.toLowerCase()} pose still (${pose}); click again to go back to the stance`}
+                    onClick={e => { e.currentTarget.blur(); holdPose(i, pose); }}
+                  >
+                    ◉ {label} <span className="viewer-kind">{pose}</span>
+                  </button>
+                )),
                 // A Block can also be played with nothing to block, to see where a block that wasn't attacked leads.
                 ...(a.type === "block" && !fixed
                   ? [

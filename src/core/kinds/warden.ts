@@ -10,10 +10,9 @@ import type { CombatEvent, CombatState, Enemy, TurnReport } from "../types";
 /** A flaming flail's direct hit deals this much of its damage again, as extra damage. */
 const FLAMING_BONUS = 1 / 4;
 
-/** A flame the Warden could take this turn: a staggered, Waxed player, or an ally's that is staggered or about to clutch its flame. */
-function flamesToUsurp(state: CombatState): string[] {
+/** A waxed ally's flame the Warden could take this turn: one that is staggered or about to clutch its flame. */
+function alliesToUsurp(state: CombatState): string[] {
   const out: string[] = [];
-  if (state.player.staggered && state.player.waxed && !state.player.reviving) out.push("player");
   for (const e of state.enemies) {
     const flame = kindOf(e).flame;
     if (!e.alive || !flame) continue;
@@ -21,6 +20,9 @@ function flamesToUsurp(state: CombatState): string[] {
   }
   return out;
 }
+
+/** Your flame is within his reach: you are staggered while Waxed (and not on your revive). */
+const yoursToUsurp = (state: CombatState) => state.player.staggered && state.player.waxed && !state.player.reviving;
 
 /**
  * A waxed ally, lit: its flame burns on its head. One that has fallen rises, at full health but
@@ -90,27 +92,28 @@ export const WARDEN: EnemyKind = {
   flags: { sealed: false, phase2: false, flaming: false, phase2Pending: false },
   pattern: parsePattern("Penitent Warden", `
     actions:
-      Flail Swing:  attack, normal, #waxing, *Far or *Flaming
-      Rising Flail: attack, normal, #waxing, *Close or *Flaming
-      Flail Slam:   attack, heavy, #waxing, #shockwave
-      Wax Punch:    attack, light, *Sealed
-      Fan Flames:   attack, light, ranged, *Unsealed, *Far, #fire
-      Flame Blast:  attack, heavy, ranged, *Unsealed, #shockwave, #fire
-      Chain Guard:  block, normal
-      Wax Guard:    block, light, *Sealed
-      Stride:       maneuver, retreat, *Close
-      Usurp Flame:  maneuver, advance, *Sealed, *Usurpable
-      Wind Up Flail: rest
-      Clutch Arm:   rest, *Unsealed, *!Flaming
+      Usurp Flame:   attack, light, *Sealed, *Usurpable   // its hit takes the flame: he is unsealed, a waxed sealed whole (dead)
+      Flail Swing:   attack, normal, #waxing, *Far or *Flaming
+      Rising Flail:  attack, normal, #waxing, *Close or *Flaming
+      Flail Slam:    attack, heavy, #waxing, #shockwave
+      Wax Punch:     attack, light, *Sealed
+      Fan Flames:    attack, light, ranged, *Unsealed, #fire
+      Flame Blast:   attack, heavy, ranged, *Unsealed, #shockwave, #fire
+      Spin Guard:    block, normal
+      Wax Guard:     block, light, *Sealed
+      Turn Away:     maneuver, retreat, *Close
+      Dash:          maneuver, advance
+      Flail Wind Up: rest
+      Clutch Flame:  rest, *Unsealed, *!Flaming
     stances:
-      Usurp Flame / Wax Punch / Recover / Second Phase > Idle          > Usurp Flame, Stride, Wind Up Flail
-      Chain Guard / Clutch Arm         > Wax Shoulder In         > Usurp Flame, Fan Flames, Wax Guard, Wind Up Flail
-      Fan Flames / Wax Guard           > Wax Arm Back            > Usurp Flame, Wax Punch, Stride, Flame Blast
-      Flame Blast / Recover            > Arm Over Chest          > Usurp Flame, Fan Flames, Wax Guard, Clutch Arm, Stride
-      Stride                           > Flail Clutched          > Usurp Flame, Flail Swing, Chain Guard
-      Flail Swing / Wind Up Flail      > Flail Spinning Behind   > Usurp Flame, Rising Flail, Wax Guard, Stride, Fan Flames
-      Rising Flail                     > Flail Spinning Overhead > Usurp Flame, Flail Slam
-      Recover / Flail Slam / Wax Punch > Kneeling                > Usurp Flame, Clutch Arm, Chain Guard
+      // His tell: Sealed, with a flame within reach, he always takes Wax Arm Back (even out of a Recover), and Usurp Flame comes first in it.
+      (*Sealed, *Usurpable) / Wax Guard / Fan Flames / Dash > Wax Arm Back > Usurp Flame, Wax Punch, Flame Blast
+      Recover / Usurp Flame / Second Phase  > Idle                    > Turn Away, Flail Wind Up
+      Turn Away / Spin Guard                > Chain Clutched          > Flail Swing, Dash
+      Flail Wind Up / Flail Swing / Dash    > Flail Spinning Behind   > Rising Flail, Spin Guard
+      Rising Flail / !Spin Guard            > Flail Spinning Overhead > Flail Slam
+      Flail Slam / Flame Blast              > Kneeling                > Clutch Flame, Flail Wind Up
+      Recover / Usurp Flame / Clutch Flame  > Wax Arm Raised          > Wax Guard, Fan Flames
   `, { events: ["Second Phase"] }),
   variant: "warden",
   figure3d: "warden",
@@ -124,12 +127,12 @@ export const WARDEN: EnemyKind = {
   // The flail is in his right hand; the candle arm is his left.
   weaponHand: "right",
   modelPoses: { front: "wd-t", back: "wd-t-b" },
+  // (Chain Clutched and Wax Arm Raised borrow older poses until they get their own.)
   stancePoses: {
     Idle: "wd-idle",
-    "Wax Shoulder In": "wd-shoulder",
     "Wax Arm Back": "wd-arm-back",
-    "Arm Over Chest": "wd-arm-chest",
-    "Flail Clutched": "wd-clutch-flail",
+    "Wax Arm Raised": "wd-shoulder",
+    "Chain Clutched": "wd-clutch-flail",
     "Flail Spinning Behind": "wd-spin-behind",
     "Flail Spinning Overhead": "wd-spin-over",
     Kneeling: "wd-kneel",
@@ -137,19 +140,21 @@ export const WARDEN: EnemyKind = {
   idlePose: "wd-idle",
   downPose: "wd-fallen",
   flinchPose: "wd-flinch",
+  // (Usurp Flame, Spin Guard and Dash borrow older poses until they get their own; Turn Away is Idle turned, for now.)
   actionPoses: {
+    "Usurp Flame": { act: "wd-usurp", strike: "wd-usurp-dash" },
     "Flail Swing": { act: "wd-clutch-flail", strike: "wd-swing" },
     "Rising Flail": { act: "wd-spin-behind", strike: "wd-rising" },
     "Flail Slam": { act: "wd-spin-over", strike: "wd-slam", projectile: "impact" },
     "Wax Punch": { act: "wd-arm-back", strike: "wd-punch", projectile: "impact" },
     "Fan Flames": { act: "wd-shoulder", strike: "wd-fan", projectile: "fan" },
     "Flame Blast": { act: "wd-arm-back", strike: "wd-blast", projectile: "blast" },
-    "Chain Guard": { act: "wd-chain-guard", windup: "wd-chain-ready" },
+    "Spin Guard": { act: "wd-chain-guard", windup: "wd-chain-ready" },
     "Wax Guard": { act: "wd-wax-guard", guard: "wd-wax-swat", windup: "wd-wax-ready" },
-    Stride: { act: "wd-stride" },
-    "Usurp Flame": { act: "wd-usurp" },
-    "Wind Up Flail": { act: "wd-spin-behind", rest: "wd-wound-up", windup: "wd-winding-up" },
-    "Clutch Arm": { act: "wd-clutch-arm", rest: "wd-clutch-arm", windup: "wd-clutch-ready" },
+    "Turn Away": { act: "wd-turn-away" },
+    Dash: { act: "wd-usurp-dash" },
+    "Flail Wind Up": { act: "wd-spin-behind", rest: "wd-wound-up", windup: "wd-winding-up" },
+    "Clutch Flame": { act: "wd-clutch-arm", rest: "wd-clutch-arm", windup: "wd-clutch-ready" },
   },
   // When he falls for good, every flame he lit goes out: the waxed die with him, sealed in wax, their candles snuffed.
   onDeath: ({ self, state, event }) => {
@@ -167,6 +172,7 @@ export const WARDEN: EnemyKind = {
   shockwave: self => self.intent.action !== "Flail Slam" || !!self.flags.flaming,
   // He picks after the waxed, to see which of them is about to Clutch Flame.
   decidesLast: true,
+  // (Usurp Flame is a fixed rule: the Model viewer plays it with you resting.)
   fixedActions: ["Usurp Flame"],
   // Usurp Flame on you: his taking your flame does not get you up; you stay down, sealed in wax, until the next forced Rest.
   holdsTargetDown: ["Usurp Flame"],
@@ -174,7 +180,7 @@ export const WARDEN: EnemyKind = {
     sealed: self => !!self.flags.sealed,
     unsealed: self => !self.flags.sealed,
     /** A flame within reach to take: yours (staggered while Waxed), or a waxed ally's (staggered, or about to Clutch Flame). */
-    usurpable: (_, state) => flamesToUsurp(state).length > 0,
+    usurpable: (_, state) => yoursToUsurp(state) || alliesToUsurp(state).length > 0,
   },
   statuses: [
     { key: "sealed", off: "Unsealed", on: "Sealed", locked: on => (on.phase2 ? "Unsealed (phase 2)" : null) },
@@ -192,18 +198,28 @@ export const WARDEN: EnemyKind = {
     if (!flags.phase2) flags.sealed = true;
   },
   /**
-   * Usurp Flame (first in every stance, while he is Sealed and a flame is within reach) takes
-   * yours, if you're staggered while Waxed, or a waxed ally's, if it's staggered or about to Clutch
-   * Flame. Several at once: even odds.
+   * Usurp Flame (first in Wax Arm Back, which he always takes while Sealed with a flame within reach) goes for
+   * yours whenever it can: you, staggered while Waxed. Otherwise a waxed ally's, staggered or about to Clutch
+   * Flame; several at once: even odds.
    */
   aim: (_, state, action, rng) => {
-    if (action !== "Usurp Flame") return undefined;
-    const flames = flamesToUsurp(state);
+    if (action !== "Usurp Flame" || yoursToUsurp(state)) return undefined;
+    const flames = alliesToUsurp(state);
     return flames.length ? flames[Math.floor(rng() * flames.length)] : undefined;
   },
+  // Usurp Flame's hit takes the flame: he is Unsealed, and a waxed is sealed whole (dead), you until you get up.
   // A direct hit from his flail (`#waxing`) leaves wax behind; once his flame is free (phase
   // two) it leaves none, but set on fire it burns for extra damage.
   onDirectHit: hit => {
+    if (hit.self.intent.action === "Usurp Flame") {
+      hit.event({ kind: "usurp", who: hit.self.id, target: hit.target.id });
+      hit.seal();
+      if (hit.self.flags.sealed && !hit.self.flags.phase2) {
+        hit.self.flags.sealed = false;
+        hit.event({ kind: "flag", who: hit.self.id, flag: "sealed", on: false });
+      }
+      return;
+    }
     if (!hit.tags.includes("waxing")) return;
     if (hit.self.flags.flaming) hit.burn(hit.damage * FLAMING_BONUS);
     if (!hit.self.flags.phase2) hit.wax();
@@ -213,28 +229,11 @@ export const WARDEN: EnemyKind = {
     if (hit.tags.includes("waxing") && !hit.self.flags.phase2 && !hit.target.waxed) hit.wax();
   },
   afterTurn: r => {
-    const { self, state, action, outcome } = r;
+    const { self, action, outcome } = r;
     if (outcome === "done") {
-      if (action === "Usurp Flame") {
-        const target = self.intent.target;
-        const ally = target ? state.enemies.find(e => e.id === target) : undefined;
-        if (ally) {
-          // Its flame taken, the waxed is sealed whole: out of the fight for good.
-          ally.alive = false;
-          ally.fate = "encased";
-          ally.hp = 0;
-          r.event({ kind: "usurp", who: self.id, target: ally.id });
-          r.event({ kind: "encased", who: ally.id });
-        } else {
-          // Your flame taken, you're sealed whole in wax until you get back up.
-          state.player.waxed = false;
-          state.player.encased = true;
-          r.event({ kind: "usurp", who: self.id, target: "player" });
-        }
-        setSealed(r, false);
-      }
+      // (Usurp Flame's effects come with its hit: see onDirectHit.)
       if (action === "Flame Blast") setSealed(r, true);
-      if (action === "Clutch Arm") {
+      if (action === "Clutch Flame") {
         // His flame can't be put out any more: clutching the flail, he sets it alight instead.
         if (self.flags.phase2) setFlaming(r, true);
         else setSealed(r, true);
@@ -276,7 +275,19 @@ export const WARDEN: EnemyKind = {
    * comes from "Usurp Flame >": Idle).
    */
   opening: ({ self, state, setups, describe, chooseIntents, rng }) => {
-    const offering = state.enemies.find((e, i) => setups[i]?.offering && kindOf(e).flame);
+    // The offering's flame already taken in an earlier attempt (it lies dead from the start), he takes another waxed's, any still up.
+    const named = state.enemies.find((e, i) => setups[i]?.offering && kindOf(e).flame);
+    const others = state.enemies.filter(e => e.alive && e !== self && !!kindOf(e).flame);
+    const offering = named && !named.alive && others.length ? others[Math.floor(rng() * others.length)] : named;
+    // None left (every waxed beaten before): no scene, the fight begins as the scene would leave him, Unsealed, on the front line, his
+    // stance coming from Usurp Flame.
+    if (offering && !offering.alive) {
+      self.line = "front";
+      self.flags.sealed = false;
+      self.last = { name: "Usurp Flame", outcome: "done" };
+      chooseIntents(state, rng);
+      return null;
+    }
     const usurp = WARDEN.pattern.actions.get("usurp flame");
     const flame = offering && kindOf(offering).flame!;
     const clutch = offering && kindOf(offering).pattern.actions.get(flame!.action.toLowerCase());
@@ -306,7 +317,7 @@ export const WARDEN: EnemyKind = {
     const o0: Enemy = from.enemies.find(e => e.id === offering.id)!;
     w0.flags.sealed = true;
     w0.last = null;
-    w0.intent = { ...describe(w0.kind, w0.line, "Idle", usurp), target: o0.id, dir: "retreat" };
+    w0.intent = { ...describe(w0.kind, w0.line, "Wax Arm Back", usurp), target: o0.id };
     o0.alive = true;
     o0.fate = undefined;
     o0.hp = o0.maxHP;

@@ -30,6 +30,13 @@ export interface DirectHit {
   tags: string[];
   /** Burns the target for this much more damage. */
   burn: (amount: number) => void;
+  /**
+   * Seals the target whole in wax, its flame taken: an enemy dies on the spot (encased, out of the fight); you are encased
+   * until you get back up.
+   */
+  seal: () => void;
+  /** Records an event of the blow's step. */
+  event: (ev: CombatEvent) => void;
   /** Leaves the target Waxed (on wax already there, a direct hit also tires it: 1/8 of the damage). */
   wax: () => void;
 }
@@ -144,7 +151,7 @@ export interface EnemyKind {
   decidesLast?: boolean;
   /**
    * Who an action is aimed at, when it isn't you: an ally's id (a Maneuver aimed at an ally moves toward them, which
-   * pushes you away), or undefined for you. Called when the action has been picked.
+   * pushes you away; an attack strikes the ally, see `attacks.ts`), or undefined for you. Called when the action has been picked.
    */
   aim?: (self: Enemy, state: CombatState, action: string, rng: Rng) => string | undefined;
   /** Actions that play on their own, with nothing of yours to attack or dodge (the model viewer lets them run alone). */
@@ -232,6 +239,7 @@ function checkKind(id: string, kind: EnemyKind) {
   for (const a of actions.values()) {
     for (const need of a.needs) for (const alt of need.split("|")) if (!conditionOf(kind, alt)) fail(`"${a.name}" needs *${alt.replace(/^!/, "")}, but no such condition exists`);
   }
+  for (const s of stances) for (const need of s.when ?? []) for (const alt of need.split("|")) if (!conditionOf(kind, alt)) fail(`stance "${s.name}" is called for by *${alt.replace(/^!/, "")}, but no such condition exists`);
   for (const s of Object.keys(kind.stancePoses)) if (!hasStance(s)) fail(`a pose for stance "${s}", which isn't in its pattern`);
   for (const a of Object.keys(kind.actionPoses ?? {})) if (!hasAction(a)) fail(`poses for action "${a}", which isn't in its pattern`);
   for (const a of [...(kind.fixedActions ?? []), ...(kind.holdsTargetDown ?? [])]) if (!hasAction(a)) fail(`no action named "${a}"`);

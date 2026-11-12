@@ -193,6 +193,17 @@ export function liftPose(drawn: Skeleton, handGiven: Side = "right", opts: LiftO
     const down = lowest - before;
     for (const j of JOINTS) joints[j] = [joints[j][0], joints[j][1] - down, joints[j][2]];
   }
+  // A leg pointed its own way (`legDirs3`): the thigh from its hip, the shin from its knee, each its true length.
+  if (opts.freeLegs && raw.legDirs3) {
+    for (const side of ["R", "L"] as const) {
+      const plan = raw.legDirs3[side === "R" ? "right" : "left"];
+      if (!plan) continue;
+      const along = (from: P3, d: readonly [number, number, number], len: number): P3 => { const n = Math.hypot(...d) || 1; return [from[0] + (d[0] / n) * len * U, from[1] + (d[1] / n) * len * U, from[2] + (d[2] / n) * len * U]; };
+      const knee = along(joints[`hip${side}` as Joint], plan[0], RIG.thigh);
+      joints[`knee${side}` as Joint] = knee;
+      joints[`foot${side}` as Joint] = along(knee, plan[1], RIG.shin);
+    }
+  }
   // A slouch: the shoulders rounded forward (and a little down), the arms going with them unless they reach their own spots after (`arms3`).
   if (raw.hunch3) {
     const f = raw.hunch3 * U, d = (raw.hunch3 / 3) * U;

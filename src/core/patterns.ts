@@ -30,6 +30,9 @@
  *   - Comes from: action names (and `Recover`, or an event the kind declares, like the Warden's
  *     `Second Phase`: right after he enters it) separated by `/` or `,`, or `All`.
  *   - Leads to: the actions it allows, in order of priority, separated by `,` or `/`.
+ *   - A group of conditions in brackets, `(*Sealed, *Usurpable) > Wax Arm Back > …`, makes the stance one it
+ *     takes whenever they all hold, whatever it just did (its Recover after a stagger or a revive included,
+ *     though not the forced turn itself): the Warden's tell for Usurp Flame. It can come from actions too.
  * - A Block can be told by what it did: `Brace` in a "comes from" list is a Brace that stopped an
  *   attack, `!Brace` one that stopped nothing (only once the pattern writes `!Brace` somewhere;
  *   otherwise `Brace` is either).
@@ -38,6 +41,7 @@
  *   ones an enemy opens a fight with.
  *
  * PICKING
+ * 0. A stance whose bracketed conditions all hold (and that has an action available) is taken, over everything below.
  * 1. Next stance, evenly among those the last action leads to. If the last action didn't
  *    happen (a Rest cut short, a cancelled action), or it was the Recover after a stagger: evenly
  *    among the Recover stances (a Rest cut short, "flinched", avoids the stance it was broken out of).
@@ -79,6 +83,8 @@ export interface StanceDef {
   name: string;
   /** Actions it can follow ("Recover" included), or "all". */
   from: "all" | Set<string>;
+  /** Conditions (as an action's `needs`) under which it is taken whatever came before: `(*Sealed, *Usurpable) >`. */
+  when?: string[];
   /** The actions it allows, in order of priority: the first available one is taken. */
   actions: ActionDef[];
 }
@@ -94,6 +100,9 @@ export interface Pattern {
 }
 
 export class PatternError extends Error {}
+
+/** A `*Condition` as written (`*A or *B`, `*!C`), as a need: "a|b", "!c" (lowercase). */
+const needOf = (w: string) => w.toLowerCase().split(/\s+or\s+/).map(alt => alt.trim().replace(/^\*\s*/, "").replace(/^!\s*/, "!")).join("|");
 
 /**
  * Parses a pattern written in the notation above, and checks it for typos and dead ends.
@@ -125,7 +134,7 @@ export function parsePattern(label: string, src: string, { events = [] }: { even
         else if (/^damage\s+\d+$/.test(w)) def.damage = Number(w.split(/\s+/)[1]);
         else if (/^cost\s+\d+$/.test(w)) def.cost = Number(w.split(/\s+/)[1]);
         else if (w === "advance" || w === "retreat" || w === "by-line") def.dir = w;
-        else if (w.startsWith("*")) def.needs.push(w.split(/\s+or\s+/).map(alt => alt.replace(/^\*\s*/, "").replace(/^!\s*/, "!")).join("|"));
+        else if (w.startsWith("*")) def.needs.push(needOf(w));
         else if (w.startsWith("#")) def.tags.push(w.slice(1));
         else fail(`action "${name}": unknown modifier "${w}"`);
       }
@@ -151,6 +160,17 @@ export function parsePattern(label: string, src: string, { events = [] }: { even
   const stances: StanceDef[] = stanceLines.map(({ from, name, to, line }) => {
     const where = `stance "${name}" (line ${line})`;
     let fromSet: StanceDef["from"];
+    // A bracketed group of conditions: taken whenever they hold.
+    let when: string[] | undefined;
+    from = from.replace(/\(([^)]*)\)/g, (_, group: string) => {
+      if (when) fail(`${where}: only one group of conditions in brackets`);
+      when = group.split(",").map(w => w.trim()).filter(Boolean).map(w => {
+        if (!w.startsWith("*")) fail(`${where}: "(${group})" should hold only *Conditions`);
+        return needOf(w);
+      });
+      if (!when.length) fail(`${where}: an empty group of conditions in brackets`);
+      return "";
+    });
     if (from.toLowerCase() === "all") fromSet = "all";
     else {
       fromSet = new Set<string>();
@@ -165,7 +185,7 @@ export function parsePattern(label: string, src: string, { events = [] }: { even
     }
     const list = to.split(/[/,]/).map(n => find(n, where));
     if (new Set(list).size !== list.length) fail(`${where}: an action is listed twice`);
-    return { name, from: fromSet, actions: list };
+    return { name, from: fromSet, actions: list, when };
   });
 
   // Recover must lead somewhere. (An action nothing follows is no error: it defaults to Recover's stances.)
@@ -227,7 +247,14 @@ export function choose(
   last: PatternMemory | null,
   available: (a: ActionDef) => boolean,
   rng: () => number,
+  holds: (needs: string[]) => boolean = () => false,
 ): { stance: StanceDef; action: ActionDef } | null {
+  // A stance its bracketed conditions call for comes before anything else.
+  const called = p.stances.filter(s => s.when && holds(s.when) && s.actions.some(available));
+  if (called.length) {
+    const stance = pick(called, rng);
+    return { stance, action: pickAction(stance, available)! };
+  }
   // A stance with nothing available can't be picked ("disabled"): the others share its turn.
   const open = nextStances(p, last).filter(s => s.actions.some(available));
   if (open.length) {

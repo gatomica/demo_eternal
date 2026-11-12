@@ -13,7 +13,7 @@ import type { CombatState, EnemySetup, Opening } from "../core/types";
 import { Exploration, type Journey } from "../explore/Exploration";
 import { START_STATS } from "../explore/empower";
 import { type ClassId, startingInventory } from "../explore/items";
-import { dropOffset, ETERNAL_SLOT, ETERNAL_STRING_CHANCE, type MapFoe, memberKey, wakeEnemies, withCorpses } from "../explore/foes";
+import { dropOffset, ETERNAL_SLOT, ETERNAL_STRING_CHANCE, MAP_FOES, type MapFoe, memberKey, wakeEnemies, withCorpses } from "../explore/foes";
 import { ENEMY_KINDS } from "../core/bestiary";
 import { dropsOf, loadoutOf, lose } from "../explore/gear";
 import type { GroundItem } from "../explore/pickups";
@@ -29,11 +29,21 @@ type Fight = { id: number; foes: MapFoe[]; state: CombatState; opening?: Opening
  */
 function enemiesOf(foes: MapFoe[], holding: Record<string, number> = {}): EnemySetup[] {
   // (Whoever holds String you lost carries it into the fight: `holds`.)
-  const holds = (f: MapFoe, j: number) => { const n = holding[memberKey(f.id, f.members?.[j] ?? j)]; return n ? { holds: n } : {}; };
-  const all = foes.flatMap(f => f.fight.map((e, j) => ({ ...e, ...holds(f, j) })));
+  const holds = (key: string) => { const n = holding[key]; return n ? { holds: n } : {}; };
+  const all = foes.flatMap(f => groupOf(f).map(({ setup, key }) => ({ ...setup, ...holds(key) })));
   if (all.some(e => e.offering)) return all;
   // (The parts of one body share a line, so they all go with the first.)
-  return foes.flatMap((f, i) => f.fight.map((e, j) => ({ ...e, ...holds(f, j), line: i === 0 && (j === 0 || e.body) ? "front" as const : "back" as const })));
+  return foes.flatMap((f, i) => groupOf(f).map(({ setup, key }, j) => ({ ...setup, ...holds(key), line: i === 0 && (j === 0 || setup.body) ? "front" as const : "back" as const })));
+}
+
+/**
+ * A map enemy's members in its fight, each with its map key: those still up, or, for a group that `keepsDead` (the Warden's), all of
+ * them, the ones dead for good lying dead from the start.
+ */
+function groupOf(f: MapFoe): { setup: EnemySetup; key: string }[] {
+  const whole = f.keepsDead && f.members ? MAP_FOES.find(x => x.id === f.id) : undefined;
+  if (whole) return whole.fight.map((setup, i) => ({ setup: f.members!.includes(i) ? setup : { ...setup, dead: true }, key: memberKey(f.id, i) }));
+  return f.fight.map((setup, j) => ({ setup, key: memberKey(f.id, f.members?.[j] ?? j) }));
 }
 
 /** The guide's lesson: its fight is the Test combat "tutorial" encounter, with what you wear (nothing, at first), and it can't be lost. */
@@ -45,7 +55,7 @@ const fightFor = (foes: MapFoe[], backTo: Journey) =>
   newFight(enemiesOf(foes, backTo.held), loadoutOf(backTo.inventory), knotCharges(backTo.knot), {}, backTo.eternity, { maxHP: backTo.maxHP ?? START_STATS.maxHP, maxEternity: backTo.maxEternity ?? START_STATS.maxEternity });
 
 /** The map keys of the enemies of these map enemies, in the fight's order (enemy `e3` is the fourth of them). */
-const keysOf = (foes: MapFoe[]) => foes.flatMap(f => f.fight.map((_, j) => memberKey(f.id, f.members?.[j] ?? j)));
+const keysOf = (foes: MapFoe[]) => foes.flatMap(f => groupOf(f).map(g => g.key));
 
 /** A new game that skips the tutorial, for testing: the lesson is behind you, and all that is left is to rest with the guide. */
 function skippedTutorial(): Journey {
@@ -169,8 +179,11 @@ export function Journeying({ fresh = false, skip = false, classId = "soldier", o
           } else {
             // (`killedBy` is the enemy's id in the fight: e0, e1...)
             const killer = result.killedBy ? keysOf(foes)[Number(result.killedBy.slice(1))] : undefined;
+            // Those you beat before you fell stay beaten, if they are ones that stay dead (the waxed): they lie where they fell (the
+            // sleepwalkers get up as you reawaken anyway).
+            const beaten = Object.fromEntries((result.fell ?? []).map(id => keysOf(foes)[Number(id.slice(1))]).filter(key => key && backTo.fallen?.[key] && !ENEMY_KINDS[backTo.fallen[key].kind].respawns).map(key => [key, backTo.fallen![key]]));
             // (Giving up has no killer: half the String is left where the fight began.)
-            fall(backTo, result.earned, killer, killer || !backTo.at ? undefined : { x: backTo.at.x, y: backTo.at.y, alt: backTo.at.alt });
+            fall({ ...backTo, corpses: { ...backTo.corpses, ...beaten } }, result.earned, killer, killer || !backTo.at ? undefined : { x: backTo.at.x, y: backTo.at.y, alt: backTo.at.alt });
           }
           setFight(null);
           setVisit(v => v + 1);

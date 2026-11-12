@@ -55,6 +55,11 @@ export interface MapFoe {
   patrol?: { x: number; y: number }[];
   /** Which of the original group's members are still standing, when some are dead for good (`fight` holds only those). */
   members?: number[];
+  /**
+   * Its members that lie dead for good still take part in its fight, dead from the start (`EnemySetup.dead`): the Warden's waxed, whom his
+   * phase two raises. (On the map they are only their remains.)
+   */
+  keepsDead?: boolean;
 }
 
 /** Where a beaten enemy lies on the map. */
@@ -191,7 +196,7 @@ export const MAP_FOES: MapFoe[] = [
   // Floor C, the Sanctum (level 13): the Penitent Warden in the middle of the platform, a waxed on three of its edges. None of them ever
   // chases you: the fight and its opening scene begin the moment you step onto the platform. (The fight is Test combat's "warden".)
   {
-    id: "warden", kind: "warden", home: { x: 27.5, y: 19.5, z: 13 }, still: true,
+    id: "warden", kind: "warden", home: { x: 27.5, y: 19.5, z: 13 }, still: true, keepsDead: true,
     // The whole platform (plan tiles 23-29 by 15-21, so world x 24 to 31 and y 16 to 23) except its four corner tiles, where the bridges come
     // in: the fight starts once you have stepped beyond the corner tile (and so can see him), wherever along the rim you go.
     trigger: { x0: 24, y0: 16, x1: 31, y1: 23, z: 13, cut: 1 },

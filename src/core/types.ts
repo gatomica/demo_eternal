@@ -64,7 +64,10 @@ export interface Intent {
   cost?: number;
   /** A ranged attack: the attacker stays put, a Block sends nothing back, and it can always be dodged. */
   ranged?: boolean;
-  /** For a Maneuver aimed at an ally (Usurp Flame): that ally's id. It pushes you away like backing off. */
+  /**
+   * Aimed at an ally instead of you: that ally's id. A Maneuver moves toward them, which pushes you away like backing off; an attack
+   * (Usurp Flame) strikes them, and its attacker tries to step onto their line.
+   */
   target?: string;
   /** Tags from the pattern, e.g. "waxing": a direct hit leaves the target Waxed. */
   tags?: string[];
@@ -352,6 +355,11 @@ export interface EnemySetup {
   part?: "left" | "mid" | "right";
   /** String it holds (see `Enemy.holds`). */
   holds?: number;
+  /**
+   * It starts the fight already dead, lying where it fell in an earlier attempt (a waxed of the Warden's that you beat before you lost to
+   * him): out of the fight, but there to be raised (his phase two lights every waxed, the fallen ones too).
+   */
+  dead?: boolean;
 }
 
 /** A scene played before the first turn: the fight as it stood before it, and its steps. */

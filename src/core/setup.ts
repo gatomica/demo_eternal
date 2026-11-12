@@ -76,6 +76,8 @@ export function createCombat(
       reviving: false,
       ...(setup.body ? { body: setup.body, part: setup.part } : {}),
       ...(setup.holds ? { holds: setup.holds } : {}),
+      // (Beaten in an earlier attempt: it lies there dead from the start.)
+      ...(setup.dead ? { alive: false, hp: 0, fate: "fallen" as const } : {}),
     };
   });
 

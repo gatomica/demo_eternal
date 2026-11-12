@@ -67,6 +67,8 @@ export interface PartShow {
   next?: string;
   /** The action it does when all the parts play together (default: the first its stance allows). */
   chosen?: string;
+  /** A pose held still in place of the stance's (one of an action's: its wind-up, as it lands...), with nothing played. */
+  pose?: string;
 }
 
 export interface ViewerShow {
@@ -169,6 +171,27 @@ function applyPart(e: CombatState["enemies"][number], part: PartShow, show: View
   const actionName = !played && part.action ? part.action : stance?.actions[0].name ?? "";
   const action = kind.pattern.actions.get(actionName.toLowerCase());
   if (action) e.intent = { ...describeAction(e.kind, e.line, stanceName, action), pose };
+  // (A pose of an action held still: shown as the stance is, until something is played.)
+  if (!played && part.pose) e.intent = { ...e.intent, pose: part.pose };
+}
+
+/**
+ * The poses of an action to hold still, each once, besides the stance's own: its wind-up (a Rest's or Block's `windup`; an attack's or
+ * Maneuver's `act`, unless it attacks straight out of the stance), and how it lands (an attack's `strike`, a Block's `guard`, a Rest's `rest`).
+ */
+export function actionPosesOf(kindName: KindId, stanceName: string, actionName: string): { label: string; pose: string }[] {
+  const kind = ENEMY_KINDS[kindName], a = kind.pattern.actions.get(actionName.toLowerCase()), p = kind.actionPoses?.[actionName];
+  if (!a || !p) return [];
+  const fromStance = a.type === "attack" && kind.attacksFromStance;
+  const list: { label: string; pose?: string }[] = [
+    { label: "Wind-up", pose: a.type === "rest" || a.type === "block" ? p.windup ?? p.act : fromStance ? undefined : p.act },
+    ...(a.type === "block" ? [{ label: "Guard", pose: p.guard ?? p.act }] : []),
+    ...(a.type === "attack" ? [{ label: "Lands", pose: p.strike }] : []),
+    ...(a.type === "rest" ? [{ label: "Rests", pose: p.rest }] : []),
+    ...(a.type === "maneuver" ? [{ label: "Pose", pose: p.act }] : []),
+  ];
+  const seen = new Set([kind.stancePoses[stanceName]]);
+  return list.filter((x): x is { label: string; pose: string } => !!x.pose && !seen.has(x.pose) && !!seen.add(x.pose));
 }
 
 /** The actions a stance allows with the enemy as shown (conditions like *Sealed checked). */

@@ -2,7 +2,7 @@
  * intents.ts — how each enemy picks what it does next: stance, then action (see patterns.ts).
  */
 import { ENEMY_KINDS, type KindId } from "./bestiary";
-import { isAvailable } from "./conditions";
+import { isAvailable, needsHold } from "./conditions";
 import { type ActionDef, choose } from "./patterns";
 import type { ActionType, CombatState, Enemy, Intent, Line, Rng } from "./types";
 
@@ -44,10 +44,10 @@ function chooseIntent(e: Enemy, state: CombatState, rng: Rng): Intent {
   // Something it must pick on from (a boss's second phase) overrides what it just did.
   const memory = e.nextFrom ? { action: e.nextFrom, outcome: "done" as const } : e.last ? { action: e.last.name, outcome: e.last.outcome, blocked: e.last.blocked, avoid: e.last.flinchedFrom } : null;
   e.nextFrom = undefined;
-  const picked = choose(kind.pattern, memory, available, rng);
+  const picked = choose(kind.pattern, memory, available, rng, needs => needsHold(kind, e, state, needs));
   if (!picked) return { type: "rest", dir: lineDir, forced: false };
   const intent = describe(picked.stance.name, picked.action);
-  // Some actions are aimed at an ally: it moves toward them, which pushes you away.
+  // Some actions are aimed at an ally: a Maneuver moves toward them, which pushes you away; an attack strikes them instead of you.
   const target = kind.aim?.(e, state, picked.action.name, rng);
   if (target && target !== "player") {
     intent.target = target;

@@ -76,7 +76,7 @@ Tutorial-area enemy roster and boss, as agreed in brainstorming. Items marked **
   A waxed whose flame the Warden takes, or that dies lit in phase two, lies in the same wax remains from that moment; the others burn as candles in phase two until the shockwave raises them.
   A unit that falls with a revive left shows the same remains, but still repositions with the lines, until it actually rises and gets its normal sprite back. The Model viewer has a "Dead" stance to see them.
 - **Target bar and camera (built):** while you plan, the health bar of whoever you're targeting hangs right below that enemy in the scene, the same size per health as your own bar; while a turn plays it sits bottom right, mirroring your bar, following whoever the action involves. The planning camera swings around you (up to about 37 degrees either way) to the least turn that leaves the selected enemy in view, counting front-line enemies in the way double.
-- **Remains on the map (built):** after a fight, whoever fell lies where it fell on the exploration map, in the same remains as in the fight (pieces, wax, the cloak over its pool). When you rest by a keeper, **every enemy goes back to where it started**, and the **sleepwalkers get up again** (`respawns` on the kind) and their remains go; the **waxed and the Warden stay dead**, their remains lying there for good. In a group with both, only the sleepwalkers come back.
+- **Remains on the map (built):** after a fight, whoever fell lies where it fell on the exploration map, in the same remains as in the fight (pieces, wax, the cloak over its pool). When you rest by a keeper, **every enemy goes back to where it started**, and the **sleepwalkers get up again** (`respawns` on the kind) and their remains go; the **waxed and the Warden stay dead**, their remains lying there for good. In a group with both, only the sleepwalkers come back. **This holds for a fight you lose too:** a waxed you beat before you fell stays dead (`CombatScreen`'s `fell`, kept by `Journeying` on a loss). The Warden's waxed are kept in his fight even so (`keepsDead` on his map enemy): the ones you beat in an earlier attempt lie dead from the start (`EnemySetup.dead`), so his phase two always raises all three, lit. If the offering (Waxed C) is among them, the opening scene takes another waxed's flame instead, one still up at random; only with none left is there no scene: he starts as it would leave him, Unsealed, on the front line, his stance from `Usurp Flame >`.
 - **Drops on the ground (built):** what a beaten enemy carried now lies on the map where it fell, on its remains, to pick up with E; nothing goes straight into your bag any more. Resting by a keeper (or coming back after a loss) clears **everything lying on the ground**: what enemies dropped (the sleepwalkers drop it again when they fall again) and what you left there yourself. Gear set on the map (not yet taken) stays. Picking up ordinary gear while you already **wear** ordinary gear of that slot opens the inventory instead, offering to **swap** them (E): you take the one on the ground and leave the one you wore in its place.
 - **The action wheel (built):** a see-through white ring that opens (growing) around whoever you selected, the same size for everyone and big enough to hold them inside (about the screen's height, never wider than 60% of its width). Four white diagonal lines cut it into four pieces, one per direction (W above, A left, S below, D right), each with its action's name; the piece being selected is brighter (dark text), solid white at the inner edge and fading out more slowly than the rest, which are see-through, their fill fading out away from the ring's center (strongest at the inner edge, nothing at the outer), with no outline; the four dividing lines are white and pointed at both ends. **The target mark is this same ring:** while you plan it is small, sitting on the wheel's center (the target's center, nudged only as far as it takes to keep every option of the wheel on-screen); focusing (E) grows it into the wheel, and cancelling (Q) shrinks the wheel back into the mark (it also slides between targets as you move the cursor). A direction with no action is faint and blank. A mouse hover lights a piece and a click commits it.
 - **Cost preview (built):** hovering Attack in the wheel (before you commit) flickers the Fatigue it would cost on your health bar, beside the Fatigue you already have.
@@ -115,7 +115,7 @@ Every enemy is a loop: **stance** (shown to you) → **action** (hidden, unless 
 
 **Attacks and Maneuvers can't whiff.** They commit the body (closing in, changing lines), so once performed they always count, even if the attack was Blocked or dodged, or the Maneuver dodged nothing.
 
-Effects tied to an action (like the Warden becoming Sealed after Clutch Arm) also only apply if the action actually happened.
+Effects tied to an action (like the Warden becoming Sealed after Clutch Flame) also only apply if the action actually happened.
 
 **Disabled stances.** A stance whose actions are all unavailable (conditions not met) is *disabled*: it can't be picked, and the other stances the last action leads to share its turn (the lit waxed's Cradle Flame, whose only action is a Rest they can no longer use).
 
@@ -123,6 +123,7 @@ Effects tied to an action (like the Warden becoming Sealed after Clutch Arm) als
 
 **Notation.** Enemies are written in this notation in the game's code (one file per kind in `src/core/kinds/`) and parsed when the game loads, so the doc and the game read the same.
 - `A / B > Stance > X / Y` means: after action A or B, the enemy can take this stance; from it, it can do X or Y.
+- **A stance called for by conditions:** a group of conditions in brackets in a "comes from" list, `(*Sealed, *Usurpable) / Wax Guard > Wax Arm Back > …`, makes it a stance the enemy takes **whenever they all hold**, whatever it just did (its Recover after a stagger or a revive included; not the forced turn itself), as long as one of its actions is available. It can come from actions as well, as usual. (The Warden's tell for Usurp Flame.)
 - **Telling a Block by what it did:** `Brace` in a "comes from" list is a Brace that stopped at least one attack, `!Brace` one that stopped nothing. This only splits a Block in two once a pattern writes `!Brace` somewhere (the Waxed's does); otherwise `Brace` is either, as before.
 - **An action no stance comes from** goes back to the **Recover** stances (it is not an error).
 - A stance's actions are an ordered list (`,` or `/`, they mean the same): the first available one is taken. `> Stride, Wax Guard, Rising Flail` is Stride if it can, else Wax Guard, else Rising Flail.
@@ -321,6 +322,13 @@ In fights he is now drawn on the 3D rig (`render/Warden3D.tsx`, first pass, untu
 - No shape is see-through except effects (shadows, glows, smoke, trails, whirls).
 - Per-pose options: how far he turns (candle side toward you, or flail shoulder toward you), head tilt, looking back over his shoulder, face turned toward the camera, arm tucked behind the head or body, arm starting from the rip's armpit.
 
+**The 3D figure's look (built, in `render/Warden3D.tsx`; the flat sprites above keep their old look):**
+- **Skirt:** a stack of level rings round her (like the Hunter's coat), the cloth running straight between them: the belt's lower edge, a seat ring just below the bottom egg (taking in her seat and right thigh), a knee ring (taking in a bent right knee), the hem; where the hem would go below the floor, the rest crumples on the floor in a ruffled ring. The joins between rings are bent round smoothly (`SKIRT_JOIN`). Open on her left over the bare leg; her right thigh is clipped to the skirt's outline. Only the bottom part (below the knee) is meant to get simple motion later.
+- **Flail:** the handle is plain dark wood (the axe's haft colour), capped with a black iron dome on a short iron sleeve (a hollow ring: seen into its open end, the handle goes in over the iron and the dark inside shows round it). The chain is oval links of black iron, each a ring in space turned a quarter round from the last; a link seen open has a thin gray line along the inside of its long sides. The head is a ball of wax lit from above (no outline), and the last link is sealed in wax where it goes into it. Her right hand: the stretch of handle in her fist is white like the hand (the cylinder trick: only the half facing the camera, edges curved like a cylinder's), so the flail always looks held. In the held-chain poses a short run of chain hangs from her candle hand to the head.
+- **Candle hand, phase one:** the little flame (`LittleFlame`) stands at the very tip of her wax fist, past the hand along the forearm, and lights her and the floor near it like a waxed's little flame (`.flame-light`, laid on by `Scene.tsx`). Sealed: smoke from the same spot.
+- **Phase two** (its scene, and the rest of the fight with her candle arm scorched): her wax fades to and fro between its own colour and the knot's red (`#b3281f`) at the speed of the hood's burning inside, with some pieces on their own beats, out of step (skirt borders, belt, the whole candle arm, the flail's ball). Her face under the hood is black. No flame on her hand, only the red knot turning in the middle of the fist, seen through the wax, and a strong red light round her all the time (`.flame-light.is-warden-red`). The flail's ball keeps its colour unless the flail is Flaming; then it fades red too and a big red little flame with no knot wraps it.
+- **Per-pose options for the 3D figure** (on the pose in `warden/skeleton.ts`): `flameAt` moves the little flame (and its light) from the fist's tip, `[along, up, right]` in figure units; `handleGrip` slides the handle through her hand (where along it she holds it, from its middle toward the chain end).
+
 **Poses fine-tuned with the user** (in the model viewer): Idle, Wax Shoulder In, Wax Arm Back, Flail Spinning Behind; actions Fan Flames (swat + flat fan of flame flying through you), Flame Blast (kneels and punches the ground; a near-straight flame-coloured trail follows the fist; the fireball flash bursts at the impact, then the shockwave ring of tall flames), Wax Punch (the same kneeling punch with the cold wax fist and a wax-coloured trail; melee; a small white impact ring where it lands); stance Kneeling (flail hand on the raised knee, handle up; wax hand at his side holding the chain, head hanging below it; the cloak runs flat over the raised thigh, then drops); Clutch Arm (its own rest pose: hunched, the wax fist gripping the flail head and pulling it up, then straight into Wax Shoulder In, flame out unless in phase 2, with a wide wax trail from the old head position through his wax hand to the flail head); Wax Guard (holds whatever stance he's in; only as a blow lands does he swat it away with Fan Flames' backhand, a wax trail and no fire, then settles into his next stance; in the Model viewer, playing a Block makes the player attack so there's something to block); Chain Guard (as the blow lands: braced, the flail hand holding the handle up in front, the wax hand gripping the chain pulled taut diagonally across his front, the head swinging below the fist). All Blocks and Maneuvers, for every fighter, hold their stance until the blow lands, then block or dodge; a block jolts both fighters apart and they stay there; a dodge, seen from the camera, steps 1.5 m back and 1.5 m across the screen (away from the attacker) when retreating, 1.2 m across when closing in, and keeps its maneuver pose to the end of the turn, walking off in it; Stride (his back to you, spun on his right leg and crouched low, the wax arm trailing, the flail arm leading the spin with the flail flung out level behind him, just the tip of his beak past the hood); stance Flail Clutched (Wax Arm Back, but the wax fist has hauled the flail up by its chain, crossing over his cloak, the head hanging below); Flail Swing (Wind Up Flail's pose, but its first spin trail is the blow, a level sweep across his front through you, then two spins behind him into Flail Spinning Behind); Flail Spinning Overhead (handle up and away from you, the flail a level blur of chains above him); Rising Flail (hips nearly front-on, shoulders twisted flail-first, leaning back onto his left leg, Wax Arm Back's head; first trail swung up from below behind his cloak, then two level spins overhead, snapping to Flail Spinning Overhead on the third); Flail Slam (Kneeling's body, Wax Arm Back's head, wax elbow above the shoulder, flail arm down and back over his torso, the flail slanting along the floor, a trail bringing the head down from overhead and a white impact shockwave where it lands); Arm Over Chest (wax arm folded up across his chest, elbow low; flail held a little up with the handle almost level, the flail hanging in the air). Maneuvers: the maneuver pose only comes with a dodge or the actual move (hit while holding the stance, it stays), and is kept through the walk to the new spot. Usurp Flame (fine-tuned): a scene plays before the turn's final step: the light dies (0.9 s) as the camera settles between him and his target, only the target's flame still burning (the flame a waxed ally holds, or a candle above the player's head); he springs from a low Wax Arm Back crouch (looking at the flame) and dashes at it, wax hand raised, the camera closing in on both (0.6 s); black (0.5 s); the light returns (1 s) on him in Idle, his flame lit, as a flame trail streams from the target, arching over him into his hand; then the turn's repositioning plays. The dash's reaching hand is held low (a waxed-staggered player is about a waxed sleepwalker's height). A Rest broken by a blow shows the kind's flinch pose (flinch / w-flinch / wd-flinch) from the hit to the end of the turn. Staggered in phase one, his flame is out; whenever it goes out (stagger, Clutch Arm, Flame Blast) a puff of smoke leaves his hand, Wind Up Flail (its own rest pose: three timed spin trails, then straight into Flail Spinning Behind).
 **Windup poses (first pass, to tune by eye in the Model viewer):** `wd-chain-ready` (Chain Guard), `wd-wax-ready` (Wax Guard), `wd-winding-up` (Wind Up Flail) and `wd-clutch-ready` (Clutch Arm): each is its action's pose half-formed, shown from the start of the turn until the Block lands or the Rest goes through.
 **Still first-pass:** the staggered pose.
@@ -334,7 +342,7 @@ In fights he is now drawn on the 3D rig (`render/Warden3D.tsx`, first pass, untu
 
 **A staggered waxed shows its flame (built):** in the Warden's fight, a waxed that is staggered has a flame burning on its head, the one he can take.
 
-**Opening scene (built):** the Warden fight opens with the three waxed on the front line, the middle one (Waxed C, set up with `offering: true`) cradling its flame, and him on the back line, Sealed, his flame out. After a 1.2 s look at the arena, the Usurp Flame scene plays exactly as in a fight (the light dies, he dashes at it, black, the light returns on him in Idle as the flame arcs into his hand), leaving it encased for good and him Unsealed, stepping into its place on the front line: the three left (Waxed A, him, Waxed B) are all on the front line when the fight starts on turn 1, his stance coming from `Usurp Flame >` (Idle). It's built by `openingOf` in combat.ts and played by the combat screen as a turn with no action of yours; Retry plays it again.
+**Opening scene (built):** the Warden fight opens with the three waxed on the front line, the middle one (Waxed C, set up with `offering: true`) cradling its flame, and him on the back line, Sealed, his flame out. After a 1.2 s look at the arena, the Usurp Flame scene plays exactly as in a fight (the light dies, he dashes at it, black, the light returns on him in Idle as the flame arcs into his hand), leaving it encased for good and him Unsealed, stepping into its place on the front line: the three left (Waxed A, him, Waxed B) are all on the front line when the fight starts on turn 1, his stance coming from `Usurp Flame >` (Idle or Wax Arm Raised). (Before it, he holds Wax Arm Back, as Usurp Flame's tell. The scene itself is still the old dash; it is to be redone with the new animations.) It's built by `openingOf` in combat.ts and played by the combat screen as a turn with no action of yours; Retry plays it again.
 
 **Settled after playtesting:** the staggered pose is final; the Warden's tuning stays as is (punishing at first, then learnable: the intended soulslike loop, even for a tutorial boss); Test combat covers the Test Boss button; everything checks out in a real fight (the arena may get another pass later).
 
@@ -348,11 +356,11 @@ In fights he is now drawn on the 3D rig (`render/Warden3D.tsx`, first pass, untu
 
 ### The waxed escort (built)
 - The fight opens with **two waxed** on his side (in front), the Warden behind them.
-- **Usurp Flame on allies:** the fixed rule also covers them. While Sealed and able to act, he always uses Usurp Flame on a waxed that is **staggered** or **about to use Clutch Flame** (Cradle Flame always leads to it, so it's readable).
-  - He becomes Unsealed; the waxed loses its flame and is **encased in wax whole**: out of the fight for good.
-  - Aimed at an ally, the Maneuver pushes you away, like backing off. From the front line it doesn't dodge your melee (a **free hit** on him); from the back line it does (a **free Rest** for you). He ends on the back line.
-  - If the waxed is gone before he reaches it, Usurp Flame fails (counts as an action that didn't happen) and he stays Sealed.
-- **Several flames at once** (you and a waxed, or both waxed): even odds.
+- **Usurp Flame on allies:** the fixed rule also covers them: a waxed that is **staggered** or **about to use Clutch Flame** (in Cradle Flame, which always leads to it, so it's readable) has a flame he can take.
+  - It is an attack on the waxed, not on you. Its hit **kills it outright**, whatever its health: it loses its flame and is **encased in wax whole**, out of the fight for good. He becomes Unsealed.
+  - **His line:** striking a waxed on the other line, he tries to step onto it (forward from the back line, back from the front); on its own line, he stays. It is an attempt like a Maneuver's: your own Maneuver can undo it (falling back while he steps forward, you both move and the distance stays). It dodges nothing: it is an attack.
+  - If the waxed is gone before he reaches it (you killed it first), Usurp Flame is cancelled (an action that didn't happen: he goes to his Recover stances) and he stays Sealed.
+- **Several flames at once:** **yours first**, whenever you are one of them; among waxed only, even odds.
 - **Phase two raises the escort (built):** the fire shockwave of his phase-two transition lights **all three waxed**: any that have fallen (or been sealed in wax) rise at full health but **staggered** (their first turn is the forced Rest), and the rest are lit too. A **lit** waxed has its flame burning on its head, and in its Cradle Flame stance it uses **Flame Immolation** (a heavy ranged attack, only while lit, first in that stance): its blast rolls out like Flame Blast's, hitting whoever it is aimed at and, as a shockwave, every other unit in the fight, and it dies as the blast rolls out (its strike pose is its death pose, sealed in wax; the Wax Blob's middle part keeps the clutch pose). Whenever he is **staggered in phase two**, one fallen waxed rises again, lit and staggered, as a flame trail whisks from his hand to it. A lit waxed that gets **staggered during a turn dies as that turn ends**: its flame streams in a trail of fire into his hand, and it lies sealed in wax again; unless he is staggered himself at that moment (then it stays staggered like any other). The ones raised staggered don't die: they are on their forced Rest. Besides Fatigue, the way to deal with their swarming is his own **shockwaves** (below).
 
 ### Weapon and opening
@@ -365,8 +373,8 @@ In fights he is now drawn on the 3D rig (`render/Warden3D.tsx`, first pass, untu
 | | |
 |---|---|
 | **Starts** | Unsealed (lit candle arm) |
-| **Becomes Sealed** | When staggered, or after using Flame Blast or Clutch Arm |
-| **Becomes Unsealed again** | By using Usurp Flame |
+| **Becomes Sealed** | When staggered, or after using Flame Blast or Clutch Flame |
+| **Becomes Unsealed again** | When Usurp Flame hits |
 | **Permanently Unsealed (phase two)** | On his last health bar (his revive), as a burning arm |
 
 ### Wax on the player
@@ -375,11 +383,11 @@ In fights he is now drawn on the 3D rig (`render/Warden3D.tsx`, first pass, untu
 - Losing all Fatigue clears Waxed.
 
 ### The fixed rule (in the pattern)
-> **Usurp Flame is the first action of every stance**, available when he is **Sealed** and a flame is within reach (`*Sealed, *Usurpable`).
+> **Sealed, with a flame within reach, he always takes Wax Arm Back, and Usurp Flame is first in it** (`(*Sealed, *Usurpable) > Wax Arm Back`, Usurp Flame `*Sealed, *Usurpable`).
 
-`*Usurpable` is the Warden's own condition: the **player is staggered and Waxed**, or a **waxed ally is staggered or about to Clutch Flame**. Being first in every stance, it wins over anything else he could do; its other options apply only when it isn't available. It is the one fully certain thing about him: the player can learn to bait it or deny it. Which flame he goes for (several at once: even odds) is decided by the kind's `aim` hook; he picks after the waxed (`decidesLast`) to see which of them is about to Clutch Flame.
+`*Usurpable` is the Warden's own condition: the **player is staggered and Waxed** (and not reviving), or a **waxed ally is staggered or about to Clutch Flame**. The bracketed conditions call for Wax Arm Back whatever he just did, even in place of the stance he'd take out of a Recover (after a stagger or his revive; the forced turn itself still comes first). It is the one fully certain thing about him: the player can learn to bait it or deny it. Which flame he goes for (yours first; among waxed, even odds) is decided by the kind's `aim` hook; he picks after the waxed (`decidesLast`) to see which of them is about to Clutch Flame. In phase two he is never Sealed, so it never comes up.
 
-**Read for the player:** wax is a warning light.
+**Read for the player:** wax is a warning light, and Wax Arm Back while he is Sealed and a flame shows is Usurp Flame.
 - *Waxed, with his flame out:* play safe. Getting staggered now hands him his flame back.
 - *Not waxed:* you can push. A stagger only costs the usual lost turn.
 
@@ -387,67 +395,71 @@ In fights he is now drawn on the 3D rig (`render/Warden3D.tsx`, first pass, untu
 
 | Action | Kind | Weight | Conditions | Notes |
 |---|---|---|---|---|
-| Usurp Flame | Maneuver | Advance | `*Sealed`, `*Usurpable` | First in every stance. He becomes Unsealed; clears the player's Waxed |
+| Usurp Flame | Attack | Light | `*Sealed`, `*Usurpable` | First in Wax Arm Back. Its hit unseals him and takes the flame: you are sealed in wax and kept down a turn longer; a waxed dies, sealed whole |
 | Flail Swing | Attack | Normal | `*Far or *Flaming` | Flail (waxes on direct hit) |
 | Rising Flail | Attack | Normal | `*Close or *Flaming` | Flail |
 | Flail Slam | Attack | Heavy | | Flail |
 | Wax Punch | Attack | Light | `*Sealed` | |
-| Fan Flames | Attack | Light, ranged | `*Unsealed`, `*Far` | |
+| Fan Flames | Attack | Light, ranged | `*Unsealed` | |
 | Flame Blast | Attack | Heavy, ranged | `*Unsealed` | He becomes Sealed |
-| Chain Guard | Block | Normal | | |
+| Spin Guard | Block | Normal | | One that stopped nothing (`!Spin Guard`) goes on to Flail Spinning Overhead |
 | Wax Guard | Block | Light | `*Sealed` | |
-| Stride | Maneuver | Retreat | `*Close` | Always backs off, never advances |
-| Wind Up Flail | Rest | | | |
-| Clutch Arm | Rest | | `*Unsealed`, `*!Flaming` | He becomes Sealed (phase two: sets the flail alight) |
+| Turn Away | Maneuver | Retreat | `*Close` | Backs off |
+| Dash | Maneuver | Advance | | A dodge forward: dodges your blows and keeps you from getting away |
+| Flail Wind Up | Rest | | | |
+| Clutch Flame | Rest | | `*Unsealed`, `*!Flaming` | He becomes Sealed (phase two: sets the flail alight) |
 
 ### Stances
 
-Usurp Flame comes first in every stance's list (see above); the rest, in order of priority:
+In order of priority:
 
 ```
-Usurp Flame / Wax Punch / Recover / Second Phase > Idle          > Stride, Wind Up Flail
-Chain Guard / Clutch Arm             > Wax Shoulder In         > Fan Flames, Wax Guard, Wind Up Flail
-Fan Flames / Wax Guard               > Wax Arm Back            > Wax Punch, Stride, Flame Blast
-Flame Blast / Recover                > Arm Over Chest          > Fan Flames, Wax Guard, Clutch Arm, Stride
-Stride                               > Flail Clutched          > Flail Swing, Chain Guard
-Flail Swing / Wind Up Flail          > Flail Spinning Behind   > Rising Flail, Wax Guard, Stride, Fan Flames
-Rising Flail                         > Flail Spinning Overhead > Flail Slam
-Recover / Flail Slam / Wax Punch     > Kneeling                > Clutch Arm, Chain Guard
+(*Sealed, *Usurpable) / Wax Guard / Fan Flames / Dash > Wax Arm Back > Usurp Flame, Wax Punch, Flame Blast
+Recover / Usurp Flame / Second Phase  > Idle                    > Turn Away, Flail Wind Up
+Turn Away / Spin Guard                > Chain Clutched          > Flail Swing, Dash
+Flail Wind Up / Flail Swing / Dash    > Flail Spinning Behind   > Rising Flail, Spin Guard
+Rising Flail / !Spin Guard            > Flail Spinning Overhead > Flail Slam
+Flail Slam / Flame Blast              > Kneeling                > Clutch Flame, Flail Wind Up
+Recover / Usurp Flame / Clutch Flame  > Wax Arm Raised          > Wax Guard, Fan Flames
 ```
 
-He opens the fight in **Idle**, **Kneeling** or **Arm Over Chest** (the `Recover >` stances).
+He opens the fight in **Idle** or **Wax Arm Raised** (the `Recover >` stances); after the opening scene, from `Usurp Flame >`, the same two.
+
+**True lengths in 3D (built):** the 3D figure leaves out the flat poses' stretches (`WARDEN_ADJUST`), and sets each arm to its true length from the shoulder it hangs from (`trueArms` in `warden/pose3d.ts`): every bone of every pose (stances, actions, windups) is the rig's length, keeping the direction its pose gives it. The flat sprites keep their stretches. **Her shins are 15% longer than the rig's and her thighs 8% shorter** in 3D (`SHIN_LONGER`, `THIGH_SHORTER`, `longerShins` in `warden/pose3d.ts`), her hips raised on her body by the difference, so her thighs start closer to the belt; she is then set down so her lower foot is where it was. **The 3D chain** runs 40 from the handle's tip to the head's middle (`CHAIN` in `warden/pose3d.ts`): the whirl's 34 plus the head's radius, so a hanging chain shows as many links as a whirling one (the flat figure's stays 34). **Idle in 3D:** his hips turned 22.5° to his right, his chest and head back facing whoever he fights (`WARDEN_STANCE`), the flail arm hanging a little out from his side and the wax arm further out and back, clear of his body as the camera sees him (`IDLE_ARMS`, `arms3`: the flat pose's spread would be a swing forward and back in space), the flail's head resting on the floor behind him and off to his left, clear of him so it can be seen (whether it burns matters): `flail3d` on the pose, the handle at 100° held a little below its middle, the chain swung 45° toward his left along the floor (`lay`). **Turn Away in 3D:** Idle's body and arms, his hips turned 90°, his chest and head on to 160° (his back to you), leaning 22° away from you (`lean` in `WARDEN_STANCE`: all of him tipped as one piece about the foot he leans toward, `placeWarden`). His left knee is raised to the front, the shin bent back under it and the foot well off the floor (`legDirs3`, a 3D-only option of the rig: a leg pointed its own way, thigh and shin). His flail arm reaches nearly straight away from you, a little above the shoulder, and bends back so the fist is in front of his chest, a little raised (`arms3` directions are as his hips face, not his chest); the handle is level in it, pointing back toward you, angled just enough that the flail passes the left side of his head, and from its end the chain runs straight back toward you, along the line of the dodge. His wax arm reaches back along that line, stretched nearly straight (the elbow a little low), and holds the chain pulled taut (`taut`), the rest of the chain running on past his fist to the head: the flail trails in one straight line (`flail` on the stance: the handle's and the chain's own ways). Built upright and then tipped, his robe hangs along his body rather than straight down: as he springs away, its pull swings back toward you by as much as he leans. The flail's head, resting on the floor, stays on it (`grounded`). His pelvis egg is swung most of the way toward his spine (`pelvisAlign` 0.7 on the stance), his chest being turned well away from his hips.
+
+**Poses (stand-ins until the stances and animations are redone):** Wax Arm Raised uses Wax Shoulder In's pose, Chain Clutched Flail Clutched's, Spin Guard Chain Guard's, Turn Away Stride's, Dash and Usurp Flame's blow the old Usurp Flame dash.
 
 ### Resolved picks by state
 
-Nothing is random inside a stance: the first available action is taken. (Usurp Flame aside, which wins whenever it is available.) `Close` and `Far` are his line.
+Nothing is random inside a stance: the first available action is taken. `Close` and `Far` are his line.
 
 | Stance | Unsealed (phase 1) | Sealed (phase 1) | Phase 2, Flaming | Phase 2, not Flaming |
 |---|---|---|---|---|
-| Idle | Close: Stride · Far: Wind Up Flail | same | same | same |
-| Wax Shoulder In | Close: Wind Up Flail · Far: Fan Flames | Wax Guard | same as Unsealed | same as Unsealed |
-| Wax Arm Back | Close: Stride · Far: Flame Blast | Wax Punch, near or far (it comes before Stride) | same as Unsealed | same as Unsealed |
-| Arm Over Chest | Close: Clutch Arm · Far: Fan Flames | Wax Guard | Close: Stride · Far: Fan Flames | same as Unsealed |
-| Flail Clutched | Close: Chain Guard · Far: Flail Swing | same | Flail Swing | Close: Chain Guard · Far: Flail Swing |
-| Flail Spinning Behind | Close: Rising Flail · Far: Fan Flames | Close: Rising Flail · Far: Wax Guard | Rising Flail | Close: Rising Flail · Far: Fan Flames |
+| Wax Arm Back | Flame Blast | Usurp Flame if a flame is within reach, else Wax Punch | Flame Blast | Flame Blast |
+| Idle | Close: Turn Away · Far: Flail Wind Up | same | same | same |
+| Chain Clutched | Close: Dash · Far: Flail Swing | same | Flail Swing | Close: Dash · Far: Flail Swing |
+| Flail Spinning Behind | Close: Rising Flail · Far: Spin Guard | same | Rising Flail | Close: Rising Flail · Far: Spin Guard |
 | Flail Spinning Overhead | Flail Slam | same | same | same |
-| Kneeling | Clutch Arm | Chain Guard | Chain Guard | Clutch Arm |
+| Kneeling | Clutch Flame | Flail Wind Up | Flail Wind Up | Clutch Flame |
+| Wax Arm Raised | Fan Flames | Wax Guard | Fan Flames | Fan Flames |
 
-No gaps: every stance is covered in every state (Arm Over Chest ends with Stride for the one case that would otherwise have nothing: phase 2, Flaming, on the front line), and every action leads to a stance. (`Stride` in Flail Spinning Behind never comes up: Rising Flail takes every Close case first.)
+No gaps: every stance is covered in every state, and every action leads to a stance.
 
 ### How it reads
-- **The flail chain:** Wind Up or Flail Swing → Spinning Behind → Rising Flail → Spinning Overhead → a guaranteed Flail Slam → Kneeling. Overhead is the one 100% read, and Kneeling never attacks: survive the Slam, then punish.
-- **Interrupting him breaks his chains.** Hitting his Wind Up Flail cancels it, so he drops to Idle or Kneeling instead of Flail Spinning Behind. A Chain Guard with nothing to block still leads on to Wax Shoulder In. An interrupted Clutch Arm doesn't Seal him.
-- **The flame is a resource.** He spends it on Flame Blast or loses it to Clutch Arm or a stagger. The only way back is Usurp Flame.
-- **Where he stands decides a lot now.** Far, he throws fire (Fan Flames, Flame Blast) or swings the flail to close in (Flail Swing); Close, he backs off (Stride) or strikes with Rising Flail. Sealed, he stays in a closed loop of Wax Punch, Kneeling, Chain Guard, Wax Shoulder In, Wax Guard and Wax Arm Back, until Usurp Flame or a stagger gets him out (with you standing still; your Maneuvers move his line).
+- **The tell:** Sealed, in Wax Arm Back, with a flame showing (yours, as you lie sealed in wax, or a waxed's), he takes it. Always; you first.
+- **The flame is a resource.** Usurp Flame takes it, and he goes to Idle or Wax Arm Raised with it lit. He spends it on Flame Blast (from Wax Arm Back, after Fan Flames) or loses it to Clutch Flame (from Kneeling, after a Slam) or a stagger.
+- **The flail chain:** Flail Wind Up, Flail Swing or Dash → Flail Spinning Behind → Rising Flail → Spinning Overhead → a guaranteed Flail Slam → Kneeling. Overhead is the one 100% read. Far, Spinning Behind is a Spin Guard instead: catch nothing with it and he goes on to Overhead all the same; block a blow with it and he takes Chain Clutched (Flail Swing from afar, Dash up close).
+- **Interrupting him breaks his chains.** Hitting his Flail Wind Up cancels it, so he drops to a Recover stance instead of Flail Spinning Behind. An interrupted Clutch Flame doesn't Seal him.
+- **Where he stands decides a lot.** Close, Idle turns away (Turn Away, into Chain Clutched) and Chain Clutched dashes in; far, he winds up and swings.
 - **Fire versus flail.** Fire is ranged, so it can always be dodged; the flail is melee, so from the front line it has to be Blocked.
-- **Phase two** removes the Sealed-only actions (Wax Punch, Wax Guard, Usurp Flame). Without changing a single action, he becomes more aggressive: the flame half of his graph turns into Fan Flames and Flame Blast.
+- **Phase two** removes the Sealed-only actions (Wax Punch, Wax Guard, Usurp Flame): Wax Arm Back is always Flame Blast, Wax Arm Raised always Fan Flames.
 
 ### Phase two
 - **Trigger:** only his **revive**: when he falls with his last health bar, phase two begins as his revive lands. (Staggering him no longer starts it; a stagger just puts his flame out.)
 - **Transition:** enraged, he breaks the wax off his arm, revealing his own sinful flame, sealed underneath. He had tried to hide and forget it even from himself. He is permanently Unsealed, as a bare burning arm.
 - **Phase-two scene (built):** the step where he enters phase two plays a 5.7 s scene first. All light fades as the camera slowly pulls far back from him (he is already in Idle, unseen). In the dark, flames flicker up all around: the waxed (the fallen ones too), the sleepwalkers sealed into the floor and walls, and unseen ones beyond the screen edges. Then they stream one by one into his hand in arcs from every direction, his flame growing, until it flares like a Flame Blast with a full ring of flame rolling out (just for show), the light returning. From then on the arena's candles and the waxed remains burn for good. Phase-two look: his wax burnt pitch black, the inside of his cloak and his hood flickering with fire, the arm burning.
 - **After the transition he always takes up Idle:** his pattern has `Usurp Flame / Recover / Second Phase > Idle`, and entering phase two makes his next stance come from `Second Phase` (once he's free to act: after the revive turn or the stagger's Recover). His pattern declares `Second Phase` as an event it can come from, so it's accepted in "comes from" like `Recover` (any kind can declare events of its own). During the scene he stays down while the light fades, still on his death sprite (the cloak over its wax pool), and is only standing in Idle, with the phase-two look, once all is dark.
-- **Flaming Flail (phase two):** his flame can no longer be put out, so Clutch Arm sets the flail on fire instead (status `Flaming`). In phase two his flail no longer waxes. While Flaming, a direct hit from a flail attack (`#waxing`) deals 1/4 of its damage again as extra damage (`FLAMING_BONUS`, a first guess to tune in playtesting). A Flail Slam puts the fire out, and its shockwave burns (orange flames instead of white spikes), as big as Flame Blast's. Look: flames wrap the flail's head; its trails, spin ring and blurred heads turn to fire; Clutch Arm's trail is flame instead of wax.
+- **Flaming Flail (phase two):** his flame can no longer be put out, so Clutch Flame sets the flail on fire instead (status `Flaming`). In phase two his flail no longer waxes. While Flaming, a direct hit from a flail attack (`#waxing`) deals 1/4 of its damage again as extra damage (`FLAMING_BONUS`, a first guess to tune in playtesting). A Flail Slam puts the fire out, and its shockwave burns (orange flames instead of white spikes), as big as Flame Blast's. Look: flames wrap the flail's head; its trails, spin ring and blurred heads turn to fire; Clutch Flame's trail is flame instead of wax.
 - **Waxed player (built):** only flail attacks wax. Waxed and standing, wax is caked on you (a shoulder, your back, an arm, a thigh, a run down your head). Staggered while Waxed, you (and every enemy with the Waxed status on it, whatever its kind but the Warden, who has a figure of his own) are sealed whole in wax at once (encased: kneeling like a waxed sleepwalker, every limb, body and head in wax), your flame burning on your head, and you keep exactly that look until you recover (no other sprite in between); Usurp Flame takes that flame and you stay encased. When Usurp Flame targets you, that turn's forced Recover does not end your stagger: you stay down, encased, and get up with the next forced Recover (the flame is taken only once, so nothing else holds you). Recovering (or reviving) clears Waxed and the encasing, and from that moment you stand rather than kneel; a waxed ally whose flame is taken is encased the same way, for good. When your Fatigue clears, Waxed clears with it.
 - **Fire hits (built):** wherever a fire attack lands (Fan Flames, Flame Blast, a Flaming flail's burn, a shockwave on his allies), flames flare up around the unit hit, with a whoosh-and-crackle sound.
 - **Shockwaves hit his allies (built):** his `#shockwave` attacks, **Flame Blast** and **Flail Slam while the flail is Flaming**, send the shockwave through the whole fight after the blow: every other enemy still on its feet (the waxed) takes the attack's damage as a direct hit (armor still turns its share into Fatigue), with no Block or dodge to answer it. At 30 health his heavy attacks deal about 7, so two shockwaves clear a waxed (12 health). An unlit Flail Slam has none.

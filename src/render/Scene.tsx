@@ -5,7 +5,7 @@ import { StringAura } from "./StringCounter";
 import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Variant } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
-import { BODY_FORWARD, BODY_RADIUS, METERS_PER_UNIT as U, orbitBox, orbitCamera, BODY_SIDE_SLOT, type Cam, darkAt, floorDisc, SHADE_RADIUS, ease, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, facingVec, focusOf, NEAR, planningCamera, project, projectPoint, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec, yawOf } from "./camera";
+import { BODY_FORWARD, BODY_RADIUS, orbitBox, orbitCamera, BODY_SIDE_SLOT, type Cam, darkAt, floorDisc, SHADE_RADIUS, ease, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, facingVec, focusOf, NEAR, planningCamera, project, projectPoint, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec, yawOf } from "./camera";
 import { ClangBurst, EternityHalo, FlameHit, HaloBurst, ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
 import type { Pt } from "./geom";
 import { Blood, Shards } from "./HealthBar";
@@ -20,7 +20,7 @@ import { FlameAnchor, HeadFlame } from "./HeadFlame";
 import { HEAD_TOP, Waxed3D } from "./Waxed3D";
 import { Sleepwalker3D } from "./Sleepwalker3D";
 import { Warden3D } from "./Warden3D";
-import { placeWarden, wardenFist } from "../warden/pose3d";
+import { placeWarden, wardenFist, wardenFlame } from "../warden/pose3d";
 import { BlobPool, type BlobBox } from "./WaxBlob";
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "../warden/arena";
 import { IGNITE } from "../warden/scenes";
@@ -115,6 +115,8 @@ export interface SceneFigure {
 
 /** Enemies seen from the front face left, so their drawing is mirrored (unless seen straight on). */
 const isMirrored = (f: SceneFigure) => f.view === "front" && !f.straight;
+/** The Warden in his second form (its scene, or his candle arm scorched after it): the red flame in his fist, the red light round him. */
+const wardenSecondForm = (f: SceneFigure) => !!f.phase2Look || f.arm === "scorched";
 
 interface Tween<T> { from: T; to: T }
 
@@ -372,10 +374,9 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
    */
   const flameSpot = (f: SceneFigure, box: { x: number; y: number; w: number; h: number }, at: Vec, onHead = false): Pt => {
     const pose = ALL_POSES[f.pose];
-    // The Warden drawn in 3D: the flame stands just over his candle fist, where it really is.
+    // The Warden drawn in 3D: the flame on his candle hand, where it really is (at the fist's tip; in his second form, in the middle of it).
     if (f.warden3d && w > 0) {
-      const { wr, placed: wp } = placeWarden(f.pose, at, figureYaw(f, at), c, w, h, f.scale), hand = wr.rig.joints.handL;
-      const q = wp.see([hand[0], hand[1] + 3 * U, hand[2]]);
+      const { wr, placed: wp } = placeWarden(f.pose, at, figureYaw(f, at), c, w, h, f.scale), q = wp.see(wardenFlame(wr, wardenSecondForm(f)));
       return [q.sx, q.sy];
     }
     if (f.variant !== "waxed" || w <= 0 || !pose) {
@@ -506,6 +507,15 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
       onPointerUp={orbit ? () => { orbitDrag.current = null; } : undefined}
       onPointerCancel={orbit ? () => { orbitDrag.current = null; } : undefined}
     >
+      {/* A clean hit's red flash (`hit-red` in index.css): the figure's brightness mapped straight onto red, a plain linear map, so the 3D figures'
+          shading and the seams between their faces stay as smooth as they are (a saturate() filter multiplies every small difference into speckle). */}
+      <svg className="fx-defs" width="0" height="0" aria-hidden="true">
+        <defs>
+          <filter id="fx-hit-red" colorInterpolationFilters="sRGB">
+            <feColorMatrix type="matrix" values="0.36 0.71 0.13 0 0.12  0.07 0.14 0.03 0 0.01  0.06 0.12 0.02 0 0.01  0 0 0 1 0" />
+          </filter>
+        </defs>
+      </svg>
       {/* (An orbiting camera has no horizon to draw the floor by: only the shade under each figure marks it.) */}
       {!orbit && <div className="scene-floor" style={{ top: `${HORIZON * 100}%` }} />}
       {w > 0 && !orbit && <FloorGrid cam={c} w={w} h={h} />}
@@ -578,6 +588,13 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         if (!rig.prop || rig.propHidden) return null;
         const flame = placeRig(rig, at, figureYaw(f, at), c, w, h, f.scale).prop!.at, size = box.w * 1.3;
         return <div key={`flame-light-${f.id}`} className="flame-light" style={{ left: flame.sx - size / 2, top: flame.sy - size / 2, width: size, height: size }} />;
+      })}
+      {/* The Warden's flame lights what is near it the same way: the little flame on his candle hand faintly; in his second form, the red flame in his fist
+          throws a stronger red light round him all the time. */}
+      {w > 0 && placed.map(({ f, box, at }) => {
+        if (!f.warden3d || f.dead || f.arm === "out") return null;
+        const red = wardenSecondForm(f), [x, y] = flameSpot(f, box, at), size = box.w * (red ? 2.1 : 1.3);
+        return <div key={`flame-light-${f.id}`} className={`flame-light${red ? " is-warden-red" : ""}`} style={{ left: x - size / 2, top: y - size / 2, width: size, height: size }} />;
       })}
       {light && !orbit && w > 0 && <LightFall cam={c} center={focusOf(c)} w={w} h={h} />}
       {dark && <div className="scene-dark" style={{ opacity: dark.level, transition: `opacity ${dark.ms}ms ease-in` }} />}

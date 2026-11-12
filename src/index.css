@@ -227,7 +227,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 
 /* ---------- Turn playback: one step at a time ---------- */
-.fig-wrap { position: relative; width: 100%; height: 100%; }
+/* (The figures' jolts below move them by `left` and `top`, not `transform`: a transform animation makes the browser keep the figure as a layer of
+   its own, and a 3D figure redrawn every frame inside one is shown from low-resolution tiles while it is being redrawn: pixelated.) */
+.fig-wrap { position: relative; left: 0; top: 0; width: 100%; height: 100%; }
+.fx-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 /* Enemies lunge left toward you; you lunge right toward them. */
 .figure-slot .fx-attack { animation: lunge-left 0.5s ease-out; }
 [data-fig="player"] .fx-attack { animation: lunge-right 0.5s ease-out; }
@@ -247,20 +250,21 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Walking to a new spot: quick steps in place while the scene moves the figure. */
 .fx-step { animation: step-bob 0.35s ease-in-out 2; }
 
-@keyframes lunge-left { 40% { transform: translateX(-14%); } }
-@keyframes lunge-right { 40% { transform: translateX(14%); } }
+@keyframes lunge-left { 40% { left: -14%; } }
+@keyframes lunge-right { 40% { left: 14%; } }
 @keyframes dodge-blur { 40% { opacity: 0.6; } }
-@keyframes hit-shake { 20% { transform: translateX(-3%); } 40% { transform: translateX(3%); } 60% { transform: translateX(-2%); } 80% { transform: translateX(1%); } }
+@keyframes hit-shake { 20% { left: -3%; } 40% { left: 3%; } 60% { left: -2%; } 80% { left: 1%; } }
 @keyframes block-flash { 30% { filter: brightness(1.8); } }
 /* Red, then straight back: a fade would pass through orange on the way. */
 @keyframes hit-red {
-  0%, 55% { filter: brightness(0.45) sepia(1) saturate(14) hue-rotate(-32deg) brightness(1.2); }
+  /* (A linear map onto red, defined in Scene.tsx: no saturate(), which turns the 3D figures' shading into speckle.) */
+  0%, 55% { filter: url(#fx-hit-red); }
   56%, 100% { filter: none; }
 }
 @keyframes break-fade { to { filter: grayscale(1) brightness(0.8); } }
-@keyframes fall { to { transform: translateY(8%); opacity: 0; } }
-@keyframes die { from { transform: translateY(-6%); opacity: 1; } to { transform: none; opacity: 0.65; } }
-@keyframes step-bob { 25%, 75% { transform: translateY(-2.5%); } 50% { transform: translateY(0); } }
+@keyframes fall { to { top: 8%; opacity: 0; } }
+@keyframes die { from { top: -6%; opacity: 1; } to { top: 0; opacity: 0.65; } }
+@keyframes step-bob { 25%, 75% { top: -2.5%; } 50% { top: 0; } }
 
 
 @media (prefers-reduced-motion: reduce) {
@@ -515,12 +519,18 @@ kbd {
 .fig-neck-cone { fill: #6c6871; stroke: #6c6871; stroke-width: 0.6; stroke-linejoin: round; }
 .fig-neck-lining { fill: color-mix(in srgb, var(--wax) 88%, black); stroke: color-mix(in srgb, var(--wax) 88%, black); stroke-width: 0.6; stroke-linejoin: round; }
 .fig-limb.fig-limb-robe { stroke: #6c6871; }
+/* The Warden's spine in 3D: a flat oval tube, filled, in the robe's under-colour. */
+.fig-spine-robe { fill: #6c6871; }
 .fig-belt { fill: var(--wax); stroke: var(--wax); stroke-width: 0.6; stroke-linejoin: round; }
 .fig-skirt { fill: #6c6871; stroke: #6c6871; stroke-width: 0.6; stroke-linejoin: round; }
 .fig-skirt-inner { fill: color-mix(in srgb, var(--wax) 88%, black); stroke: color-mix(in srgb, var(--wax) 88%, black); stroke-width: 0.6; stroke-linejoin: round; }
 .fig-robe-top { fill: #6c6871; }
 .fig-robe-opening { fill: var(--ink); }
+/* (outlined in its own white, a hair past its edge, so the gray of the egg under it does not show as a thin line where it meets a white limb; its wax edge covers the rest) */
+.fig-robe-opening { stroke: var(--ink); stroke-width: 0.6px; stroke-linejoin: round; }
 .fig-cloak-wax { fill: none; stroke: var(--wax); stroke-width: 3; stroke-linecap: round; }
+/* The wax along the edges of the Warden's skirt and the opening above it: a thin line on the cloth's very edge. */
+.fig-skirt-edge { fill: none; stroke: var(--wax); stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; }
 /* The cloak's lining: caked in wax, in shadow. */
 .fig-cloak-inside { fill: #6e5f2c; }
 .fig-seam { fill: none; stroke: #2c2a31; stroke-width: 2.4; stroke-linecap: round; }
@@ -546,6 +556,17 @@ kbd {
 .fig-face-wax { fill: var(--wax); stroke: none; }
 .fig-beak-line { fill: none; stroke: color-mix(in srgb, var(--wax) 55%, black); stroke-width: 0.9; stroke-linecap: round; stroke-linejoin: round; }
 .fig-beak-flat { fill: color-mix(in srgb, var(--wax) 76%, black); }
+/* The 3D Warden's flail: a dark wooden handle, black iron links (a gray line inside the long sides of those seen open), a ball of wax lit from above, and the last link sealed in wax; no outlines on the wax. */
+.fig-flail-haft { fill: none; stroke: #5b3f2b; stroke-linecap: round; }
+.fig-chain-link { fill: none; stroke: #2e2d33; stroke-linejoin: round; }
+.fig-flail-dome { fill: #2e2d33; }
+.fig-flail-dome-in { fill: #141317; }
+.fig-flail-hand { fill: var(--ink); }
+.fig-flail-hand.dbg-red { fill: #e0201b; }
+.fig-chain-link-in { fill: none; stroke: #8f93a3; stroke-linejoin: round; }
+.fig-ball-wax { fill: color-mix(in srgb, var(--wax) 78%, black); }
+.fig-ball-lit { fill: var(--wax); }
+.fig-flail-wax { fill: none; stroke: var(--wax); stroke-linecap: round; }
 .fig-chain { fill: none; stroke: var(--metal); stroke-width: 1.6; stroke-dasharray: 2 1.4; stroke-linecap: round; }
 .fig-arm-wax { fill: none; stroke: var(--wax); stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
 .fig-arm-burnt { fill: none; stroke: #1b1315; stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
@@ -733,6 +754,38 @@ kbd {
 .ignite-flare { z-index: 3003; }
 /* Phase two: his wax burnt pitch black; the inside of his cloak and his hood burning. */
 .wd-phase2 { --wax: #16120f; }
+/* The 3D figure's second form: its wax fades to and fro between the wax's own colour and the knot's red, as fast as his hood's inside burns (the red light
+   round him is the scene's: .flame-light.is-warden-red). Some pieces fade on their own beat, out of step with the rest (as the inside of his hood is with the
+   outside): his skirt's borders, his belt, his candle arm (all of it, hand too, on one beat), and the flail's wax ball, which fades only while the flail is on
+   fire. Every beat runs on the figure itself, not on its pieces (a piece is re-placed as the drawing re-sorts, and would start its fade over), and each piece
+   takes its colour from its own beat. His face, under the hood, is black. */
+@property --wax { syntax: "<color>"; inherits: true; initial-value: #b9a14e; }
+@property --wax-edge { syntax: "<color>"; inherits: true; initial-value: #b9a14e; }
+@property --wax-belt { syntax: "<color>"; inherits: true; initial-value: #b9a14e; }
+@property --wax-arm { syntax: "<color>"; inherits: true; initial-value: #b9a14e; }
+@property --wax-ball { syntax: "<color>"; inherits: true; initial-value: #b9a14e; }
+@keyframes wd-wax-fade { from { --wax: #b9a14e; } to { --wax: #b3281f; } }
+@keyframes wd-wax-edge { from { --wax-edge: #b9a14e; } to { --wax-edge: #b3281f; } }
+@keyframes wd-wax-belt { from { --wax-belt: #b9a14e; } to { --wax-belt: #b3281f; } }
+@keyframes wd-wax-arm { from { --wax-arm: #b9a14e; } to { --wax-arm: #b3281f; } }
+@keyframes wd-wax-ball { from { --wax-ball: #b9a14e; } to { --wax-ball: #b3281f; } }
+svg.wd-phase2 {
+  --wax: #b9a14e;
+  animation: wd-wax-fade 0.5s ease-in-out infinite alternate, wd-wax-edge 0.62s ease-in-out -0.21s infinite alternate,
+    wd-wax-belt 0.44s ease-in-out -0.37s infinite alternate, wd-wax-arm 0.71s ease-in-out -0.12s infinite alternate;
+}
+svg.wd-flaming { animation: wd-wax-ball 0.53s ease-in-out -0.3s infinite alternate; }
+svg.wd-phase2.wd-flaming {
+  animation: wd-wax-fade 0.5s ease-in-out infinite alternate, wd-wax-edge 0.62s ease-in-out -0.21s infinite alternate,
+    wd-wax-belt 0.44s ease-in-out -0.37s infinite alternate, wd-wax-arm 0.71s ease-in-out -0.12s infinite alternate, wd-wax-ball 0.53s ease-in-out -0.3s infinite alternate;
+}
+svg.wd-phase2 .fig-skirt-edge { --wax: var(--wax-edge); }
+svg.wd-phase2 .fig-belt { --wax: var(--wax-belt); }
+svg.wd-phase2 .fig-hand-wax { --wax: var(--wax-arm); }
+svg.wd-phase2 .fig-head { fill: #0b090b; }
+svg.wd-phase2 .fig-ball-wax, svg.wd-phase2 .fig-ball-lit, svg.wd-phase2 .fig-flail-wax { --wax: #b9a14e; }
+svg.wd-flaming .fig-ball-wax, svg.wd-flaming .fig-ball-lit, svg.wd-flaming .fig-flail-wax { --wax: var(--wax-ball); }
+@media (prefers-reduced-motion: reduce) { svg.wd-phase2, svg.wd-flaming { animation: none; --wax: #b66e37; --wax-edge: #b66e37; --wax-belt: #b66e37; --wax-arm: #b66e37; --wax-ball: #b66e37; } }
 .wd-phase2 .fig-stain, .wd-phase2 .fig-stain-run { fill: #0f0c0a; stroke: #0f0c0a; }
 .wd-phase2 .fig-cloak-inside { fill: #c4521c; animation: inner-fire 0.45s ease-in-out infinite alternate; }
 .wd-phase2 .fig-hood-dark, .wd-phase2 .fig-hood-wax, .wd-phase2 .fig-neck-lining, .wd-phase2 .fig-skirt-inner { fill: #b2441a; animation: inner-fire 0.5s ease-in-out infinite alternate-reverse; }
@@ -763,6 +816,8 @@ kbd {
   background: radial-gradient(circle, rgb(255 70 45 / 0.34) 0, rgb(255 70 45 / 0.16) 32%, rgb(255 70 45 / 0.05) 60%, transparent 72%);
   animation: flame-light 1.8s ease-in-out infinite alternate;
 }
+/* The Warden's second form: the red flame in his fist lights him and the floor round him, strongly and all the time. */
+.flame-light.is-warden-red { background: radial-gradient(circle, rgb(235 45 35 / 0.55) 0, rgb(235 45 35 / 0.28) 30%, rgb(235 45 35 / 0.09) 58%, transparent 72%); }
 .flame-light.is-blazing { background: radial-gradient(circle, rgb(255 60 40 / 0.5) 0, rgb(255 60 40 / 0.24) 30%, rgb(255 60 40 / 0.07) 58%, transparent 72%); animation-duration: 0.9s; }
 @keyframes flame-light { from { opacity: 0.8; transform: scale(0.96); } to { opacity: 1; transform: scale(1.04); } }
 @media (prefers-reduced-motion: reduce) { .flame-light { animation: none; } }
@@ -896,7 +951,9 @@ kbd {
 .is-charred .fig-wax-edge { fill: #090806; }
 .is-charred .fig-wax-drip { stroke: #1b1915; }
 .is-charred .fig-head-shine { opacity: 0.2; }
-.is-charred .fig-cloak-wax { stroke: #1b1915; }
+.is-charred .fig-ball-wax, .is-charred .fig-ball-lit { fill: #1b1915; }
+.is-charred .fig-flail-wax { stroke: #1b1915; }
+.is-charred .fig-cloak-wax, .is-charred .fig-skirt-edge { stroke: #1b1915; }
 
 /* The guide: a navy cloak that doubles as a hat, a glowing yarn orb on a black string, bare feet. */
 .guide-cloak { fill: #1d2a4f; stroke: #111a33; stroke-width: 1; stroke-linejoin: round; }

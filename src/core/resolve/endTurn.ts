@@ -24,7 +24,8 @@ export function endTurn(t: Turn) {
       t.emit({ kind: "revive", who: e.id });
     } else if (t.fallen.has(e.id)) {
       e.alive = false;
-      e.fate = "fallen";
+      // (One sealed whole in wax by the blow that ended it stays so.)
+      e.fate = e.fate === "encased" ? "encased" : "fallen";
       e.hp = 0;
       e.fatigue = 0;
       kindOf(e).onDeath?.({ self: e, state: s, event: t.emit });

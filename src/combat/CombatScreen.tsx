@@ -96,7 +96,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   /** Set for fights from the map: when it's over, carry on (won or not) instead of retrying. */
   /** You have the revive knot (its symbol shows beside your bars even when it is spent). */
   knotOwned?: boolean;
-  onDone?: (won: boolean, charges: number, eternity: number, result: { earned: number; killedBy?: string }) => void;
+  onDone?: (won: boolean, charges: number, eternity: number, result: { earned: number; killedBy?: string; /** The enemies (ids) that were dead at any point of the fight. */ fell?: string[] }) => void;
   /** The String you carry into the fight (the counter at the top right); a fight from Test combat starts with none. */
   string?: number;
   /** Your eternal String (death never takes it). */
@@ -139,7 +139,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   /** How many lots have reached you (a won fight ends once they all have). */
   const [landedLots, setLandedLots] = useState(0);
   const [pops, setPops] = useState<StringPop[]>([]);
-  const paid = useRef(new Set<string>());
+  // (Those dead from the start, beaten in an earlier attempt, have paid already.)
+  const paid = useRef(new Set<string>((opening?.from ?? initial).enemies.filter(e => !e.alive).map(e => e.body ?? e.id)));
+  // Every enemy that has been dead at some point of the fight (raised again or not), for the map: the ones that stay dead stay beaten.
+  const fell = useRef(new Set<string>());
+  useEffect(() => { for (const e of fight.enemies) if (!e.alive) fell.current.add(e.id); }, [fight]);
   const earned = useRef(0);
   const burstIds = useRef(0);
   /** The revive knot's red string: sent from the numeral once you lie down, and wound round you (then you rise). */
@@ -695,7 +699,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     setFight(f => ({ ...f, status: "won", enemies: f.enemies.map(e => ({ ...e, hp: 0, alive: false, fate: "fallen" as const })) }));
   };
   // Giving up a fight from the map: you fall as if you had lost it (the lesson can't be lost).
-  const forfeit = () => { setPaused(false); onDone?.(false, fight.player.charges, fight.player.eternity, { earned: earned.current }); };
+  const forfeit = () => { setPaused(false); onDone?.(false, fight.player.charges, fight.player.eternity, { earned: earned.current, fell: [...fell.current] }); };
   const dev = useDev();
   // (The rest are the developer tools' (`ui/dev.ts`): on the map they only show while those are on. Test combat and the viewers are tools themselves.)
   const tools = dev || !onDone;
@@ -711,7 +715,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const finish = () => {
     // Fallen for good: whose blow it was, so what you lost can be found on it.
     const defeat = fight.status === "lost" ? fight.lastTurn.flatMap(st => st.events).find(ev => ev.kind === "defeat") : undefined;
-    onDone?.(fight.status === "won", fight.player.charges, fight.player.eternity, { earned: earned.current, killedBy: defeat?.kind === "defeat" ? defeat.by : undefined });
+    onDone?.(fight.status === "won", fight.player.charges, fight.player.eternity, { earned: earned.current, killedBy: defeat?.kind === "defeat" ? defeat.by : undefined, fell: [...fell.current] });
   };
   // A won fight on the map ends by itself: once the last String has wound round you (or, with none coming, after a moment), the scene fades out.
   // (E skips the wait.)

@@ -182,6 +182,12 @@ export interface Skeleton {
    * feet set wider apart: a splayed stance. The body is lowered so the feet stay on the floor.
    */
   splay3?: number;
+  /**
+   * The 3D rig only, free legs (`freeLegs`): a leg pointed its own way, the figure's own right or left: the direction of its thigh from the hip, then of
+   * its shin from the knee, in body space (x the figure's right, y up, z ahead; any length), each bone its true length (a knee raised, the foot off
+   * the floor). The other leg is as the pose has it.
+   */
+  legDirs3?: { right?: readonly [readonly [number, number, number], readonly [number, number, number]]; left?: readonly [readonly [number, number, number], readonly [number, number, number]] };
   /** The 3D rig only: the shoulders turned, the figure's right one this many figure units back and the left one as far forward (negative: the other way). */
   twist3?: number;
   /**

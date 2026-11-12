@@ -2,13 +2,14 @@
  * attacks.ts — a turn's first phase: attacks, the player first. Your action goes first: your
  * attack lands, or your Block or dodge (aimed at an enemy) meets the attack of the enemy you
  * aimed it at, which follows at once (every part of its body, for a multi-part one). The other
- * enemies' attacks then play one at a time in random order. Each is answered by the target's
+ * enemies' attacks then play one at a time in random order (at you, or at the ally one is aimed at:
+ * the Warden's Usurp Flame on a waxed). Each is answered by the target's
  * Block or dodge, if it has one. After every blow, anyone killed or staggered loses whatever
  * they hadn't done yet: their attack, a Block for later attacks, a Rest, a move.
  */
 import { kindOf } from "../bestiary";
 import { attackCost, attackDamage, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, ITEM_SHARE, resistance, sixteenths, spendEternity } from "../rules";
-import type { Enemy, Fighter, Player, Rng, WeaponTier } from "../types";
+import type { CombatEvent, Enemy, Fighter, Player, Rng, WeaponTier } from "../types";
 import { bodyOf } from "../body";
 import { waxOn } from "./statuses";
 import type { Turn } from "./turn";
@@ -32,7 +33,9 @@ export function resolveAttacks(t: Turn, rng: Rng) {
 
   const queue: { attacker: Fighter; target: Fighter }[] = [];
   if (t.act?.type === "attack") queue.push({ attacker: p, target: t.byId(t.act.target)! });
-  for (const e of [...shuffled(strikers.filter(e => aimedBody.has(e.id))), ...shuffled(strikers.filter(e => !aimedBody.has(e.id)))]) queue.push({ attacker: e, target: p });
+  // (An enemy's attack aimed at an ally strikes that ally; one whose ally is long gone strikes nothing, see `strike`.)
+  const targetOf = (e: Enemy): Fighter => (e.intent.target ? t.s.enemies.find(x => x.id === e.intent.target) ?? p : p);
+  for (const e of [...shuffled(strikers.filter(e => aimedBody.has(e.id))), ...shuffled(strikers.filter(e => !aimedBody.has(e.id)))]) queue.push({ attacker: e, target: targetOf(e) });
 
   queue.forEach(({ attacker, target }) => {
     strike(t, attacker, target);
@@ -110,7 +113,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
     t.emit({ kind: "canceled", who: attacker.id, action: "attack", reason: t.fallen.has(attacker.id) ? "fallen" : "staggered" });
     return;
   }
-  if (t.fallen.has(target.id)) {
+  if (t.fallen.has(target.id) || (target !== p && !(target as Enemy).alive)) {
     t.cancelled.add(attacker.id);
     t.emit({ kind: "canceled", who: attacker.id, action: "attack", reason: "no target" });
     return;
@@ -134,8 +137,10 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
     }
   }
   t.tire(attacker, cost);
-  // Melee closes in on the target; a ranged attacker stays where it is.
+  // Melee closes in on the target; a ranged attacker stays where it is. An enemy striking an ally tries to step onto the ally's line
+  // instead (forward from the back line, back from the front; not at all when they share one), which your Maneuver can undo.
   if (attacker === p) t.pulls.set(target.id, p.id);
+  else if (target !== p) { if (!ranged && (target as Enemy).line !== (attacker as Enemy).line) t.shifts.set(attacker.id, (target as Enemy).line); }
   else if (!ranged) t.pulls.set(attacker.id, attacker.id);
   // Whom it attacked with its weapon this turn, however the blow goes (for the Jagged Chisel, next turn; not a Hurl Wax).
   if (isWeaponBlow(attacker, weight)) t.attacked.set(attacker.id, target.id);
@@ -180,8 +185,30 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
         t.emit({ kind: "burned", who: target.id, damage: amount });
       },
       wax: () => waxOn(t, target, through),
+      seal: () => sealWhole(t, target),
+      event: (ev: CombatEvent) => t.emit(ev),
     });
   }
+}
+
+/**
+ * Sealed whole in wax, its flame taken (Usurp Flame): an enemy dies on the spot, encased, and is out of the rest of the turn; you
+ * are encased (no longer just Waxed) until you get back up.
+ */
+function sealWhole(t: Turn, target: Fighter) {
+  if (target === t.p) {
+    t.p.waxed = false;
+    t.p.encased = true;
+    return;
+  }
+  const e = target as Enemy;
+  e.hp = 0;
+  e.fatigue = 0;
+  e.staggered = false;
+  e.fate = "encased";
+  t.out.add(e.id);
+  t.fallen.add(e.id);
+  t.emit({ kind: "encased", who: e.id });
 }
 
 /** How much more Fatigue a fighter's bar can take before it staggers: none once staggered, and what goes past a full bar is lost. */

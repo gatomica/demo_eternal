@@ -36,8 +36,13 @@ export function conditionOf(kind: EnemyKind, need: string): Condition | undefine
 
 /** Whether all of an action's conditions hold for this enemy right now. */
 export function isAvailable(kind: EnemyKind, self: Enemy, state: CombatState, a: ActionDef): boolean {
+  return needsHold(kind, self, state, a.needs);
+}
+
+/** Whether all these needs (an action's, or a stance's bracketed conditions) hold for this enemy right now. */
+export function needsHold(kind: EnemyKind, self: Enemy, state: CombatState, needs: string[]): boolean {
   // Each need holds if any of its alternatives (`*A or *B`, kept as "a|b") does.
-  return a.needs.every(need =>
+  return needs.every(need =>
     need.split("|").some(alt => {
       const holds = conditionOf(kind, alt)?.(self, state) ?? false;
       return alt.startsWith("!") ? !holds : holds;
