@@ -99,7 +99,7 @@ What is planned but not built is in `docs/todo.md`: read it when starting a task
 - Poses are tuned by eye with the user, often over many rounds. When changing one pose, leave every
   other pose exactly as it is.
 - Visual changes: check them in the Model viewer (each stance, each action, Staggered, Flinch, and the
-  Model stance: a T-pose with the camera orbiting the figure, drag to turn it round and over or under it, "Reset view" to put it back, to check proportions; `Scene`'s `orbit`) and
+  Model stance: a T-pose with the camera orbiting the figure, drag to turn it round and over or under it, "Reset view" to put it back, to check proportions; `Scene`'s `orbit`) (in any other pose, dragging the scene swings the camera round the figure for a look while the button is held, snapping back on letting go: `Scene`'s `peek`) and
   in a real Test combat fight. Mid-turn timing bugs (a pose flashing for a frame, a status shown too
   early) usually come from `viewAt` / step snapshots vs. the final `fight` state in `combat/CombatScreen.tsx`.
 - Map plans: a diagonal tile (◤ ◥ ◣ ◢: the character shows its floor half; the other half is wall) cuts corners for non-square rooms. Ladders (`H`, an `H` on consecutive levels at one tile is one tall ladder) are climbed in place. Floors are stacked on one shared footprint (a higher floor may sit right over a lower one; one level is `RISE` = one tile of height on screen). Stairs

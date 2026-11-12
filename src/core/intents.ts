@@ -15,7 +15,7 @@ export function describeAction(kindName: KindId, line: Line, stance: string | un
   return {
     type: a.type, dir, forced: false, stance, action: a.name,
     pose: stance ? kind.stancePoses[stance] ?? poses?.act : poses?.act,
-    actPose: poses?.act, strikePose: poses?.strike, projectile: poses?.projectile, restPose: poses?.rest, windupPose: poses?.windup, guardPose: poses?.guard,
+    actPose: poses?.act, strikePose: poses?.strike, projectile: poses?.projectile, restPose: poses?.rest, windupPose: (stance && poses?.windupFrom?.[stance]) || poses?.windup, guardPose: poses?.guard, prepPose: poses?.prep, landPose: poses?.land, dodgeDash: poses?.dash, leap: poses?.leap, landSlide: poses?.slide,
     weight: a.weight, damage: a.damage, cost: a.cost, ranged: a.ranged || undefined, tags: a.tags.length ? a.tags : undefined,
   };
 }

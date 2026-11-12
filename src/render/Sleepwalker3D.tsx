@@ -19,6 +19,7 @@ import { modelOfWeapon } from "./gear3d";
 import { visibleCap } from "./hoodCap";
 import { useSway } from "./sway";
 import { WEAPON_REACH } from "./StickFigure";
+import { RIG } from "./rig";
 
 /** Its bodily thickness, in figure units, before perspective: the limbs (as the flat figure's), the wax that seals it, the head. */
 const LIMB = 5, SHELL = 13, HEAD_R = 7.5;
@@ -130,6 +131,9 @@ const lift = (pose: PoseName, hand: Side, reach: number) => liftPose(ALL_POSES[p
 const weaponIn = (rig: Rig3, pose: PoseName, reach: number) =>
   heldAlong(rig.weaponHand === "right" ? rig.joints.handR : rig.joints.handL, poseWeaponAxis(ALL_POSES[pose]), reach);
 
+/** The swings that sweep level across the front, left or right, the arm fully stretched out straight ahead halfway through (their arch passes there). */
+const ACROSS = new Set<string>(["sw-swing-l", "sw-swing-r"]);
+
 /** How far a dead body's middle line lies off the floor (figure units): the depth of its back, so the ribcage and head rest on the floor. */
 const LIE_LIFT = 4.5;
 /** How far a dead body is turned on the floor from the way it faced (radians, toward its right): across the view rather than end on. */
@@ -209,12 +213,14 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, hooded: hooded
   // The arch of a strike: from where the weapon's far end was in the wind-up to where it ends (bare-handed, from the hand), as thick as the
   // weapon's damaging part (the blade, the brick, the bulb).
   const windUp = SWINGS[pose];
+  // (A level swing across her front, left or right, reached furthest straight ahead halfway through, the arm fully stretched out: its arch passes there.)
   const arc = useMemo(() => {
     if (!windUp) return undefined;
     const before = lift(windUp, hand, reach);
-    return weapon === "baseline"
-      ? swingArc(before.joints.handR, rig.joints.handR)
-      : swingArc(weaponIn(before, windUp, reach).tip, weaponIn(rig, pose, reach).tip, model && model.damage * U);
+    const [from, to] = weapon === "baseline" ? [before.joints.handR, rig.joints.handR] : [weaponIn(before, windUp, reach).tip, weaponIn(rig, pose, reach).tip];
+    const sh = rig.joints.shoulderR, far = (RIG.upperArm + RIG.forearm + (weapon === "baseline" ? 0 : reach)) * U;
+    const mid: P3 | undefined = ACROSS.has(pose) ? [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, sh[2] + far] : undefined;
+    return swingArc(from, to, weapon === "baseline" ? undefined : model && model.damage * U, mid);
   }, [windUp, pose, hand, rig, weapon, reach, model]);
   // The swing this pose is part of, for the weapon's edge side to lead through: its own strike's arch, or (a wind-up) the one it is about to make.
   const swing = useMemo(() => {

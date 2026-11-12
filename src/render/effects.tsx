@@ -103,7 +103,8 @@ const IMPACT_MS = 380;
  * far it goes. Only the side facing `toward` (a world angle: x = cos, z = sin) burns: flames
  * tallest straight ahead, dying away around the sides, nothing behind (or all the way round, for
  * `full`). The flames (`flame` meters tall) keep their size as it spreads, only rising as it
- * advances. `impact`: a melee blow's version, white spikes, quicker.
+ * advances. `impact`: a melee blow's version, white spikes, quicker; they bend in over where it struck as they rise, along a dome over it, instead of
+ * standing straight up (a cylinder of them).
  */
 export function Shockwave({ center, reach, toward, flame, proj, impact, full }: {
   center: Vec; reach: number; toward: number; flame: number;
@@ -157,6 +158,16 @@ export function Shockwave({ center, reach, toward, flame, proj, impact, full }: 
       const hh = hgt * k, ww = half * k;
       return `M${x - ww} ${y} Q${x - ww * 0.6 + lean * 0.5 * k} ${y - hh * 0.55} ${x + lean * k} ${y - hh} Q${x + ww * 0.7 + lean * 0.4 * k} ${y - hh * 0.45} ${x + ww} ${y} Z`;
     };
+    if (impact) {
+      // A melee blow's spike follows the dome over where it struck: from its foot on the ring it rises and bends in toward the middle, round the dome (a
+      // ball's, as wide as the ring), as far along it as the spike is tall; its sides drawn in to its tip as the flames' are.
+      const tall = flame * (0.25 + 0.95 * eased) * w ** 1.6, up = Math.min(Math.PI / 2 - 0.05, tall / r);
+      const onDome = (u: number) => { const q = proj({ x: center.x + r * Math.cos(u) * Math.cos(t), z: center.z + r * Math.cos(u) * Math.sin(t) }); return [q.sx, q.sy - r * Math.sin(u) * q.ppm] as const; };
+      const [tx, ty] = onDome(up), [mx, my] = onDome(up / 2), cx = 2 * mx - (x + tx) / 2, cy = 2 * my - (y + ty) / 2;
+      const spike = `M${x - half} ${y} Q${cx - half * 0.35} ${cy} ${tx} ${ty} Q${cx + half * 0.35} ${cy} ${x + half} ${y} Z`;
+      flames.push({ depth: at.depth, d: spike, core: spike });
+      continue;
+    }
     flames.push({ depth: at.depth, d: tongue(1), core: tongue(0.5) });
   }
   // Each flame is layered with the figures by its distance, as they are (see Scene), so the far

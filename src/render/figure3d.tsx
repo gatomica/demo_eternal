@@ -6,7 +6,7 @@
 import { isValidElement, type ReactNode, type Ref } from "react";
 import type { WeaponTier } from "../core/types";
 import { type Cam, eyeSpace, facingVec, METERS_PER_UNIT as U, onScreen, right as rightOf, toCamera, type Vec } from "./camera";
-import { type Joint, type P3, type placeRig, ribcageOf, type Rig3, type Seen, type swingArc, weaponFrame } from "./rig3d";
+import { type ArcCircle, type Joint, type P3, type placeRig, ribcageOf, type Rig3, type Seen, type swingArc, weaponFrame } from "./rig3d";
 import { drawGear, type GearModel, type V3 } from "./gear3d";
 import { GearShape } from "./GearShape";
 import { HeldWeapon } from "./StickFigure";
@@ -189,11 +189,31 @@ export function ellipsoidPart(c: Canvas3D, key: string, centre: P3, side: P3, fw
 }
 
 /** A swing's arch (`swingArc`), drawn as it fades when the strike ends (`fig-trail`), in front of the figure. */
-export function arcPart(c: Canvas3D, arc: { outer: (t: number) => P3; inner: (t: number) => P3 }): Part {
-  const { see, X, Y } = c;
-  const STEPS = 20, ts = Array.from({ length: STEPS + 1 }, (_, i) => i / STEPS);
-  const edge = [...ts.map(t => see(arc.outer(t))), ...ts.map(t => see(arc.inner(t))).reverse()];
-  return { key: "swing", depth: Math.min(...edge.map(p => p.depth)) - 0.05, node: <polygon key="swing" points={edge.map(p => `${X(p)},${Y(p)}`).join(" ")} className="fig-trail" /> };
+export function arcPart(c: Canvas3D, arc: { circle: ArcCircle }): Part {
+  return trailPart(c, "swing", arc.circle);
+}
+
+/**
+ * A trail along a stretch of a circle in space (`ArcCircle`), drawn as the sprites draw theirs (`StrikeTrail`): a crescent of two true arcs, not points
+ * joined up, so it costs next to nothing to draw. The circle is an ellipse on the screen (its two ways in its plane, seen from here, are two of its half
+ * diameters): its outer edge is that ellipse's arc, a line across its blunt end as thick as the trail is there, and its inner edge a slightly smaller arc
+ * back to where it starts, a point. It fades as it is drawn (`fig-trail`), in front of the figure.
+ */
+export function trailPart(c: Canvas3D, key: string, arc: ArcCircle, className = "fig-trail"): Part {
+  const { see, X, Y } = c, { centre: C, e1, e2, radius: r, a0, a1, thick } = arc;
+  const along = (v: P3, k: number): P3 => [C[0] + v[0] * k, C[1] + v[1] * k, C[2] + v[2] * k];
+  const c0 = see(C), pe = see(along(e1, r)), qe = see(along(e2, r));
+  const cx = X(c0), cy = Y(c0), p = [X(pe) - cx, Y(pe) - cy], q = [X(qe) - cx, Y(qe) - cy];
+  // (the ellipse's own axes, from the two half diameters)
+  const s00 = p[0] * p[0] + q[0] * q[0], s11 = p[1] * p[1] + q[1] * q[1], s01 = p[0] * p[1] + q[0] * q[1];
+  const spread = Math.sqrt(((s00 - s11) / 2) ** 2 + s01 * s01), rx = Math.sqrt((s00 + s11) / 2 + spread), ry = Math.sqrt(Math.max(1e-6, (s00 + s11) / 2 - spread));
+  const tilt = (Math.atan2(2 * s01, s00 - s11) / 2) * (180 / Math.PI);
+  const sweep = (a1 > a0) === (p[0] * q[1] - p[1] * q[0] > 0) ? 1 : 0, big = Math.abs(a1 - a0) > Math.PI ? 1 : 0, k = Math.min(0.9, thick / r);
+  // (its ends where they really are, seen in perspective: the arcs run between them, the ellipse only giving their bend)
+  const onCircle = (a: number, kk = 1): [number, number] => { const q2 = see([0, 1, 2].map(i => C[i] + (e1[i] * Math.cos(a) + e2[i] * Math.sin(a)) * r * kk) as unknown as P3); return [X(q2), Y(q2)]; };
+  const from = onCircle(a0), to = onCircle(a1), innerEnd = onCircle(a1, 1 - k), f = (v: number) => Math.round(v * 100) / 100;
+  const d = `M${f(from[0])} ${f(from[1])} A${f(rx)} ${f(ry)} ${f(tilt)} ${big} ${sweep} ${f(to[0])} ${f(to[1])} L${f(innerEnd[0])} ${f(innerEnd[1])} A${f(rx * (1 - k / 2))} ${f(ry * (1 - k / 2))} ${f(tilt)} ${big} ${1 - sweep} ${f(from[0])} ${f(from[1])} Z`;
+  return { key, depth: Math.min(c0.depth, pe.depth, qe.depth) - 0.05, node: <path key={key} d={d} className={className} /> };
 }
 
 /**

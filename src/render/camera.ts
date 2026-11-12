@@ -44,7 +44,7 @@ export const focusOf = (c: Cam): Vec => c.look ?? { x: c.x + Math.sin(c.yaw) * L
 const FOCAL = 1.1;
 
 /** Eye height of the camera, in meters. */
-const EYE_HEIGHT = 1.26;
+export const EYE_HEIGHT = 1.26;
 
 /** Where the horizon sits, as a share of screen height from the top. */
 export const HORIZON = 0.507;
@@ -282,6 +282,8 @@ export function behind(anchor: Vec, yaw: number, amount: number): Vec {
  * ============================================================ */
 
 export const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+/** Fast at first, slowing to a halt: something sliding to a stop (losing its speed steadily, as friction takes it). */
+export const easeOut = (t: number) => 1 - Math.pow(1 - t, 2);
 
 export const lerpVec = (a: Vec, b: Vec, t: number): Vec => ({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
 
@@ -329,6 +331,9 @@ export function figureBox(cam: Cam, p: Vec, w: number, h: number, scale = 1) {
  */
 export type ShotCamera = Cam | { follow: string; yaw: number } | { between: [string, string]; yaw: number };
 
+/** One stage of a figure's move (`SceneShot.own`): this share of the way, over `ms`, slowing from its start to `endSpeed` (a share of its own average speed). */
+export interface MoveStage { share: number; ms: number; endSpeed: number }
+
 /** Where everyone should be and where the camera should look, and how long to take getting there. */
 export interface SceneShot {
   positions: Record<string, Vec>;
@@ -336,6 +341,16 @@ export interface SceneShot {
   ms: number;
   /** Who jumps to its new spot at once instead of walking there (while the screen is dark, say). */
   snap?: string[];
+  /** `out`: the move starts at speed and slows to a halt (a slide), instead of easing in and out. */
+  easing?: "out";
+  /**
+   * Figures that move to their spots on their own timing in this shot (a dodge's dash, longer than the attacker's approach it starts in). Easing `out`,
+   * `endSpeed` is the speed it still has as it gets there, a share of its average speed (0: it comes to a halt; a dash running on into a slide keeps some).
+   * `since`: when (performance.now()) the move began, if not as the shot reaches the scene: it starts from where it was then and is as far along as that
+   * time says, however late the scene draws it, so a move handed on from another (a dash into its slide) never stops between them.
+   * `stages`: the move in stages, one after the other along the same line (a dash, then its slide), each easing `out` on its own.
+   */
+  own?: Record<string, { ms: number; easing?: "out"; endSpeed?: number; since?: number; stages?: MoveStage[] }>;
   /** Bumped on every new shot, so the scene knows to start moving. */
   version: number;
 }

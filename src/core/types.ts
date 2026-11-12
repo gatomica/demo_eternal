@@ -51,12 +51,22 @@ export interface Intent {
   /** For a Rest: the pose once it actually happens, at the end of the turn. */
   restPose?: string;
   /**
-   * For a Rest or a Block: the pose it takes from the start of the turn, to show its intent: until the Rest happens
+   * For an Attack: the pose it takes as it closes in to strike. For a Rest or a Block: the pose it takes from the start of the turn, to show its intent: until the Rest happens
    * (or is broken), or until the blow it blocks lands.
    */
   windupPose?: string;
   /** For a Block: it holds its stance, and only takes this pose as an attack on it lands. */
   guardPose?: string;
+  /** For a Rest: its second wind-up, taken for a moment just before the Rest goes through. */
+  prepPose?: string;
+  /** For a Maneuver: the pose it lands in once a dodge's dash has carried it clear (until then it dodges in `actPose`). */
+  landPose?: string;
+  /** For a Maneuver: how long and how far its dodge's dash goes (see `actionPoses`' `dash` in core/bestiary.ts). */
+  dodgeDash?: { ms: number; far: number; hop?: number };
+  /** For an Attack: a leap past its target instead of closing in; for a Maneuver, its dodge (see `actionPoses`' `leap` in core/bestiary.ts). */
+  leap?: { hold: number; ms: number; hop: number; pass: number; behind: number; slide: { far: number; ms: number }; settle?: string };
+  /** For a Maneuver: how it slides on after a dodge's dash (see `actionPoses`' `slide` in core/bestiary.ts). */
+  landSlide?: { far: number; ms: number; turn: number; settle: string };
   /** The weight of this Attack or Block, when the action has its own. Otherwise the fighter's weapon. */
   weight?: WeaponTier;
   /** Its own damage and Fatigue cost in sixteenths of its max health, when the action sets them (otherwise its weight's). */

@@ -5,7 +5,7 @@ import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, us
 import { PHASE_TWO, playMusic } from "../audio/music";
 import { eternalSfx, play as playSfx, prepare as prepareSfx, sfxFor } from "../audio/sfx";
 import { ActionWheel, type Anchor } from "./ActionWheel";
-import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_LATERAL, DODGE_PAST, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
+import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_LATERAL, DODGE_PAST, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, PREP_MS, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
 import { LessonBox } from "./LessonBox";
 import { prepareWalk, speak } from "../audio/walk";
 import { useDev } from "../ui/dev";
@@ -15,7 +15,7 @@ import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveTurn, snapshotOf } from "../core/resolve";
 import { attackCost, restRecovery } from "../core/rules";
 import type { CombatEvent, CombatState, Enemy, Opening, Player, PlayerAction, Stance, Swing } from "../core/types";
-import { behind, bodiesOfEnemies, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, SCENE_TILT, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
+import { behind, right as rightOf, bodiesOfEnemies, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, SCENE_TILT, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
 import type { Projectile } from "../render/effects";
 import { type BarValues, HealthBar, PlayerBars } from "../render/HealthBar";
 import { lookOf } from "../render/looks";
@@ -42,7 +42,7 @@ const PLAYER_3D = true;
 /** Whether the game itself (fights, not the Model viewer) draws the Warden from the 3D rig. Off while it is built. */
 const WARDEN_3D_IN_GAME = false;
 
-export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, restOnPlay, shade = true, playerAction, playerHold, playerDead, light = true, debugLimbs = false, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, orbit, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
+export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, restOnPlay, shade = true, playerAction, playerHold, playerDead, light = true, debugLimbs = false, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, orbit, peek, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
   initial: CombatState;
   /** A scene to play before the first turn (it leaves the fight as `initial`). */
   opening?: Opening;
@@ -62,6 +62,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   restOnPlay?: boolean;
   /** The model viewer's Model stance: the camera orbits the enemy (or you), and dragging turns it round (see `Scene`'s `orbit`). */
   orbit?: Parameters<typeof Scene>[0]["orbit"];
+  /** The model viewer, any other pose: dragging swings the camera round for a look, snapping back on letting go (see `Scene`'s `peek`). */
+  peek?: Parameters<typeof Scene>[0]["peek"];
   /** The model viewer's player mode: each change plays this action for you (instead of a Rest or an Attack). */
   playerAction?: PlayerAction;
   /** The model viewer's player mode: the pose you hold while no turn is playing. */
@@ -291,6 +293,19 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    * and the enemies walk from wherever they are to their lines. If you Maneuvered, you walk to
    * where you were going and the camera follows you there. */
   const world = useRef({ anchor: { x: 0, z: 0 } as Vec, yaw: 0, pos: {} as Record<string, Vec> });
+  /** When each dodger's longer dash (its Maneuver's `dash`) ends (performance.now()), for its slide to carry on from. */
+  const dashEnds = useRef<Record<string, number>>({});
+  /**
+   * A leap being played (an Attack's `leap`), by step: how long its approach lasts (its wind-up hold, then the jump up to passing its target, when the
+   * blow lands), and how long the step then needs (the rest of the jump, and the slide).
+   */
+  const leapPlan = useRef<{ key: string; approach: number; after: number } | null>(null);
+  /** The step (its key) in which a leap has left the floor: it takes its strike pose from then on. */
+  const [leapt, setLeapt] = useState<string | null>(null);
+  /** Where anyone that stepped out to the side (its Maneuver changing nothing, dodging nothing) stands until its next turn is over. */
+  const sidestep = useRef<Record<string, Vec>>({});
+  /** Who dashed and slid to their new spot this turn (their Maneuver's own move), so they do not walk off after it. */
+  const repositioned = useRef(new Set<string>());
 
   /** The parts of multi-target enemies (the Wax Blob): they share a slot in the formation. */
   const bodies = useMemo(() => bodiesOfEnemies(initial.enemies), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -382,7 +397,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // Turn so the enemies, from wherever they are now, end up roughly ahead in their lines.
     const enemiesNow = [...front, ...back].map(id => w.pos[id]).filter(Boolean);
     const yaw = facingToward(anchor, enemiesNow, front.length, back.length, w.yaw);
-    const pos = { ...w.pos, ...Object.fromEntries(formation(anchor, yaw, front, back, bodies)), player: anchor };
+    // (one that stepped out to the side, its Maneuver changing nothing, stays there until its next turn is over: `sidestep`)
+    const pos = { ...w.pos, ...Object.fromEntries(formation(anchor, yaw, front, back, bodies)), ...sidestep.current, player: anchor };
     world.current = { anchor, yaw, pos };
     return { pos, camera: planningShot(anchor, yaw, pos, st) };
   };
@@ -401,9 +417,14 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     world.current.pos = pos;
     return { positions: pos, camera: { follow: "player", yaw: 0 }, ms: 0, version: 0 };
   });
-  const shoot = (positions: Record<string, Vec>, camera: ShotCamera, ms: number, snap?: string[]) => {
+  /** The shot and the playback as they are now, for a timer set long before (a leap's landing). */
+  const shotRef = useRef(shot);
+  shotRef.current = shot;
+  const playbackRef = useRef(playback);
+  playbackRef.current = playback;
+  const shoot = (positions: Record<string, Vec>, camera: ShotCamera, ms: number, snap?: string[], easing?: "out", own?: SceneShot["own"]) => {
     world.current.pos = positions;
-    setShot(s => ({ positions, camera, ms, snap, version: s.version + 1 }));
+    setShot(s => ({ positions, camera, ms, snap, easing, own, version: s.version + 1 }));
   };
 
   useLayoutEffect(() => {
@@ -467,9 +488,45 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           ? behind(w.pos.player, w.yaw, FALL_BACK)
           : closeIn(w.pos.player, w.pos[act.target!] ?? w.pos.player, ENGAGE_GAP);
       }
-      const { pos, camera } = settle(viewAt(playback.from, step!.after), anchor);
-      shoot(pos, camera, SETTLE_MS);
-      return;
+      // (anyone that stepped out to the side last turn goes back to its place in the line now, unless it steps out again)
+      sidestep.current = {};
+      const settled = viewAt(playback.from, step!.after), { pos, camera } = settle(settled, anchor);
+      let sidestepped = false;
+      // One whose Maneuver dodges with a dash and a slide, and that dodged nothing this turn, goes to its new spot the same way: dashing off, then
+      // sliding on to a halt right there (its spot for the next turn), the dash slowing only to the slide's speed. (Any other just walks there.)
+      const own: NonNullable<SceneShot["own"]> = {}, timers: number[] = [], now = performance.now();
+      const spots = pos as Record<string, Vec>;
+      for (const e of repositioners(playback)) {
+        const from = w.pos[e.id], slide = e.intent.landSlide!, dash = e.intent.dodgeDash, dashMs = dash?.ms ?? APPROACH_MS - DODGE_DELAY_MS;
+        let to = spots[e.id];
+        if (!from || !to) continue;
+        let dist = Math.hypot(to.x - from.x, to.z - from.z);
+        if (dist < 0.05) {
+          // Its Maneuver changed nothing (already where it was going): it dodges all the same, out to one side, across the line from you to it (away
+          // from the others), as far as a dodge goes, and stands there next turn.
+          const you = spots.player ?? anchor, d0 = { x: from.x - you.x, z: from.z - you.z }, l0 = Math.hypot(d0.x, d0.z) || 1;
+          let side = { x: -d0.z / l0, z: d0.x / l0 };
+          const others = Object.entries(spots).filter(([id]) => id !== e.id && id !== "player").map(([, p]) => p);
+          if (others.length) {
+            const mid = { x: others.reduce((n, p) => n + p.x, 0) / others.length, z: others.reduce((n, p) => n + p.z, 0) / others.length };
+            if (side.x * (from.x - mid.x) + side.z * (from.z - mid.z) < 0) side = { x: -side.x, z: -side.z };
+          }
+          dist = DODGE_BACK * Math.SQRT2 + (dash?.far ?? 0) + slide.far;
+          to = spots[e.id] = { x: from.x + side.x * dist, z: from.z + side.z * dist };
+          sidestepped = true;
+          sidestep.current[e.id] = to;
+        }
+        // (a jump, `hop`, flies at one speed, the landing taking speed out of it; otherwise the dash slows to the slide's speed)
+        const slid = Math.min(slide.far, dist / 2), dashed = dist - slid, endSpeed = dash?.hop ? 1 : Math.min(1.9, slide.ms > 0 ? ((2 * slid) / slide.ms) * dashMs / dashed : 0);
+        own[e.id] = { ms: dashMs + slide.ms, since: now, stages: [{ share: dashed / dist, ms: dashMs, endSpeed }, { share: slid / dist, ms: slide.ms, endSpeed: 0 }] };
+        const dir = { x: (to.x - from.x) / dist, z: (to.z - from.z) / dist };
+        repositioned.current.add(e.id);
+        setDodging(prev => ({ ...prev, [e.id]: { dir, retreat: e.intent.dir === "retreat", reposition: true, hop: dash?.hop ? { since: now, ms: dashMs, height: dash.hop } : undefined } }));
+        timers.push(window.setTimeout(() => setDodging(prev => (prev[e.id] ? { ...prev, [e.id]: { ...prev[e.id], slide: { since: now + dashMs, ms: slide.ms, turn: slide.turn, to: slide.settle } } } : prev)), dashMs));
+      }
+      // (framed again with anyone that stepped out to the side where it ends up)
+      shoot(pos, sidestepped ? planningShot(world.current.anchor, world.current.yaw, pos, settled) : camera, SETTLE_MS, undefined, undefined, Object.keys(own).length ? own : undefined);
+      return () => timers.forEach(x => window.clearTimeout(x));
     }
     const a = w.pos[attack.attacker];
     const t = w.pos[attack.target];
@@ -504,30 +561,98 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       const at = attack.ranged ? a : closeIn(a, t, STRIKE_GAP);
       // (It stays centered between the two as they move: closing in, knocked back, dodging.)
       const camera: ShotCamera = { between: [attack.attacker, attack.target], yaw: sceneYaw(attack.attacker, attack.target, shotCamera(shot).yaw) };
-      shoot(dragBody(w.pos, attack.attacker, at), camera, APPROACH_MS);
-      if (attack.result === "dodged") {
+      /**
+       * A leap past someone (`leap`): `who` winds up, then jumps from `from` along a line that passes `past`'s left side (the left of the screen, the
+       * camera being behind it), and comes down behind it; the blow lands as it passes. Landed, it loses speed (its slide starts slower than it flew)
+       * and slides on to a halt, taking `settleTo` and turning to face you. `lunge`: the attacker it dodges, lunging at it so as to arrive as it passes.
+       */
+      const launch = (who: string, from: Vec, past: Vec, leap: NonNullable<Enemy["intent"]["leap"]>, settleTo: PoseName, airPose: string | undefined, lunge?: { id: string; to: Vec }) => {
+        const gap = Math.hypot(past.x - from.x, past.z - from.z) || 1, u = { x: (past.x - from.x) / gap, z: (past.z - from.z) / gap };
+        const camRight = rightOf(shotCamera(shot).yaw);
+        let side = { x: -u.z, z: u.x };
+        if (side.x * camRight.x + side.z * camRight.z > 0) side = { x: -side.x, z: -side.z };
+        const by = { x: past.x + side.x * leap.pass, z: past.z + side.z * leap.pass };
+        const toBy = Math.hypot(by.x - from.x, by.z - from.z) || 1, dir = { x: (by.x - from.x) / toBy, z: (by.z - from.z) / toBy };
+        const span = toBy * (gap + leap.behind) / gap, land = { x: from.x + dir.x * span, z: from.z + dir.z * span };
+        const now = performance.now(), off = now + leap.hold, down = off + leap.ms, pass = leap.ms * (toBy / span), approach = leap.hold + pass;
+        leapPlan.current = { key: stepKey, approach, after: leap.ms - pass + leap.slide.ms };
+        let positions = dragBody(w.pos, who, land);
+        const own: NonNullable<SceneShot["own"]> = { [who]: { since: off, ms: leap.ms, easing: "out", endSpeed: 1 } };
+        // (the attacker it dodges lunges as it always does, timed to arrive as it passes)
+        if (lunge) { positions = dragBody(positions, lunge.id, lunge.to); own[lunge.id] = { since: now + Math.max(0, approach - APPROACH_MS), ms: Math.min(APPROACH_MS, approach) }; }
+        shoot(positions, camera, approach, undefined, undefined, own);
+        setDodging(prev => ({ ...prev, [who]: { dir, retreat: false, leap: true, hop: { since: off, ms: leap.ms, height: leap.hop } } }));
+        const key = playback.from.turn;
+        window.setTimeout(() => setLeapt(stepKey), leap.hold);
+        window.setTimeout(() => {
+          if (world.current.pos[who] !== land || !playbackRef.current || playbackRef.current.from.turn !== key) return;
+          const end = { x: land.x + dir.x * leap.slide.far, z: land.z + dir.z * leap.slide.far };
+          shoot(dragBody(world.current.pos, who, end), shotRef.current.camera, leap.slide.ms, undefined, undefined, { [who]: { since: down, ms: leap.slide.ms, easing: "out" } });
+          setDodging(prev => (prev[who] ? { ...prev, [who]: { ...prev[who], slide: { since: down, ms: leap.slide.ms, turn: 0, to: settleTo, from: airPose } } } : prev));
+        }, down - now);
+      };
+      const leaper = playback.from.enemies.find(e => e.id === attack.attacker), leap = !attack.ranged ? leaper?.intent.leap : undefined;
+      // (a Maneuver that dodges by leaping: `leap` on the one attacked)
+      const dodger = attack.result === "dodged" ? playback.from.enemies.find(e => e.id === attack.target && e.intent.type === "maneuver" && !e.intent.forced) : undefined;
+      const dodgeLeap = dodger?.intent.leap;
+      if (leap && leaper) {
+        // An Attack that is a leap past its target.
+        const struckIn = leaper.intent.strikePose;
+        launch(attack.attacker, a, t, leap, handOffOf(struckIn) ?? "idle", struckIn);
+      } else if (dodgeLeap && dodger) {
+        // A Maneuver that dodges by leaping past its attacker as it lunges: the blow lands where it was.
+        launch(attack.target, t, at, dodgeLeap, asPose(dodgeLeap.settle, "idle"), dodger.intent.actPose, { id: attack.attacker, to: at });
+      } else shoot(dragBody(w.pos, attack.attacker, at), camera, APPROACH_MS);
+      if (attack.result === "dodged" && !dodgeLeap) {
         // A target that dodges gets clear late in the approach, timed to be gone just as the blow arrives (the
         // blow lands where it was), and only then takes its dodge pose.
-        const { to, retreating } = dodgeTo(at);
+        const { to: clear, retreating } = dodgeTo(at);
+        const moves = playback.from.enemies.find(e => e.id === attack.target)?.intent, dash = moves?.dodgeDash, slide = moves?.landSlide;
+        const go0 = { x: clear.x - t.x, z: clear.z - t.z }, len0 = Math.hypot(go0.x, go0.z) || 1;
+        // (a longer dash, its Maneuver's `dash`: on further the same way, on its own timing, slowing as it goes; into a slide, only down to the slide's speed)
+        const to = dash ? { x: clear.x + (go0.x / len0) * dash.far, z: clear.z + (go0.z / len0) * dash.far } : clear;
+        // (a jump, `hop`, flies at one speed, the landing taking speed out of it)
+        const ownOf = (since: number) => dash && { [attack.target]: { since, ms: dash.ms, easing: "out" as const, endSpeed: dash.hop ? 1 : slide && slide.ms > 0 ? Math.min(1.9, ((2 * slide.far) / slide.ms) * dash.ms / (len0 + dash.far)) : 0 } };
+        // (when the dash ends, for its slide to carry on from exactly then)
         const timer = window.setTimeout(() => {
-          shoot(dragBody(world.current.pos, attack.target, to), camera, APPROACH_MS - DODGE_DELAY_MS);
+          const since = performance.now();
+          dashEnds.current[attack.target] = since + (dash?.ms ?? 0);
+          shoot(dragBody(world.current.pos, attack.target, to), camera, APPROACH_MS - DODGE_DELAY_MS, undefined, undefined, ownOf(since));
           setDodgeStarted(stepKey);
           // The dodger faces the way it goes (or, backing off, away from it) from here until it starts repositioning (see `dodgeFor`).
           const go = { x: to.x - t.x, z: to.z - t.z }, len = Math.hypot(go.x, go.z) || 1;
-          setDodging(prev => ({ ...prev, [attack.target]: { dir: { x: go.x / len, z: go.z / len }, retreat: retreating } }));
-        }, DODGE_DELAY_MS);
+          setDodging(prev => ({ ...prev, [attack.target]: { dir: { x: go.x / len, z: go.z / len }, retreat: retreating, hop: dash?.hop ? { since, ms: dash.ms, height: dash.hop } : undefined } }));
+        }, leapPlan.current?.key === stepKey ? Math.max(0, leapPlan.current.approach - (APPROACH_MS - DODGE_DELAY_MS)) : DODGE_DELAY_MS);
         cleanup = () => window.clearTimeout(timer);
       }
     } else if (attack.result === "hit") {
       // A clean hit knocks the target back, and it stays there.
-      shoot(dragBody(w.pos, attack.target, pushedAway(a, t, KNOCKBACK)), shot.camera, KNOCK_MS);
+      // (by a leap: away from where it passed, the leaper flying on)
+      const leaping = !!dodging[attack.attacker]?.leap;
+      shoot(dragBody(w.pos, attack.target, pushedAway(leaping ? { x: t.x * 2 - (t.x + a.x) / 2, z: t.z * 2 - (t.z + a.z) / 2 } : a, t, KNOCKBACK)), shot.camera, KNOCK_MS);
     } else if (attack.result === "blocked") {
       // A block jolts them both apart a little, and they stay there (like a knockback).
       let knocked = dragBody(w.pos, attack.target, pushedAway(a, t, BLOCK_PUSH));
-      if (!attack.ranged) knocked = dragBody(knocked, attack.attacker, pushedAway(t, a, BLOCK_PUSH));
+      if (!attack.ranged && !dodging[attack.attacker]?.leap) knocked = dragBody(knocked, attack.attacker, pushedAway(t, a, BLOCK_PUSH));
       shoot(knocked, shot.camera, KNOCK_MS);
+    } else if (attack.result === "dodged") {
+      // A dodge that slides on (its Maneuver's `slide`): landed, it carries on along its dodge, slowing to a halt, and turns as it goes (`Scene`).
+      // (with a longer dash, once the dash is over)
+      const moves = playback.from.enemies.find(e => e.id === attack.target)?.intent, slide = moves?.landSlide, d = dodging[attack.target];
+      if (slide && d) {
+        // (it carries on from the very moment the dash ends, however late this runs: no stop between them)
+        const since = moves?.dodgeDash ? dashEnds.current[attack.target] ?? performance.now() : performance.now();
+        const go = () => {
+          const p = world.current.pos[attack.target];
+          if (!p) return;
+          shoot(dragBody(world.current.pos, attack.target, { x: p.x + d.dir.x * slide.far, z: p.z + d.dir.z * slide.far }), shot.camera, slide.ms, undefined, "out", { [attack.target]: { since, ms: slide.ms, easing: "out" } });
+          setDodging(prev => (prev[attack.target] ? { ...prev, [attack.target]: { ...prev[attack.target], slide: { since, ms: slide.ms, turn: slide.turn, to: slide.settle } } } : prev));
+        };
+        const wait = since - performance.now();
+        if (wait > 0) { const timer = window.setTimeout(go, wait); cleanup = () => window.clearTimeout(timer); } else go();
+      }
     }
-    // (A dodge already got out of the way during the approach, so there's nothing more to move at the impact.)
+    // (Otherwise a dodge already got out of the way during the approach, so there's nothing more to move at the impact.)
     return cleanup;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playback?.index, playback?.phase, !!playback, selId, fight, usurpStage, igniteState, waking]);
@@ -581,7 +706,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // A turn where nothing happens (a Block, with nothing to block, and no one else doing anything) still plays one quiet step, so it lasts
     // the minimum a turn lasts (MIN_ATTACK_PHASE_MS, then the step) rather than ending the moment you commit.
     const steps = next.lastTurn.length ? next.lastTurn : [{ events: [], after: snapshotOf(next.player, next.enemies) }];
-    setPlayback({ from: fight, steps, index: 0, phase: phaseAt(steps, 0, 0), playerPose: pose, action: forced ? null : action });
+    setPlayback({ from: fight, steps, index: 0, phase: prepsIn({ from: fight }, steps[0]) ? "approach" : phaseAt(steps, 0, 0), playerPose: pose, action: forced ? null : action });
     closeWheel();
   };
   const commit = (option: WheelOption | null) => {
@@ -853,9 +978,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           return setPlayback({ ...pb, phase: "impact" });
         }
         const index = pb.index + 1;
-        if (index < pb.steps.length) return setPlayback({ ...pb, index, phase: phaseAt(pb.steps, index, performance.now() - turnStart.current) });
+        if (index < pb.steps.length) return setPlayback({ ...pb, index, phase: prepsIn(pb, pb.steps[index]) ? "approach" : phaseAt(pb.steps, index, performance.now() - turnStart.current) });
         // Anyone who dodged is still walking to their new spot: they keep their pose until there.
-        const walking = lastDodgers.current;
+        // (not those that dashed and slid there: they are at their spots already, turned as their next stance faces)
+        const walking = Object.fromEntries(Object.entries(lastDodgers.current).filter(([id]) => !repositioned.current.has(id)));
+        repositioned.current.clear();
         if (Object.keys(walking).length) setWalkOff(walking);
         onTurnPlayed?.(fightRaw); // same render as the playback ending, so nothing flickers
         setPlayback(null);
@@ -863,10 +990,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // An attacker closes in; the first step after the attacks holds until the attack phase has lasted
       // MIN_ATTACK_PHASE_MS. The last step stays long enough for a Rest's animation, if one goes through.
       playback.phase === "approach"
-        ? risesNow ? 250 : isAttackStep(step) ? APPROACH_MS : Math.max(0, MIN_ATTACK_PHASE_MS - (performance.now() - turnStart.current))
-        : playback.index === playback.steps.length - 1 && resting
-          ? Math.max(STEP_MS, REST_ANIM_MS)
-          : STEP_MS,
+        ? risesNow ? 250 : isAttackStep(step) ? (leapPlan.current?.key === stepKey ? leapPlan.current.approach : APPROACH_MS) : Math.max(prepsIn(playback, step) ? PREP_MS : 0, MIN_ATTACK_PHASE_MS - (performance.now() - turnStart.current))
+        : Math.max(STEP_MS, playback.index === playback.steps.length - 1 && resting ? REST_ANIM_MS : 0, slideMs(playback), leapPlan.current?.key === `${playback.from.turn}-${playback.index}-approach` ? leapPlan.current.after + 100 : 0),
     );
     return () => window.clearTimeout(timer);
   }, [playback, paused, waitingForString]);
@@ -910,13 +1035,42 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   // The approach (step key) in which a target has started to dodge.
   const [dodgeStarted, setDodgeStarted] = useState<string | null>(null);
   // Who has dodged this turn, and the way they went.
-  const [dodging, setDodging] = useState<Record<string, { dir: Vec; retreat: boolean }>>({});
+  const [dodging, setDodging] = useState<Record<string, NonNullable<SceneFigure["dodge"]>>>({});
   // A Rest's own animation (its pose) starts the moment it goes through and lasts REST_ANIM_MS.
   const [restPoseOver, setRestPoseOver] = useState<string | null>(null);
   useEffect(() => {
     if (!playback) return;
     const t = window.setTimeout(() => setRestPoseOver(stepKey), REST_ANIM_MS);
     return () => window.clearTimeout(t);
+  }, [stepKey]);
+  /** How long a longer dash (a Maneuver's `dash`) still runs after the blow it dodges lands. */
+  const dashLeft = (intent?: { dodgeDash?: { ms: number } }) => Math.max(0, (intent?.dodgeDash?.ms ?? 0) - (APPROACH_MS - DODGE_DELAY_MS));
+  /**
+   * How long the step now needs for a dodge in it to slide to its halt (its Maneuver's `slide`), so the next step does not cut the slide short: the step
+   * waits for it. (0: no slide.)
+   */
+  const slideMs = (pb: Playback) => Math.max(0, ...(pb.steps[pb.index]?.events ?? []).map(ev =>
+    ev.kind === "attack" && ev.result === "dodged" ? (() => { const i = pb.from.enemies.find(e => e.id === ev.target)?.intent; return dashLeft(i) + (i?.landSlide?.ms ?? 0); })() : 0),
+    // (and the last step, where everyone goes to their new spots, for one that dashes and slides there)
+    ...(pb.index === pb.steps.length - 1 ? repositioners(pb).map(e => (e.intent.dodgeDash?.ms ?? APPROACH_MS - DODGE_DELAY_MS) + (e.intent.landSlide?.ms ?? 0)) : []));
+  /**
+   * The enemies whose Maneuver has a slide and that dodged no attack this turn, but whose Maneuver happened: they dash and slide to their new spots
+   * (in the last step) instead of walking there.
+   */
+  const repositioners = (pb: Playback) => pb.from.enemies.filter(e =>
+    e.intent.type === "maneuver" && !e.intent.forced && !!e.intent.landSlide
+    && pb.steps.some(st => st.events.some(ev => ev.kind === "maneuver" && ev.who === e.id))
+    && !pb.steps.some(st => st.events.some(ev => ev.kind === "attack" && ev.result === "dodged" && ev.target === e.id)));
+  /** Whether a step is a Rest going through for someone with a second wind-up (`prep`): it plays its first beat (an approach) for it. */
+  const prepsIn = (pb: { from: CombatState }, st: { events: CombatEvent[] } | undefined) => !!st?.events.some(ev => ev.kind === "rest" && ev.result === "rested" && !!pb.from.enemies.find(e => e.id === ev.who)?.intent.prepPose);
+  /** The step (its key) in whose first beat a second wind-up (`prep`) is showing: the last `PREP_MS` of it. */
+  const [prepNow, setPrepNow] = useState<string | null>(null);
+  useEffect(() => {
+    if (!playback || playback.phase !== "approach" || !prepsIn(playback, step)) return;
+    const beat = Math.max(PREP_MS, MIN_ATTACK_PHASE_MS - (performance.now() - turnStart.current)), key = stepKey;
+    const t = window.setTimeout(() => setPrepNow(key), beat - PREP_MS);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepKey]);
   /** The step where someone's Rest actually happened (not cut short), or -1. */
   const restStep = (id: string) => stepOf("rest", id);
@@ -961,13 +1115,16 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     /** The pose it hands off to, if not `idle`. */
     handOff?: PoseName;
     /** A Block or Maneuver: hold this pose, and only take `react` (the block, the dodge) as an attack on them lands. */
-    guard?: { hold: PoseName; react: PoseName; keepAfterDodge?: boolean };
+    guard?: { hold: PoseName; react: PoseName; keepAfterDodge?: boolean; land?: PoseName; leapWindup?: PoseName };
   }
   const playbackPose = (id: string, staggered: boolean, poses: Poses): PoseName => {
     if (!playback) return poses.telegraph;
     const struck = strikeStep(id);
     // Wind up while closing in, then strike. A strike that spins on into the next stance (its
     // trails carrying on) takes that stance a moment in, like a Rest's own pose does.
+    // (A leap: its wind-up until it leaves the floor, its strike pose in the air, and the pose it hands off to once it lands and slides.)
+    const leaping = dodging[id]?.leap;
+    if (struck === playback.index && leaping) return dodging[id]?.slide ? poses.handOff ?? poses.idle : impact || leapt === `${playback.from.turn}-${playback.index}-approach` ? poses.strike : poses.windUp;
     if (struck === playback.index) return impact ? (poses.strikeHandsOff && restOver === stepKey ? poses.handOff ?? poses.idle : poses.strike) : poses.windUp;
     if (staggered) return poses.down;
     if (struck >= 0 && struck < playback.index) return poses.idle;
@@ -977,13 +1134,25 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // from then on it keeps it to the end of the turn, walking off to its new spot in it too.
       // Hit while it holds its stance, it just keeps holding it.
       if (poses.guard.keepAfterDodge) {
+        // One that dodges by leaping (`leap`): its wind-up as its attacker comes, its pose in the air, and its next stance once it lands and slides.
+        const lp = dodging[id];
+        if (lp?.leap) return lp.slide ? poses.idle : leapt?.startsWith(`${playback.from.turn}-`) ? poses.guard.react : poses.guard.leapWindup ?? poses.guard.hold;
         // One that already dodged an attack this turn settles into its next stance as the repositioning step (its
         // Maneuver) starts, whether or not it changes line, and walks to its new spot in that. One that didn't
         // takes the Maneuver's pose from there instead.
         const repositioning = stepOf("maneuver", id);
         const dodged = stepOf("dodge", id);
         if (repositioning >= 0 && dodged >= 0 && dodged < repositioning && playback.index >= repositioning) return poses.idle;
-        return dodgedBefore(id) ? poses.guard.react : poses.guard.hold;
+        // One that dodged nothing but dashes and slides to its new spot holds its stance until it dashes off, dashes in its pose, and lands as it slides.
+        const own = dodging[id];
+        if (own?.reposition) return own.slide && poses.guard.land ? poses.guard.land : poses.guard.react;
+        if (repositioners(playback).some(e => e.id === id)) return poses.guard.hold;
+        if (!dodgedBefore(id)) return poses.guard.hold;
+        // (its dash done, it lands: the dash runs through the rest of the attacker's approach, so it is there as the blow lands)
+        // (one that slides lands as its slide begins: a longer dash is still under way as the blow lands)
+        const slides = !!playback.from.enemies.find(e => e.id === id)?.intent.landSlide;
+        const landed = playback.index > dodged || (slides ? !!dodging[id]?.slide : impact || (dodged >= 0 && !isAttackStep(playback.steps[dodged])));
+        return landed && poses.guard.land ? poses.guard.land : poses.guard.react;
       }
       if (hits.includes(playback.index)) return impact ? poses.guard.react : poses.guard.hold;
       return hits.length && hits[0] < playback.index ? poses.idle : poses.guard.hold;
@@ -1051,6 +1220,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     if (!playback || e.intent.type !== "rest" || e.intent.forced || e.staggered) return actionPose(e);
     const at = restStep(e.id);
     if (reached(at)) return actionPose(e);
+    // (its second wind-up, `prep`, for a moment just before it goes through)
+    if (e.intent.prepPose && playback.index === at && prepNow === stepKey) return asPose(e.intent.prepPose, "rest");
     return e.intent.windupPose ? asPose(e.intent.windupPose, "rest") : poseForIntent(e);
   };
   /** Its strike pose spins on into its next stance (Flail Swing): it hands off partway through. */
@@ -1160,11 +1331,12 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return playbackPose(e.id, e.staggered, {
       // A Block winds up from the start of the turn (its windup pose, if it has one, else its stance) and only takes
       // its blocking pose as the blow lands.
-      guard: guarding ? { hold: e.intent.type === "block" && e.intent.windupPose ? asPose(e.intent.windupPose, "block") : poseForIntent(e), react: e.intent.guardPose ? asPose(e.intent.guardPose, "block") : actionPose(e), keepAfterDodge: e.intent.type === "maneuver" } : undefined,
+      guard: guarding ? { hold: e.intent.type === "block" && e.intent.windupPose ? asPose(e.intent.windupPose, "block") : poseForIntent(e), react: e.intent.guardPose ? asPose(e.intent.guardPose, "block") : actionPose(e), keepAfterDodge: e.intent.type === "maneuver", land: e.intent.landPose ? asPose(e.intent.landPose, "idle") : undefined, leapWindup: e.intent.leap && e.intent.windupPose ? asPose(e.intent.windupPose, "idle") : undefined } : undefined,
       telegraph: playback ? restTelegraph(e) : poseForIntent(e),
       // Some (the Warden) attack straight out of whatever stance they're in.
       // (An action it dies doing leaves it lying in its strike pose, its death pose, until it is taken off the field as the turn ends.)
-      down: downPoseOf(e), windUp: kindOf(e).attacksFromStance && e.intent.stance ? poseForIntent(e) : windUpPose(e), strike: strikePose(e),
+      // (An attack with a wind-up pose of its own, `windup`, takes it as it closes in, even one that otherwise attacks out of its stance.)
+      down: downPoseOf(e), windUp: e.intent.type === "attack" && e.intent.windupPose ? asPose(e.intent.windupPose, windUpPose(e)) : kindOf(e).attacksFromStance && e.intent.stance ? poseForIntent(e) : windUpPose(e), strike: strikePose(e),
       idle: e.intent.action && kindOf(e).fatalActions?.includes(e.intent.action) ? strikePose(e) : settledPose(e),
       strikeHandsOff: handsOff(e),
       // Its strike always plays out in full: if it ends up staggered (or down), it still spins on
@@ -1309,6 +1481,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const dodgeFor = (id: string) => {
     const d = dodging[id];
     if (!d || !playback) return undefined;
+    // (a Maneuver's own dash and slide to its new spot: along it to the end of the turn)
+    if (d.reposition || d.leap) return d;
     const repositioning = stepOf("maneuver", id);
     return repositioning >= 0 && playback.index >= repositioning ? undefined : d;
   };
@@ -1499,7 +1673,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         <Scene
           figures={figures} shot={shot} projectiles={projectiles} usurpTrails={usurpTrails} arenaLit={candlesLit}
           arena={fight.enemies.some(e => kindOf(e).arena)}
-          light={light} shade={shade} orbit={orbit}
+          light={light} shade={shade} orbit={orbit} peek={orbit ? undefined : peek}
           onSelectedBox={b => { if (!busy) setAnchor(b); }}
           dark={wakeDark ?? (ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark)}
           ignite={ignite ? { who: ignite.who, start: ignite.start, seed: ignite.seed } : undefined}

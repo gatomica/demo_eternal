@@ -22,6 +22,8 @@ export const REST_POSE_MS = 300;
  * settles into its next stance. It starts instantly: the windup pose only shows before it, while the turn plays.
  */
 export const REST_ANIM_MS = 500;
+/** How long a Rest's second wind-up (its `prep` pose) shows, just before the Rest goes through (ms): its step waits for it. */
+export const PREP_MS = 350;
 
 /**
  * The attack phase of a turn lasts at least this long (from the moment you commit): everything that happens after the

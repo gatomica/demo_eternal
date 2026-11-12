@@ -17,6 +17,7 @@ import { type Hold, type Joint, liftPose, type P3, placeRig, type Seen, swingArc
 import { ALL_POSES, type PoseName } from "./poses";
 import { modelOfWeapon } from "./gear3d";
 import { Prop, WEAPON_REACH } from "./StickFigure";
+import { RIG } from "./rig";
 
 /** The Waxed's bodily thickness, in figure units (a pose's drawing is 100 × 120 units), before perspective. */
 const LIMB = 5, BIND = 10, SHELL = 13;
@@ -27,6 +28,8 @@ export const HEAD_TOP = HEAD_RY;
 
 /** The swings that leave an arch behind: the pose of the strike, and the pose of the wind-up that its right hand swings from. */
 const SWINGS: Partial<Record<PoseName, PoseName>> = { "w-low-strike": "w-low-windup", "w-overhead-strike": "w-overhead-windup" };
+/** The strikes that reach out straight ahead at their middle, the arm fully stretched (their arch passes there): the low attack. */
+const REACHING = new Set<string>(["w-low-strike"]);
 
 /**
  * How the chisel and the hammer are held where it is not simply along the forearm: across the hand in the poses that rear back, out to the side by the flame (clear of the
@@ -102,12 +105,14 @@ function Waxed3DView({ pose, hand = "right", weapon, encased, meldLegs, hideFlam
   // The arch of a strike: from where the right hand was in the wind-up to where it ends, bowing toward the player.
   // With a weapon it arches from the weapon's far end (where the weapon was, to where it is now), not from the hand, and it ends as thick as the weapon's
   // damaging part (the blade, the brick): that is what sweeps through.
+  // (The low attack reached furthest straight ahead halfway through, the arm fully stretched out: its arch passes there.)
   const arc = useMemo(() => {
     if (!windUp) return undefined;
     const before = liftPose(ALL_POSES[windUp], hand);
-    return weapon === "baseline"
-      ? swingArc(before.joints.handR, rig.joints.handR)
-      : swingArc(weaponHold(before, reach, holdOf(windUp), plane).tip, weaponHold(rig, reach, holdOf(pose), plane).tip, model && model.damage * U);
+    const [from, to] = weapon === "baseline" ? [before.joints.handR, rig.joints.handR] : [weaponHold(before, reach, holdOf(windUp), plane).tip, weaponHold(rig, reach, holdOf(pose), plane).tip];
+    const sh = rig.joints.shoulderR, far = (RIG.upperArm + RIG.forearm + (weapon === "baseline" ? 0 : reach)) * U;
+    const mid: P3 | undefined = REACHING.has(pose) ? [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, sh[2] + far] : undefined;
+    return swingArc(from, to, weapon === "baseline" ? undefined : model && model.damage * U, mid);
   }, [windUp, pose, hand, rig, weapon, reach, model, plane]);
   // (A part of the Wax Blob: its legs melt into the pool, never in the far tone.)
   const c = canvas3d(placeRig(rig, at, yaw, cam, w, h, scale), box, { unshaded: key => !!meldLegs && key.startsWith("shell-leg") });

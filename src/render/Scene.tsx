@@ -5,7 +5,7 @@ import { StringAura } from "./StringCounter";
 import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Variant } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
-import { BODY_FORWARD, BODY_RADIUS, orbitBox, orbitCamera, BODY_SIDE_SLOT, type Cam, darkAt, floorDisc, SHADE_RADIUS, ease, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, facingVec, focusOf, NEAR, planningCamera, project, projectPoint, right, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec, yawOf } from "./camera";
+import { BODY_FORWARD, BODY_RADIUS, EYE_HEIGHT, orbitBox, orbitCamera, BODY_SIDE_SLOT, type Cam, darkAt, floorDisc, SHADE_RADIUS, ease, easeOut, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, facingVec, focusOf, NEAR, planningCamera, project, projectPoint, right, type MoveStage, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec, yawOf } from "./camera";
 import { ClangBurst, EternityHalo, FlameHit, HaloBurst, ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
 import type { Pt } from "./geom";
 import { Blood, Shards } from "./HealthBar";
@@ -20,7 +20,7 @@ import { FlameAnchor, HeadFlame } from "./HeadFlame";
 import { HEAD_TOP, Waxed3D } from "./Waxed3D";
 import { Sleepwalker3D } from "./Sleepwalker3D";
 import { Warden3D } from "./Warden3D";
-import { placeWarden, wardenFist, wardenFlame } from "../warden/pose3d";
+import { isWardenPose, placeWarden, wardenFist, wardenFlame, wardenRig } from "../warden/pose3d";
 import { BlobPool, type BlobBox } from "./WaxBlob";
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "../warden/arena";
 import { IGNITE } from "../warden/scenes";
@@ -51,7 +51,18 @@ export interface SceneFigure {
    * It is dodging: the way it goes (a unit vector on the floor), and whether it is backing off. It faces along it (advancing), or away
    * from it (retreating), for as long as this is set; the combat screen sets it from the dodge until the figure starts repositioning.
    */
-  dodge?: { dir: Vec; retreat: boolean };
+  dodge?: {
+    dir: Vec; retreat: boolean;
+    /** Landed, it slides on (`actionPoses`' `slide`): from `turn` degrees to its left of the way its dodge faces, it turns to its right over `ms` (from
+     *  `since`, performance.now()) until it faces as the `to` pose will (facing you). */
+    slide?: { since: number; ms: number; turn: number; to: string; way?: "right" | "near"; from?: string };
+    /** (the combat screen's) This is its Maneuver's own move to its new spot, not a dodge of an attack: it faces along it until the turn is over. */
+    reposition?: boolean;
+    /** (the combat screen's) Its own leap and slide, an Attack's (`leap`): it faces along it until the turn is over. */
+    leap?: boolean;
+    /** Its dash is a jump: off the floor from `since` (performance.now()) for `ms`, rising as high as `height` (meters) halfway, and landing as it ends. */
+    hop?: { since: number; ms: number; height: number };
+  };
   /** It carries a flame of its own (a waxed): phase two's scene draws on it. */
   flame?: boolean;
   arm?: CandleArm;
@@ -118,7 +129,8 @@ const isMirrored = (f: SceneFigure) => f.view === "front" && !f.straight;
 /** The Warden in his second form (its scene, or his candle arm scorched after it): the red flame in his fist, the red light round him. */
 const wardenSecondForm = (f: SceneFigure) => !!f.phase2Look || f.arm === "scorched";
 
-interface Tween<T> { from: T; to: T }
+/** A figure's move to its spot: from where it was, over `ms` from `start`, eased in and out (or, `out`, slowing to a halt). */
+interface Move { from: Vec; to: Vec; start: number; ms: number; out: boolean; endSpeed: number; stages?: MoveStage[] }
 
 /** A repeatable random number in [0, 1) for each index. */
 const rand = (seed: number, i: number) => {
@@ -130,7 +142,7 @@ const rand = (seed: number, i: number) => {
  * Draws the floor and every figure through the camera. When a new shot arrives, everyone (and
  * the camera) moves from wherever they are right now to the new spots, over the shot's duration.
  */
-export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [], arena, arenaLit, ignite, light, shade = true, onSelectedBox, orbit }: {
+export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [], arena, arenaLit, ignite, light, shade = true, onSelectedBox, orbit, peek }: {
   figures: SceneFigure[];
   shot: SceneShot;
   projectiles?: Projectile[];
@@ -158,6 +170,11 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
    * 0 seen from in front) and raises or lowers the camera over it (`pitch`, degrees): `onDrag` is told how far each drag moved, in those degrees.
    */
   orbit?: { yaw: number; pitch: number; focus: "foes" | "player"; onDrag: (yaw: number, pitch: number) => void };
+  /**
+   * (The model viewer, any pose but the Model stance.) Dragging the scene swings the camera round (and over or under) the figures looked at, for as long
+   * as the button is held; let go, and it is back where the fight has it. The figures face as they would; only the camera moves.
+   */
+  peek?: { focus: "foes" | "player" };
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   /** The way each figure faced as its blow began (`SceneFigure.faceToward`), kept for the whole blow. */
@@ -184,27 +201,44 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     fromYaw: "follow" in shot.camera ? shot.camera.yaw : null,
     tracking: "between" in shot.camera,
   });
-  const pos = useRef(new Map<string, Tween<Vec>>());
-  const timing = useRef({ start: 0, ms: 0 });
+  const pos = useRef(new Map<string, Move>());
+  const timing = useRef({ start: 0, ms: 0, out: false });
   const [, setFrame] = useState(0);
   const progress = () => {
     const { start, ms } = timing.current;
     return ms <= 0 ? 1 : Math.min(1, (performance.now() - start) / ms);
   };
-  const posNow = (id: string, k = ease(progress())) => {
-    const t = pos.current.get(id);
-    return t ? lerpVec(t.from, t.to, k) : undefined;
+  /** How far the shot's move has got, eased as it moves. */
+  const eased = () => (timing.current.out ? easeOut : ease)(progress());
+  /** How far a figure's move has got, eased (each figure on its own timing: most on the shot's, `SceneShot.own` on theirs). */
+  const movedOf = (m: Move, at = performance.now()) => {
+    // (in stages: each its share of the way, over its own time, slowing from its start to its end speed)
+    if (m.stages) {
+      let left = at - m.start, done = 0;
+      for (const st of m.stages) {
+        if (left < st.ms) { const t = Math.max(0, left / st.ms); return done + st.share * ((2 - st.endSpeed) * t - (1 - st.endSpeed) * t * t); }
+        left -= st.ms; done += st.share;
+      }
+      return 1;
+    }
+    const t = m.ms <= 0 ? 1 : Math.max(0, Math.min(1, (at - m.start) / m.ms));
+    // (slowing steadily from its start to `endSpeed`, a share of its average speed: at 0 the same as `easeOut`)
+    return m.out ? (2 - m.endSpeed) * t - (1 - m.endSpeed) * t * t : ease(t);
   };
-  const camNow = (k = ease(progress())): Cam => {
+  const posNow = (id: string, at?: number) => {
+    const m = pos.current.get(id);
+    return m ? lerpVec(m.from, m.to, movedOf(m, at)) : undefined;
+  };
+  const camNow = (k = eased()): Cam => {
     const { from, to, fromYaw, tracking } = cam.current;
     if ("between" in to) {
       // Centered between the two wherever they are right now: pushed, knocked back or dodging. (One that is several parts, the Wax Blob, is
       // framed whole: all its parts count, not only the one in the action.)
       const whole = (id: string): Vec[] => {
         const body = figures.find(f => f.id === id)?.body;
-        return (body ? figures.filter(f => f.body === body).map(f => f.id) : [id]).map(i => posNow(i, k)).filter((p): p is Vec => !!p);
+        return (body ? figures.filter(f => f.body === body).map(f => f.id) : [id]).map(i => posNow(i)).filter((p): p is Vec => !!p);
       };
-      const a = posNow(to.between[0], k), b = posNow(to.between[1], k);
+      const a = posNow(to.between[0]), b = posNow(to.between[1]);
       if (!a || !b) return from;
       // (Backing off as far as it takes to show the two whole.)
       const scale = (id: string) => figures.find(f => f.id === id)?.scale ?? 1;
@@ -212,7 +246,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
       return tracking ? centered : lerpCam(from, centered, k);
     }
     if (!("follow" in to)) return lerpCam(from, to, k);
-    const at = posNow(to.follow, k);
+    const at = posNow(to.follow);
     if (!at) return from;
     const riding = planningCamera(at, lerpAngle(fromYaw ?? from.yaw, to.yaw, k));
     // Already riding: stay locked on. Coming from a fixed shot: ease into the ride.
@@ -221,23 +255,28 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
 
   useLayoutEffect(() => {
     // Start every move from where things are on screen right now.
-    const k = ease(progress());
+    const k = eased();
     const prev = cam.current.to;
     const nowCam = camNow(k);
     // Keep riding (and turning from the current angle) if the camera was riding the same figure.
     const stillRiding = "follow" in prev && "follow" in shot.camera && prev.follow === shot.camera.follow;
     const fromYaw = stillRiding && "follow" in prev ? lerpAngle(cam.current.fromYaw ?? prev.yaw, prev.yaw, k) : null;
     const tracking = "between" in prev && "between" in shot.camera && prev.between[0] === shot.camera.between[0] && prev.between[1] === shot.camera.between[1];
+    const now = performance.now();
     for (const [id, to] of Object.entries(shot.positions)) {
-      const t = pos.current.get(id);
-      pos.current.set(id, { from: t && !shot.snap?.includes(id) ? lerpVec(t.from, t.to, k) : to, to });
+      const own = shot.own?.[id], start = own?.since ?? now, was = pos.current.has(id) && !shot.snap?.includes(id) ? posNow(id, start) : undefined;
+      // (one still on its way to the same spot, on its own move, keeps going as it was: a knockback's shot does not cut short a leap past it)
+      const going = pos.current.get(id);
+      if (!own && going && !shot.snap?.includes(id) && (going.stages || going.out) && Math.hypot(going.to.x - to.x, going.to.z - to.z) < 1e-6 && now - going.start < going.ms) continue;
+      pos.current.set(id, { from: was ?? to, to, start, ms: own?.ms ?? shot.ms, out: own ? own.easing === "out" : shot.easing === "out", endSpeed: own?.endSpeed ?? 0, stages: own?.stages });
     }
     cam.current = { from: nowCam, to: shot.camera, fromYaw, tracking };
-    timing.current = { start: performance.now(), ms: shot.ms };
+    timing.current = { start: performance.now(), ms: shot.ms, out: shot.easing === "out" };
     let raf = 0;
     const tick = () => {
       setFrame(f => f + 1);
-      if (progress() < 1) raf = requestAnimationFrame(tick);
+      const moving = [...pos.current.values()].some(m => m.ms > 0 && performance.now() - m.start < m.ms);
+      if (progress() < 1 || moving) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -268,13 +307,29 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     const big = Math.max(1, ...orbitFigures.map(f => f.scale ?? 1)), spread = Math.max(0, ...ps.map(p => Math.hypot(p.x - centre.x, p.z - centre.z)));
     return orbitCamera(centre, orbit!.pitch, 0.95 * big, (3.2 + spread * 1.2) * big);
   };
-  const c = orbit ? orbiting() : camNow();
+  // A peek (`peek`): while the button is held, the fight's camera swung round the figures looked at, about a point a meter up among them, and raised
+  // or lowered round it, tilting to keep looking at it.
+  const [peekView, setPeekView] = useState<{ yaw: number; pitch: number } | null>(null);
+  const peeking = !orbit && !!peek && !!peekView;
+  const peekAt = (c0: Cam, v: { yaw: number; pitch: number }): Cam => {
+    const them = figures.filter(f => (peek!.focus === "player" ? f.id === "player" : f.id !== "player")).map(f => posNow(f.id)).filter((p): p is Vec => !!p);
+    if (!them.length) return c0;
+    const P = { x: them.reduce((n, p) => n + p.x, 0) / them.length, z: them.reduce((n, p) => n + p.z, 0) / them.length }, H = 1;
+    const a = (v.yaw * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+    const x0 = c0.x - P.x, z0 = c0.z - P.z, y = (c0.eye ?? EYE_HEIGHT) - H;
+    const x1 = x0 * ca + z0 * sa, z1 = z0 * ca - x0 * sa, flat = Math.hypot(x1, z1) || 1e-6, len = Math.hypot(flat, y);
+    const rise = Math.atan2(y, flat), to = Math.max(-1.05, Math.min(1.48, rise + (v.pitch * Math.PI) / 180)), k = (len * Math.cos(to)) / flat;
+    return { x: P.x + x1 * k, z: P.z + z1 * k, yaw: c0.yaw + a, look: c0.look, eye: H + len * Math.sin(to), pitch: (c0.pitch ?? 0) + (to - rise) };
+  };
+  // (The figures face as the fight's own camera has them: `cFight`.)
+  const cFight = orbit ? orbiting() : camNow();
+  const c = peeking ? peekAt(cFight, peekView!) : cFight;
   const orbitDrag = useRef<{ x: number; y: number } | null>(null);
   let placed = figures
     .filter(f => !orbit || orbitFigures.includes(f))
     .map(f => {
       const p = posNow(f.id);
-      return p && w ? { f, box: orbit ? orbitBox(c, p, w, h, f.scale) : figureBox(c, p, w, h, f.scale), at: p, raw: p } : null;
+      return p && w ? { f, box: orbit || peeking ? orbitBox(c, p, w, h, f.scale) : figureBox(c, p, w, h, f.scale), at: p, raw: p } : null;
     })
     .filter((x): x is { f: SceneFigure; box: ReturnType<typeof figureBox>; at: Vec; raw: Vec } => !!x && x.box.depth > NEAR)
     .sort((a, b) => b.box.depth - a.box.depth); // far first, so nearer figures draw on top
@@ -296,11 +351,31 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     const me = focusOf(c);
     return ambient * (1 - darkAt(Math.hypot(p.x - me.x, p.z - me.z)));
   };
+  /** How high a figure is off the floor now (meters): mid-jump, in a dodge's dash that is a jump (`dodge.hop`), as a thrown thing flies, up and down again. */
+  const riseOf = (f: SceneFigure) => {
+    const hop = f.dodge?.hop;
+    if (!hop || hop.ms <= 0) return 0;
+    const t = (performance.now() - hop.since) / hop.ms;
+    return t <= 0 || t >= 1 ? 0 : 4 * hop.height * t * (1 - t);
+  };
   /** The way a figure faces on the floor: along its dodge, else toward the player. */
   const figureYaw = (f: SceneFigure, at: Vec) => {
     // Orbiting: every figure is turned the same, `orbit.yaw` round from facing the camera.
     if (orbit) return Math.PI - (orbit.yaw * Math.PI) / 180;
-    if (dodgeFacing(f)) return yawOf(dodgeFacing(f)!);
+    const dodgeWay = dodgeFacing(f);
+    if (dodgeWay) {
+      const base = yawOf(dodgeWay), s = f.dodge?.slide;
+      if (!s) return base;
+      // Sliding on after its dodge: from a little to its left of the way it dodged, turning to its right, slowing as the slide does, to face as its next
+      // stance will (toward you, turned as that pose turns its hips, less what the pose it lands in turns them already).
+      const t = s.ms > 0 ? Math.max(0, Math.min(1, (performance.now() - s.since) / s.ms)) : 1;
+      const hips = (p: string) => (isWardenPose(p) ? wardenRig(p).yaw : 0), TAU = Math.PI * 2;
+      // (`from`: the pose it was in before it landed, if not this one: it turns on from where that pose had it facing, with no jump as the pose changes)
+      const from = base - (s.turn * Math.PI) / 180 + (s.from ? hips(s.from) - hips(f.pose) : 0), to = facingYaw(cFight, at, posNow("player"), f.view, false) + hips(s.to) - hips(f.pose);
+      // (to its right, or, `near`, whichever way round is shorter)
+      const right = (((to - from) % TAU) + TAU) % TAU, turn = s.way === "near" && right > Math.PI ? right - TAU : right;
+      return from + turn * easeOut(t);
+    }
     if (!f.faceToward) {
       // No blow now. One that defeated its target is still faced: for the rest of the turn it fell in (the others being attacked meanwhile do not turn you away from it),
       // and, once none is left up, after the fight is won too (you do not turn to the default way, or to where another lies). Otherwise nothing is held.
@@ -312,7 +387,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
       // (worked out the first time it is asked in a blow, from where the two stand then, and held until the blow is over)
       if (faceLock.current.get(f.id)?.key !== f.faceToward.key) {
         const me = posNow(f.id), foe = posNow(f.faceToward.id);
-        if (me && foe) faceLock.current.set(f.id, { key: f.faceToward.key, yaw: facingYaw(c, me, foe, f.player3d ? "front" : f.view, false), target: f.faceToward.id });
+        if (me && foe) faceLock.current.set(f.id, { key: f.faceToward.key, yaw: facingYaw(cFight, me, foe, f.player3d ? "front" : f.view, false), target: f.faceToward.id });
         else faceLock.current.delete(f.id);
       }
       const held = faceLock.current.get(f.id);
@@ -323,9 +398,15 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     if (f.player3d && !f.straight) {
       const all = figures.filter(g => g.id !== "player"), up = all.filter(g => !g.dead || g.fellThisTurn);
       const foes = (up.length ? up : all).map(g => posNow(g.id)).filter((p): p is Vec => !!p);
-      if (foes.length) return facingYaw(c, at, { x: foes.reduce((n, p) => n + p.x, 0) / foes.length, z: foes.reduce((n, p) => n + p.z, 0) / foes.length }, "front", false);
+      if (foes.length) return facingYaw(cFight, at, { x: foes.reduce((n, p) => n + p.x, 0) / foes.length, z: foes.reduce((n, p) => n + p.z, 0) / foes.length }, "front", false);
     }
-    return facingYaw(c, at, posNow("player"), f.view, !!f.straight);
+    return facingYaw(cFight, at, posNow("player"), f.view, !!f.straight);
+  };
+  /** Where on the floor the Warden's blow lands (his flail's head for the Slam, else his candle fist: `wardenFist`), from his 3D rig, standing at `at`. */
+  const wardenFloorAt = (f: SceneFigure, at: Vec): Vec => {
+    const { wr } = placeWarden(f.pose, at, figureYaw(f, at), c, w, h, f.scale), p = wardenFist(f.pose), yaw = figureYaw(f, at) + wr.yaw, k = f.scale ?? 1;
+    const fwd = facingVec(yaw), rgt = right(yaw);
+    return { x: at.x + (rgt.x * p[0] + fwd.x * p[2]) * k, z: at.z + (rgt.z * p[0] + fwd.z * p[2]) * k };
   };
   /** The floor point under a screen x on a figure standing at `at` (its feet's depth). */
   const floorAt = (at: Vec, sx: number): Vec => {
@@ -376,7 +457,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     const pose = ALL_POSES[f.pose];
     // The Warden drawn in 3D: the flame on his candle hand, where it really is (at the fist's tip; in his second form, in the middle of it).
     if (f.warden3d && w > 0) {
-      const { wr, placed: wp } = placeWarden(f.pose, at, figureYaw(f, at), c, w, h, f.scale), q = wp.see(wardenFlame(wr, wardenSecondForm(f)));
+      const { wr, placed: wp } = placeWarden(f.pose, at, figureYaw(f, at), c, w, h, f.scale, riseOf(f)), q = wp.see(wardenFlame(wr, wardenSecondForm(f)));
       return [q.sx, q.sy];
     }
     if (f.variant !== "waxed" || w <= 0 || !pose) {
@@ -395,7 +476,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   /** Where a blow of his lands from, on the screen: the fist (or flail's head) from his 3D rig, else the flat drawing's point (box units, mirrored with it). */
   const originOf = (t: { f: SceneFigure; at: Vec }, a: { x: number; y: number; w: number; h: number }, o?: readonly [number, number]): [number, number] => {
     if (t.f.warden3d && w > 0 && o) {
-      const q = placeWarden(t.f.pose, t.at, figureYaw(t.f, t.at), c, w, h, t.f.scale).placed.see(wardenFist(t.f.pose));
+      const q = placeWarden(t.f.pose, t.at, figureYaw(t.f, t.at), c, w, h, t.f.scale, riseOf(t.f)).placed.see(wardenFist(t.f.pose));
       return [q.sx, q.sy];
     }
     const ox = o ? (isMirrored(t.f) ? 100 - o[0] : o[0]) / 100 : 0.5;
@@ -473,7 +554,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     const { f, box, at } = selectedItem, pose = ALL_POSES[f.pose];
     if (!pose) return box.y + box.h * 0.5;
     if (f.warden3d && !f.dead && w > 0) {
-      const { wr, placed: wp } = placeWarden(f.pose, at, figureYaw(f, at), c, w, h, f.scale), j = wr.rig.joints;
+      const { wr, placed: wp } = placeWarden(f.pose, at, figureYaw(f, at), c, w, h, f.scale, riseOf(f)), j = wr.rig.joints;
       return wp.see([0, 1, 2].map(i => j.neck[i] + (j.pelvis[i] - j.neck[i]) * 0.3) as unknown as P3).sy;
     }
     if ((f.variant === "waxed" || f.sleepwalker3d || f.player3d) && !f.dead && w > 0) {
@@ -495,17 +576,28 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     <div
       className="scene"
       ref={boxRef}
-      style={orbit ? { cursor: "grab", touchAction: "none" } : undefined}
-      onPointerDown={orbit ? e => { orbitDrag.current = { x: e.clientX, y: e.clientY }; e.currentTarget.setPointerCapture(e.pointerId); } : undefined}
-      onPointerMove={orbit ? e => {
+      style={orbit || peek ? { cursor: peeking ? "grabbing" : "grab", touchAction: "none" } : undefined}
+      onPointerDown={orbit || peek ? e => {
+        orbitDrag.current = { x: e.clientX, y: e.clientY };
+        // (a peek starts only once it is dragged, so a plain click is still a click)
+        if (orbit) e.currentTarget.setPointerCapture(e.pointerId);
+      } : undefined}
+      onPointerMove={orbit || peek ? e => {
         const from = orbitDrag.current;
         if (!from) return;
         // (How far it moved is worked out here, not in the update: React runs that later, when the drag may be over.)
-        orbit.onDrag((e.clientX - from.x) * 0.5, (e.clientY - from.y) * 0.5);
+        const dy = (e.clientX - from.x) * 0.5, dp = (e.clientY - from.y) * 0.5;
+        if (orbit) orbit.onDrag(dy, dp);
+        else {
+          if (!peekView && Math.hypot(dy, dp) < 2) return;
+          if (!peekView) e.currentTarget.setPointerCapture(e.pointerId);
+          setPeekView(v => ({ yaw: ((v?.yaw ?? 0) + dy) % 360, pitch: Math.max(-60, Math.min(85, (v?.pitch ?? 0) + dp)) }));
+        }
         orbitDrag.current = { x: e.clientX, y: e.clientY };
       } : undefined}
-      onPointerUp={orbit ? () => { orbitDrag.current = null; } : undefined}
-      onPointerCancel={orbit ? () => { orbitDrag.current = null; } : undefined}
+      // (let go: a peek snaps back to the fight's camera)
+      onPointerUp={orbit || peek ? () => { orbitDrag.current = null; setPeekView(null); } : undefined}
+      onPointerCancel={orbit || peek ? () => { orbitDrag.current = null; setPeekView(null); } : undefined}
     >
       {/* A clean hit's red flash (`hit-red` in index.css): the figure's brightness mapped straight onto red, a plain linear map, so the 3D figures'
           shading and the seams between their faces stay as smooth as they are (a saturate() filter multiplies every small difference into speckle). */}
@@ -517,8 +609,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         </defs>
       </svg>
       {/* (An orbiting camera has no horizon to draw the floor by: only the shade under each figure marks it.) */}
-      {!orbit && <div className="scene-floor" style={{ top: `${HORIZON * 100}%` }} />}
-      {w > 0 && !orbit && <FloorGrid cam={c} w={w} h={h} />}
+      {!orbit && !peeking && <div className="scene-floor" style={{ top: `${HORIZON * 100}%` }} />}
+      {w > 0 && !orbit && !peeking && <FloorGrid cam={c} w={w} h={h} />}
       {/* The ambient shade over the sky, the floor and its lines (the figures are shaded one by one, below). */}
       {ambient < 1 && <div className="scene-shade" style={{ background: `rgba(0, 0, 0, ${(1 - ambient).toFixed(3)})` }} />}
       {props.map(({ pr, box }) => (
@@ -557,7 +649,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         >
           {f.holdsString && !f.dead && <StringAura layer="back" spread={f.body ? 2.4 : 1} />}
           <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" && !((f.sleepwalker3d || f.player3d) && w > 0) ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.warden3d && w > 0 ? <Warden3D pose={f.pose} arm={f.arm} phase2Look={f.phase2Look} flailFire={f.flailFire} dead={!!f.dead} charred={f.charred} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : (f.sleepwalker3d || f.player3d) && w > 0 ? <Sleepwalker3D pose={f.pose} hand={f.hand} weapon={f.weapon} gear={f.player3d ? { weaponItem: f.weaponItem, armor: f.armor, armorItem: f.armorItem, headItem: f.headItem } : undefined} hooded={f.hooded} encased={f.encased} waxCaked={f.waxCaked && !f.dead} dead={!!f.dead} eternalFlash={f.eternalFlash} swayId={f.id} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
+            {f.dead === "pieces" && !((f.sleepwalker3d || f.player3d) && w > 0) ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.warden3d && w > 0 ? <Warden3D pose={f.pose} lingerFrom={f.lingerFrom} arm={f.arm} phase2Look={f.phase2Look} flailFire={f.flailFire} dead={!!f.dead} charred={f.charred} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} rise={riseOf(f)} w={w} h={h} box={box} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : (f.sleepwalker3d || f.player3d) && w > 0 ? <Sleepwalker3D pose={f.pose} hand={f.hand} weapon={f.weapon} gear={f.player3d ? { weaponItem: f.weaponItem, armor: f.armor, armorItem: f.armorItem, headItem: f.headItem } : undefined} hooded={f.hooded} encased={f.encased} waxCaked={f.waxCaked && !f.dead} dead={!!f.dead} eternalFlash={f.eternalFlash} swayId={f.id} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {headFlames.has(f.id) && <FlameAnchor id={f.id} x={headFlames.get(f.id)![0] - box.x} y={headFlames.get(f.id)![1] - box.y} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}
@@ -596,7 +688,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         const red = wardenSecondForm(f), [x, y] = flameSpot(f, box, at), size = box.w * (red ? 2.1 : 1.3);
         return <div key={`flame-light-${f.id}`} className={`flame-light${red ? " is-warden-red" : ""}`} style={{ left: x - size / 2, top: y - size / 2, width: size, height: size }} />;
       })}
-      {light && !orbit && w > 0 && <LightFall cam={c} center={focusOf(c)} w={w} h={h} />}
+      {light && !orbit && !peeking && w > 0 && <LightFall cam={c} center={focusOf(c)} w={w} h={h} />}
       {dark && <div className="scene-dark" style={{ opacity: dark.level, transition: `opacity ${dark.ms}ms ease-in` }} />}
       {dark?.flame && (() => {
         const t = placed.find(x => x.f.id === dark.flame);
@@ -724,7 +816,8 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
               {(() => {
                 const A = posNow(pr.from), B = posNow(pr.to);
                 if (!A || !B) return null;
-                const at = floorAt(A, ax);
+                // (from where the blow really lands on the floor: the Warden's flail's head or fist, from his 3D rig; else under it on the screen)
+                const at = thrower!.f.warden3d && w > 0 ? wardenFloorAt(thrower!.f, A) : floorAt(A, ax);
                 // A flaming flail's burns, as big as a Flame Blast's: out through the target, with flames as tall.
                 return pr.fiery
                   ? <Shockwave center={at} reach={Math.hypot(B.x - at.x, B.z - at.z) * 1.25} toward={Math.atan2(B.z - at.z, B.x - at.x)} flame={1.4} proj={proj} />

@@ -117,7 +117,7 @@ export type WardenPoseName =
   | "wd-idle" | "wd-shoulder" | "wd-arm-back" | "wd-arm-chest" | "wd-clutch-flail"
   | "wd-spin-behind" | "wd-spin-over" | "wd-kneel"
   | "wd-swing" | "wd-rising" | "wd-slam" | "wd-punch" | "wd-fan" | "wd-blast"
-  | "wd-chain-guard" | "wd-wax-guard" | "wd-stride" | "wd-turn-away" | "wd-usurp" | "wd-clutch-arm" | "wd-fallen"
+  | "wd-chain-guard" | "wd-wax-guard" | "wd-stride" | "wd-turn-away" | "wd-dodge-land" | "wd-swing-windup" | "wd-spin-land" | "wd-kneel-windup" | "wd-usurp" | "wd-clutch-arm" | "wd-fallen"
   | "wd-wound-up" | "wd-wax-swat" | "wd-usurp-dash" | "wd-flinch"
   | "wd-chain-ready" | "wd-wax-ready" | "wd-winding-up" | "wd-clutch-ready"
   | "wd-t" | "wd-t-b";
@@ -152,6 +152,7 @@ export const RAW_WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     // The wax arm bent, its elbow pointing at you (foreshortened): a short forearm tucked in
     // under his head, its flame (or smoke) still showing beside the hood.
     { elbow: [71, 55], hand: [66, 50] },
+    // (the 3D figure holds the flail its own way, up over her head: `WARDEN_STANCE`)
     { handle: 238, shoulderAtRip: true, armBehindHead: true, turn: 1, spinTrail: true, trailEndsAt: "wd-spin-behind" },
   ),
   // Wax Arm Back: turned flail shoulder first, hunched low and leaning back, his weight sunk
@@ -183,6 +184,14 @@ export const RAW_WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     { elbow: [29, 37], hand: [18, 41] },
     { turn: -1, handle: 155, faceBack: true, faceFront: 0.6, tilt: 22, chainInHand: true, headBehindArm: true },
   ),
+  // Flail Swing's wind-up: flat, Flail Clutched's sprite exactly. The 3D figure draws Flail Clutched (`pose3d`), lower and wound further round to her left
+  // (`WARDEN_STANCE`).
+  "wd-swing-windup": pose(
+    { head: [40, 38], neck: [44, 48], hip: [49, 77], ...legs([64, 96], [77, 114], [20, 95], [37, 114]) },
+    { elbow: [58, 63], hand: [57, 78], ball: [0, 0] },
+    { elbow: [29, 37], hand: [18, 41] },
+    { turn: -1, handle: 155, faceBack: true, faceFront: 0.6, tilt: 22, chainInHand: true, headBehindArm: true, pose3d: "wd-clutch-flail" },
+  ),
   // Flail Spinning Behind: like Wind Up Flail's rest pose but hunched even lower, the wax arm
   // bent with its elbow toward you, the flail whirling in a circle behind him.
   "wd-spin-behind": pose(
@@ -190,6 +199,14 @@ export const RAW_WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     { elbow: [36, 63], hand: [25, 71], ball: [0, 96] },
     { elbow: [73, 61], hand: [68, 56] },
     { handle: 172, shoulderAtRip: true, armBehindHead: true, turn: 1, spin: "behind" },
+  ),
+  // Wind Up Flail lands: Flail Spinning Behind exactly (flat, its sprite; in 3D, its body, `pose3d`), with the trail of the flail coming down from over her
+  // head into the whirl (`WARDEN_STANCE`).
+  "wd-spin-land": pose(
+    { head: [58, 34], neck: [54, 45], hip: [47, 75], ...legs([60, 95], [67, 114], [38, 97], [31, 114]) },
+    { elbow: [36, 63], hand: [25, 71], ball: [0, 96] },
+    { elbow: [73, 61], hand: [68, 56] },
+    { handle: 172, shoulderAtRip: true, armBehindHead: true, turn: 1, spin: "behind", pose3d: "wd-spin-behind" },
   ),
   // Flail Spinning Overhead: the flail arm raised, the handle pointing up and away from you, the
   // flail whirling level above him (a blur of chains, like Flail Spinning Behind).
@@ -208,6 +225,13 @@ export const RAW_WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     { elbow: [42, 72], hand: [45, 88] },
     { handle: 35, chainInHand: true, kneeUnderCloak: true },
   ),
+  // Wind Up Flail from Kneeling: flat, Kneeling's sprite exactly; the 3D figure draws Kneeling (`pose3d`), half risen from the floor (`WARDEN_STANCE`).
+  "wd-kneel-windup": pose(
+    { head: [58, 46], neck: [55, 57], hip: [48, 84], ...legs([66, 88], [68, 114], [42, 112], [26, 114]) },
+    { elbow: [47, 50], hand: [55.7, 55.4], ball: [0, 0] },
+    { elbow: [42, 72], hand: [45, 88] },
+    { handle: 35, chainInHand: true, kneeUnderCloak: true, pose3d: "wd-kneel" },
+  ),
 
   /* ---------- Actions ---------- */
   // Flail Swing lands: Wind Up Flail's pose, but its first spin is the blow, sweeping level across
@@ -216,7 +240,8 @@ export const RAW_WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     { head: [55, 28], neck: [52, 39], hip: [47, 71], ...legs([59, 93], [66, 114], [40, 94], [33, 114]) },
     { elbow: [38, 52], hand: [29, 53], ball: [12, 130] },
     { elbow: [71, 55], hand: [66, 50] },
-    { handle: 238, shoulderAtRip: true, armBehindHead: true, turn: 1, spinTrail: true, swingTrail: true, trailEndsAt: "wd-spin-behind" },
+    // (the 3D figure draws Idle's body instead, posed as Turn Away turned to face you: `pose3d`, `WARDEN_STANCE`)
+    { handle: 238, shoulderAtRip: true, armBehindHead: true, turn: 1, spinTrail: true, swingTrail: true, trailEndsAt: "wd-spin-behind", pose3d: "wd-idle" },
   ),
   // Rising Flail lands: Flail Spinning Overhead's pose, hips and legs seen almost from the front,
   // but the shoulders twisted round, flail shoulder forward and the wax one back; the flail arm
@@ -281,7 +306,8 @@ export const RAW_WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     { head: [56, 25], neck: [54, 36], hip: [49, 68], ...legs([63, 90], [71, 114], [40, 92], [29, 114]) },
     { elbow: [52, 24], hand: [64, 17], ball: [0, 0] },
     { elbow: [45, 57], hand: [53, 60] },
-    { handle: 39, chainInHand: true, chainTaut: true, turn: 1 },
+    // (the 3D figure draws Flail Spinning Behind's body instead, the flail whirling between her and you: `pose3d`, `WARDEN_STANCE`)
+    { handle: 39, chainInHand: true, chainTaut: true, turn: 1, pose3d: "wd-spin-behind" },
   ),
   // Wax Guard: the wax forearm raised upright before his mask.
   "wd-wax-guard": pose(
@@ -297,7 +323,8 @@ export const RAW_WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     { head: [56, 25], neck: [54, 36], hip: [49, 68], ...legs([63, 90], [71, 114], [40, 92], [29, 114]) },
     { elbow: [54, 50], hand: [62, 44], ball: [76, 86] },
     { elbow: [45, 57], hand: [52, 66] },
-    { handle: 70, turn: 1, chainInHand: true, headBehindArm: true },
+    // (the 3D figure draws Flail Spinning Behind's body instead, the flail whirling before her: `pose3d`, `WARDEN_STANCE`)
+    { handle: 70, turn: 1, chainInHand: true, headBehindArm: true, pose3d: "wd-spin-behind" },
   ),
   // Wax Guard's windup: Wax Guard's body, the wax forearm just starting to come up, angled out
   // from his side (it ends upright before his mask).
@@ -313,7 +340,8 @@ export const RAW_WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     { head: [53, 26], neck: [51, 37], hip: [48, 68], ...legs([58, 92], [64, 114], [41, 92], [35, 114]) },
     { elbow: [42, 54], hand: [33, 60], ball: [14, 112] },
     { elbow: [68, 52], hand: [64, 44] },
-    { handle: 215, shoulderAtRip: true, armBehindHead: true, turn: 1 },
+    // (the 3D figure draws Idle's body instead, beginning to turn: `pose3d`, `WARDEN_STANCE`)
+    { handle: 215, shoulderAtRip: true, armBehindHead: true, turn: 1, pose3d: "wd-idle" },
   ),
   // Clutch Arm's windup: standing a little hunched, the flail arm drawn up with the handle held out
   // before him and the flail hanging, the wax hand reaching across toward it.
@@ -340,6 +368,14 @@ export const RAW_WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     { elbow: [17, 56], hand: [33, 52], ball: [97, 57] },
     { elbow: [49, 64], hand: [61, 68] },
     { turn: -1, faceBack: true, backView: true, handle: 2, flailForearmBehind: true, pose3d: "wd-idle" },
+  ),
+  // Dodge Lands: where Turn Away's dodge comes down. Flat, Stride's sprite (as Turn Away's). The 3D figure draws Flail Clutched instead (`pose3d`), standing
+  // higher and turned to give you her back (`WARDEN_STANCE`).
+  "wd-dodge-land": pose(
+    { head: [23, 47], neck: [30, 57], hip: [45, 84], ...legs([33, 100], [44, 114], [61, 100], [77, 110]) },
+    { elbow: [17, 56], hand: [33, 52], ball: [97, 57] },
+    { elbow: [49, 64], hand: [61, 68] },
+    { turn: -1, faceBack: true, backView: true, handle: 2, flailForearmBehind: true, pose3d: "wd-clutch-flail" },
   ),
   // Usurp Flame, before he springs: Wax Arm Back, crouched even lower, the wax arm drawn back
   // below his shoulder, looking at the flame he's after.
@@ -506,8 +542,11 @@ const WARDEN_ADJUST: Partial<Record<WardenPoseName, BoneAdjust>> = {
   "wd-arm-back": { torso: 0.92, leadShin: 0.906, rearThigh: 1.393, rearShin: 1.041, weaponUpper: 1.116, weaponFore: 1.074, freeUpper: 1.163, freeFore: 0.576 },
   "wd-arm-chest": { torso: 0.977, leadShin: 0.953, rearThigh: 0.961, rearShin: 0.953, weaponUpper: 0.863, weaponFore: 0.714, freeUpper: 1.374, freeFore: 1.418 },
   "wd-clutch-flail": { torso: 0.92, leadShin: 0.906, rearThigh: 1.393, rearShin: 1.041, weaponUpper: 1.116, weaponFore: 1.074, freeUpper: 1.264, freeFore: 0.836 },
+  "wd-swing-windup": { torso: 0.92, leadShin: 0.906, rearThigh: 1.393, rearShin: 1.041, weaponUpper: 1.116, weaponFore: 1.074, freeUpper: 1.264, freeFore: 0.836 },
+  "wd-spin-land": { torso: 0.963, leadThigh: 0.974, leadShin: 0.826, rearThigh: 0.97, rearShin: 0.75, weaponUpper: 1.429, weaponFore: 0.972, freeUpper: 1.427, freeFore: 0.505 },
   "wd-spin-behind": { torso: 0.963, leadThigh: 0.974, leadShin: 0.826, rearThigh: 0.97, rearShin: 0.75, weaponUpper: 1.429, weaponFore: 0.972, freeUpper: 1.427, freeFore: 0.505 },
   "wd-spin-over": { torso: 1.063, weaponFore: 0.884, freeUpper: 0.773, freeFore: 0.769 },
+  "wd-kneel-windup": { torso: 0.872, leadThigh: 0.753, leadShin: 1.064, rearThigh: 1.169, rearShin: 0.658, weaponUpper: 1.015, weaponFore: 0.731, freeUpper: 1.062, freeFore: 1.163 },
   "wd-kneel": { torso: 0.872, leadThigh: 0.753, leadShin: 1.064, rearThigh: 1.169, rearShin: 0.658, weaponUpper: 1.015, weaponFore: 0.731, freeUpper: 1.062, freeFore: 1.163 },
   "wd-swing": { torso: 1.012, leadThigh: 1.023, leadShin: 0.904, rearThigh: 0.981, rearShin: 0.865, weaponUpper: 0.972, weaponFore: 0.647, freeUpper: 1.397, freeFore: 0.505 },
   "wd-rising": { torso: 1.07, leadShin: 0.931, rearThigh: 1.167, rearShin: 0.891, freeUpper: 1.03, freeFore: 0.769 },
@@ -519,6 +558,7 @@ const WARDEN_ADJUST: Partial<Record<WardenPoseName, BoneAdjust>> = {
   "wd-chain-guard": { torso: 1.012, leadThigh: 1.064, leadShin: 1.033, rearThigh: 1.046, weaponUpper: 1.04, freeUpper: 1.674, freeFore: 0.61 },
   "wd-wax-guard": { torso: 1.031, leadThigh: 1.061, leadShin: 0.921, rearThigh: 1.046, rearShin: 0.921, weaponUpper: 1.172, weaponFore: 0.904, freeUpper: 1.329, freeFore: 1.857 },
   "wd-turn-away": { torso: 0.965, leadThigh: 0.816, leadShin: 0.727, rearThigh: 0.924, rearShin: 0.77, weaponUpper: 0.742, weaponFore: 1.178, freeUpper: 1.1, freeFore: 0.904 },
+  "wd-dodge-land": { torso: 0.965, leadThigh: 0.816, leadShin: 0.727, rearThigh: 0.924, rearShin: 0.77, weaponUpper: 0.742, weaponFore: 1.178, freeUpper: 1.1, freeFore: 0.904 },
   "wd-stride": { torso: 0.965, leadThigh: 0.816, leadShin: 0.727, rearThigh: 0.924, rearShin: 0.77, weaponUpper: 0.742, weaponFore: 1.178, freeUpper: 1.1, freeFore: 0.904 },
   "wd-usurp": { torso: 0.895, leadThigh: 0.925, leadShin: 0.78, rearThigh: 1.407, rearShin: 0.883, weaponUpper: 1.129, weaponFore: 1.074, freeUpper: 0.961, freeFore: 0.678 },
   "wd-flinch": { torso: 1.022, leadThigh: 1.098, leadShin: 0.879, rearThigh: 0.902, rearShin: 0.84, weaponUpper: 0.833, weaponFore: 0.958, freeUpper: 0.869, freeFore: 1.03 },

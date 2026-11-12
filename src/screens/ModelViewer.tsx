@@ -275,6 +275,19 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
                       </button>,
                     ]
                   : []),
+                // A Maneuver can also be played with no attack to dodge: it only repositions, to see how it moves to its new spot.
+                ...(a.type === "maneuver" && !fixed
+                  ? [
+                      <button
+                        key={`${a.name}-reposition`}
+                        className={`chip viewer-action${available ? "" : " viewer-unmet"}`}
+                        title={`Play ${a.name} with nothing attacking it: it dodges nothing, and only moves to its new spot`}
+                        onClick={e => { e.currentTarget.blur(); play(i, a.name, false, true); }}
+                      >
+                        ○ Reposition <span className="viewer-kind">{a.name} dodges nothing</span>
+                      </button>,
+                    ]
+                  : []),
                 // A Rest can also be broken by a blow, to see the flinch.
                 ...(a.type === "rest" && !fixed && part.stance !== STAGGERED
                   ? [
@@ -358,6 +371,7 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
       attackOnPlay={!!show.interrupt}
       restOnPlay={!!show.whiff}
       orbit={anyModel ? orbit : undefined}
+      peek={{ focus: "foes" }}
       onTurnPlayed={afterTurn}
       onRetry={onRetry}
       onChangeLoadout={onBack}
@@ -454,6 +468,7 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
       playerHold={model ? "t-pose" : held === "dead" ? undefined : held}
       playerDead={held === "dead"}
       orbit={model ? orbit : undefined}
+      peek={{ focus: "player" }}
       onRetry={onRetry}
       onChangeLoadout={onBack}
       changeLabel="Change model"

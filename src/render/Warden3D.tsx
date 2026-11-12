@@ -8,16 +8,16 @@
  *
  * The robe was removed from this drawing (it is to be modelled again, in parts, from scratch); only the fallen heap (`dead`) still draws a cloak.
  */
-import { memo, type ReactNode, useContext, useId } from "react";
+import { memo, type ReactNode, useContext, useEffect, useId, useState } from "react";
 import { type Cam, METERS_PER_UNIT as U, type Vec } from "./camera";
 import { DebugLimbsContext } from "./debugLimbs";
 import { visibleCap } from "./hoodCap";
-import { canvas3d, ellipsoidPart, Figure3DSvg, sameDrawing } from "./figure3d";
+import { canvas3d, ellipsoidPart, Figure3DSvg, sameDrawing, trailPart } from "./figure3d";
 import type { PoseName } from "./poses";
-import { type P3, ribcageOf } from "./rig3d";
-import { FlailFire, type CandleArm } from "../warden/skeleton";
+import { type P3, ribcageOf, swingArc } from "./rig3d";
+import { FlailFire, type CandleArm, WARDEN_POSES, type WardenPoseName } from "../warden/skeleton";
 import { LittleFlame, LittleKnot } from "./LittleFlame";
-import { CANDLE_FIST, FLAIL_CHAIN, flail3, placeWarden, wardenFlame } from "../warden/pose3d";
+import { CANDLE_FIST, FLAIL_CHAIN, flail3, isWardenPose, PELVIS_MIDDLE, PELVIS_TOP_HEIGHT, placeWarden, SPINE_IN, WARDEN_STANCE, wardenFlame, wardenRig } from "../warden/pose3d";
 
 /** His hood's round and the thickness of his limbs (figure units, before perspective). */
 /** The hood's opening: its hem, pulled down over his eyes, hangs this far below where he looks at the front (radians) and this far below the level of his head at the back of his neck; his face's size and its two eyes (how far either side of where he looks, radians, and their size). */
@@ -26,7 +26,7 @@ const BROW = 0.05, NAPE = 1.2, HEAD_R = 7.5, EYE_APART = 0.42, EYE_R = 1.8, BEAK
 const RIB_TILT = 0.587, RIB_DEPTH = 1.3, RIB_FORWARD = 0.2, RIB_RAISE = 0.12, RIB_WIDTH = 1;
 /** How much wider (and deeper) its bottom is than its top: the egg's section at the bottom end of its axis is this much bigger than the plain ellipsoid's, and as much smaller at the top (a share). */
 const RIB_EGG = 0.3;
-/** Narrower side to side (not front to back) from a little above its middle down: at its middle, and at its bottom, these shares of the width it would have
+/** Narrower side to side (not front to back), more so toward its bottom: at its middle, and at its bottom, these shares of the width it would have
  *  (`Egg.narrow`). */
 const RIB_NARROW = { mid: 0.88, low: 0.8 };
 /** How tall it is, a share of the usual ribcage's height (its widths stay as they are): shorter at both ends, about its middle. */
@@ -34,13 +34,14 @@ const RIB_HEIGHT = 0.88;
 /** And smaller all over but across: its height and depth this share of what they would be (its width side to side as it is). The tilt (`RIB_TILT`, 0.25
  *  before) was raised to make up for it, so her bust reaches as far forward as it did. */
 const RIB_SIZE = 0.9;
-/** Its upper half reaches on to where its top was before it was made smaller and tilted (`RIB_SIZE`, the tilt as 0.25): up by her neck, as it did. */
-const RIB_TOP_TILT = 0.25;
+/** Its upper half reaches on, tipped back less than its lower half, up by her neck (nearly where its top was before it was made smaller and tilted, which was
+ *  0.25: a little more tilt than that keeps its front an egg's, curving out all the way, not dipping in above the bust like a pear's). */
+const RIB_TOP_TILT = 0.32;
 /** How gradual the bend between its two halves is: the axis eases from one to the other from this far below its middle to as far above (a share of its half
  *  height), so the surface (and the toga's opening cut across it) runs smooth there. */
-const RIB_BEND = 0.4;
+const RIB_BEND = 1;
 /** Her pelvis, an egg leaned the other way (its lower half as `PELVIS_TILT` and `PELVIS_HEIGHT` say; its upper half bends at the middle, leaning less, `PELVIS_TOP_TILT`, and reaching higher, `PELVIS_TOP_HEIGHT`, up into the bust) (its top forward, its bottom back, radians): its width as a share of what reaches both hip joints (its section at the pelvis is as wide as the hips are, and a leg's thickness more), its depth as a share of the ribcage's, its half height as a share of the spine's length, and where its middle is along the spine (a share of it up from the pelvis), and how much wider its bottom is than its top, front to back and (less, so its top is wide) side to side. */
-const PELVIS_TILT = 0.3, PELVIS_TOP_TILT = 0.22, PELVIS_WIDTH = 1, PELVIS_DEPTH = 1.2, PELVIS_HEIGHT = 0.75, PELVIS_TOP_HEIGHT = 1, PELVIS_MIDDLE = 0.5, PELVIS_EGG = 0.3, PELVIS_EGG_W = 0.1;
+const PELVIS_TILT = 0.3, PELVIS_TOP_TILT = 0.22, PELVIS_WIDTH = 1, PELVIS_DEPTH = 1.2, PELVIS_HEIGHT = 0.75, PELVIS_EGG = 0.3, PELVIS_EGG_W = 0.1;
 /** How thick her thigh is at the hip (figure units); it thins to a limb's thickness at the knee. */
 const THIGH_R = 4;
 /** Her thighs are fuller at their backs: a second run of rounds along each, set this far behind the bone and this big (shares of the thigh's thickness there),
@@ -53,11 +54,12 @@ const thighBackAt = (t: number) => { const c = Math.max(0, Math.min(1, t)), w = 
  *  share, and radians round): from the right of her neck, down past the armpit, to the side of her bust, and round to the middle of her back. */
 const ROBE_GAP = 0.08;
 /**
- * The toga's opening on her right: a plane cutting the robe over her chest, square to this way (along the egg's side, up and front: out to her right and as much
- * up, toward the top of her shoulder) and standing at this share of the egg's reach that way. Everything beyond it is bare: the top of her right shoulder, its
- * edge running over the shoulder, above her armpit (which the robe covers).
+ * The toga's opening on her right: a plane cutting the robe over her chest, square to this way (along the egg's side, up and front: out to her right, a little up)
+ * and standing at this share of the egg's reach that way. Everything beyond it is bare: its highest point a little above the top of her shoulder (the robe's point nearest
+ * the top of her arm, half the arm's thickness above the shoulder joint), and from there it runs down round the arm's root, her armpit bare, to the side of her bust.
+ * Clear of her neck and the middle of her back.
  */
-const TOGA_CUT = { n: [1, 1.1, 0.1] as [number, number, number], at: 0.8 };
+const TOGA_CUT = { n: [1, 0.3, 0] as [number, number, number], at: 0.8 };
 /** His neck's cone: its radius at the neck and where it meets the hood (figure units), and how high the band that closes its open front is (a share of the cone's height). */
 const CONE_BASE = 4, CONE_TOP = 7.5, CONE_BAND = 0.5, NECK_RAISE = 3;
 /** The width of the outline the neck cone's strips are drawn with (`.fig-neck-cone` and `.fig-neck-lining` in index.css; drawing units). */
@@ -94,8 +96,8 @@ const HOOD_R = 8.9, WAX_SHOULDER = 3.2, WAX_ELBOW = 4.4, FIST = CANDLE_FIST, LIM
 interface Egg { middle: P3; side: P3; up: P3; fwd: P3; halfW: number; halfD: number; halfH: number; taper: number;
   /** How much wider its bottom is than its top across (side to side), if that is not the same as front to back. */
   taperW?: number;
-  /** Narrower side to side below the top of its upper half: as wide as it would be halfway up its upper half, `mid` of that at its middle and `low` at its
-   *  bottom (shares), easing smoothly from each to the next. */
+  /** Narrower side to side, more so toward its bottom: `mid` of the width it would have at its middle and `low` at its bottom (shares), and on in the same
+   *  straight line above (a share that changes steadily along it, so the outline stays an egg's, curving out everywhere, never pinched in like a pear's). */
   narrow?: { mid: number; low: number };
   /** A different axis for its upper half (above its middle): the egg then bends there, its top reaching on along its own way and height. With `blend`, the
    *  bend is gradual, the axis easing from the lower half's to the upper half's from this far below its middle to as far above it (a share of the half height),
@@ -122,6 +124,10 @@ export interface Warden3DProps {
   at: Vec;
   yaw: number;
   scale?: number;
+  /** Lifted this far off the floor (meters): in the air, mid-jump. */
+  rise?: number;
+  /** The pose he has just moved on from, while what it left behind still shows (Clutch Arm's rewaxing trail). */
+  lingerFrom?: WardenPoseName;
   w: number;
   h: number;
   box: Box;
@@ -152,10 +158,10 @@ function hull(ps: [number, number][]): [number, number][] {
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
-function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred, title, cam, at, yaw, scale = 1, w, h, box }: Warden3DProps) {
+function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred, title, cam, at, yaw, scale = 1, rise = 0, lingerFrom, w, h, box }: Warden3DProps) {
   const clip = `wd3${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const debug = useContext(DebugLimbsContext);
-  const { wr, placed } = placeWarden(pose, at, yaw, cam, w, h, scale);
+  const { wr, placed } = placeWarden(pose, at, yaw, cam, w, h, scale, rise);
   // (his right arm and her left leg are always the one white: the robe's opening shows them, and with the robe on nothing white is beside them for the far-limb shade
   // to tell them from. What stays under the robe, her right leg, is always in the shade.)
   const c = canvas3d(placed, box, { unshaded: key => key === "R-arm" || key === "legL" || key === "neck" });
@@ -267,12 +273,10 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
   /** An egg in space (convex, so its outline on the screen is the hull of its surface's points, drawn as a smooth curve): its sections along its axis are an ellipse's, each
    *  scaled by how far down it is, wider below the middle and narrower above. */
   const eggRing = (u: number, taper: number) => Math.sqrt(Math.max(0, 1 - u * u)) * (1 - taper * u * (1 - 0.3 * u * u));
-  /** An egg's section across (side to side) at `u`, as a share of its half width: its own taper across, and narrowed from halfway up its upper half down (`narrow`). */
+  /** An egg's section across (side to side) at `u`, as a share of its half width: its own taper across, and narrowed (`narrow`), steadily along it. */
   const ringAcross = (E: Egg, u: number) => {
     const ring = eggRing(u, E.taperW ?? E.taper), n = E.narrow;
-    if (!n) return ring;
-    const ease = (t: number) => { const c = Math.max(0, Math.min(1, t)); return c * c * (3 - 2 * c); };
-    return ring * (u >= 0 ? 1 + (n.mid - 1) * ease((0.5 - u) / 0.5) : n.mid + (n.low - n.mid) * ease(-u));
+    return n ? ring * (n.mid + (n.mid - n.low) * u) : ring;
   };
   /** A point on an egg's surface: `u` along its axis (-1 the bottom, 1 the top), `a` round it (0 to its side, π/2 to its front). */
   /** An egg's axis at `u`: its own, or above its middle its upper half's (eased from one to the other across the bend, when it has a `blend`). */
@@ -311,12 +315,16 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     for (let s = 0; s <= STEPS; s++) least = Math.min(least, outsideOf(E, plus(p, toViewer, (-reach * s) / STEPS)));
     return least;
   };
-  const egg = (key: string, E: Egg, cls = "fig-ribcage", over = 0) => {
+  /** An egg's outline on the screen (the hull of its surface's points, as a smooth curve). */
+  const eggOutline = (E: Egg) => {
     const skin = Array.from({ length: 49 }, (_, n) => -1 + n / 24).flatMap(u => Array.from({ length: 64 }, (_, m) => {
       const q = see(eggPoint(E, u, (m / 64) * Math.PI * 2));
       return [X(q), Y(q)] as [number, number];
     }));
-    parts.push({ key, depth: see(E.middle).depth - over, node: <path key={key} d={smooth(hull(skin))} className={cls} /> });
+    return smooth(hull(skin));
+  };
+  const egg = (key: string, E: Egg, cls = "fig-ribcage", over = 0) => {
+    parts.push({ key, depth: see(E.middle).depth - over, node: <path key={key} d={eggOutline(E)} className={cls} /> });
   };
   /** A plane cutting an egg (`cutOpening`): positive where a point of its surface is beyond it. */
   const cutPlane = (E: Egg, at: { n: [number, number, number]; at: number }) => {
@@ -394,6 +402,8 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     const d = unit(minus(knee, hip)), hipLine = unit(minus(j.hipR, j.hipL));
     return unit(cross(hipLine, d));
   };
+  /** Where the spine meets each egg: near the top of the bottom one, near the bottom of the ribcage's (`SPINE_IN` of the way from the middle to that end). */
+  let spineLow: P3 = j.pelvis, spineHigh: P3 = j.waist;
   let skirtOf: Egg | null = null, ribMiddle: P3 = j.waist, pelvisMiddle: P3 = j.pelvis, ribEgg: Egg | null = null, pelvisEgg: Egg | null = null, robeEgg: Egg | null = null, robeDepth = -Infinity;
   {
     const rc = ribcageOf(wr.rig), ct = Math.cos(RIB_TILT), st = Math.sin(RIB_TILT);
@@ -408,15 +418,22 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
       upper: { up: upTop, fwd: fwdTop, halfH: rc.halfHeight * RIB_HEIGHT, blend: RIB_BEND },
     };
     egg("ribcage", ribEgg);
+    spineHigh = plus(middle, up, -ribEgg.halfH * SPINE_IN);
   }
   {
     // (its axis runs from the pelvis up to the waist, its width along the line of the hips, square to the axis; it reaches a little below the pelvis and above the waist)
-    const lift = unit(minus(j.waist, j.pelvis)), line = minus(j.hipR, j.hipL), along = dot(line, lift);
+    // (standing along the line it stood along before her upper body was pulled back with it, if it was: `pelvisLift`)
+    const lift = wr.pelvisLift ?? unit(minus(j.waist, j.pelvis)), line = minus(j.hipR, j.hipL), along = dot(line, lift);
     const side = unit(minus(line, lift.map(v => v * along) as unknown as P3)), fwd0 = unit(cross(side, lift));
-    const run = Math.hypot(...minus(j.waist, j.pelvis)), ct = Math.cos(PELVIS_TILT), st = Math.sin(PELVIS_TILT), ctt = Math.cos(PELVIS_TOP_TILT), stt = Math.sin(PELVIS_TOP_TILT);
-    const up = unit([0, 1, 2].map(i => lift[i] * ct + fwd0[i] * st) as unknown as P3), fwd = unit([0, 1, 2].map(i => fwd0[i] * ct - lift[i] * st) as unknown as P3);
-    let upTop = unit([0, 1, 2].map(i => lift[i] * ctt + fwd0[i] * stt) as unknown as P3), fwdTop = unit([0, 1, 2].map(i => fwd0[i] * ctt - lift[i] * stt) as unknown as P3);
-    const middle = plus(j.pelvis, lift, run * PELVIS_MIDDLE);
+    const run = wr.pelvisRun ?? Math.hypot(...minus(j.waist, j.pelvis)), ct = Math.cos(PELVIS_TILT), st = Math.sin(PELVIS_TILT), ctt = Math.cos(PELVIS_TOP_TILT), stt = Math.sin(PELVIS_TOP_TILT);
+    // (a pose may tip it back about the pelvis, `pelvisBack`, so it stays round her hips where her legs join it; the spine, from near its top up to the
+    // ribcage, then leans forward to meet the chest where it is)
+    const tb = ((wr.pelvisBack ?? 0) * Math.PI) / 180, cb = Math.cos(tb), sb = Math.sin(tb);
+    const tLift = unit([0, 1, 2].map(i => lift[i] * cb - fwd0[i] * sb) as unknown as P3), tFwd = unit([0, 1, 2].map(i => fwd0[i] * cb + lift[i] * sb) as unknown as P3);
+    const up = unit([0, 1, 2].map(i => tLift[i] * ct + tFwd[i] * st) as unknown as P3), fwd = unit([0, 1, 2].map(i => tFwd[i] * ct - tLift[i] * st) as unknown as P3);
+    let upTop = unit([0, 1, 2].map(i => tLift[i] * ctt + tFwd[i] * stt) as unknown as P3), fwdTop = unit([0, 1, 2].map(i => tFwd[i] * ctt - tLift[i] * stt) as unknown as P3);
+    const middle = plus(j.pelvis, tLift, run * PELVIS_MIDDLE);
+    spineLow = plus(middle, tLift, run * PELVIS_TOP_HEIGHT * SPINE_IN);
     // (a pose may swing it toward the spine, the line from its middle up to the ribcage's, `pelvisAlign`: its axis turned that share of the way, both halves,
     // where her chest is turned away from her hips and the spine leans off the hips' own up)
     let upL = up, fwdL = fwd, sideL = side;
@@ -435,20 +452,20 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     pelvisEgg = { middle, side: sideL, up: upL, fwd: fwdL, halfW: ((Math.hypot(...line) / 2 + (LIMB / 2) * U) / at0) * PELVIS_WIDTH, halfD: ribcageOf(wr.rig).halfDepth * PELVIS_DEPTH, halfH: run * PELVIS_HEIGHT, taper: PELVIS_EGG, taperW: PELVIS_EGG_W, upper: { up: upTop, fwd: fwdTop, halfH: run * PELVIS_TOP_HEIGHT } };
     egg("pelvis", pelvisEgg, "fig-robe-top");
   }
-  // The spine joins the two eggs, from the middle of the pelvis to the middle of the ribcage. The robe will hide it from every side; it is here to keep the body's
-  // proportions and lengths true when it twists and bends (the eggs move on its ends).
+  // The spine joins the two eggs, from near the top of the bottom one to near the bottom of the ribcage (`spineLow`, `spineHigh`). The robe will hide it from
+  // every side; it is here to keep the body's proportions and lengths true when it twists and bends (the eggs move on its ends).
   // (a tube with an oval round, wider side to side, `SPINE_WIDE`, than front to back, `SPINE`: its outline the hull of the ovals round its two ends and its middle)
   {
-    const axis = unit(minus(ribMiddle, pelvisMiddle)), side0 = ribEgg?.side ?? pelvisEgg?.side ?? ([1, 0, 0] as P3);
+    const axis = unit(minus(spineHigh, spineLow)), side0 = ribEgg?.side ?? pelvisEgg?.side ?? ([1, 0, 0] as P3);
     const sideS = unit(plus(side0, axis, -dot(side0, axis))), fwdS = cross(axis, sideS);
     const ring = [0, 0.5, 1].flatMap(t => {
-      const c = mix(pelvisMiddle, ribMiddle, t);
+      const c = mix(spineLow, spineHigh, t);
       return Array.from({ length: 36 }, (_, m) => {
         const a = (m / 36) * Math.PI * 2, q = see(plus(plus(c, sideS, Math.cos(a) * (SPINE_WIDE / 2) * U), fwdS, Math.sin(a) * (SPINE / 2) * U));
         return [X(q), Y(q)] as [number, number];
       });
     });
-    parts.push({ key: "spine", depth: depthOf(see(pelvisMiddle), see(ribMiddle)), node: <path key="spine" d={smooth(hull(ring))} className="fig-spine-robe" /> });
+    parts.push({ key: "spine", depth: depthOf(see(spineLow), see(spineHigh)), node: <path key="spine" d={smooth(hull(ring))} className="fig-spine-robe" /> });
   }
   behind("spine", "ribcage", "pelvis"); // (under both eggs, so it never shows)
 
@@ -474,16 +491,34 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     // (and a second run behind the bone, `THIGH_BACK`: the back of the thigh fuller. "Behind" is across the thigh, away from the way the legs face: down, for a
     // thigh raised to the front)
     const back = thighBack(hip, knee);
-    const ring = Array.from({ length: 6 }, (_, i) => i / 5).flatMap(t => {
+    const rounds = Array.from({ length: 6 }, (_, i) => i / 5).flatMap(t => {
       const r0 = LIMB / 2 + (THIGH_R - LIMB / 2) * t, c = mix(knee, hip, t);
       const b = thighBackAt(t);
-      return [{ at: c, r: r0 }, { at: plus(c, back, r0 * b.off * U), r: r0 * b.size }].flatMap(({ at, r: rr }) => {
-        const q = see(at), r = rr * scaleAt(q);
-        return Array.from({ length: 36 }, (_, m) => [X(q) + r * Math.cos((m / 36) * Math.PI * 2), Y(q) + r * Math.sin((m / 36) * Math.PI * 2)] as [number, number]);
-      });
+      return [{ at: c, r: r0 }, { at: plus(c, back, r0 * b.off * U), r: r0 * b.size }];
     });
-    const far = side === "R";
-    parts.push({ key: `thigh${side}`, depth: depthOf(seen[`hip${side}` as const], seen[`knee${side}` as const]), node: <g key={`thigh${side}`} className="fig-ribcage" style={far ? { fill: "var(--ink-far)" } : undefined}><path d={smooth(hull(ring))} /></g> });
+    const circles = (rs: typeof rounds) => rs.flatMap(({ at, r: rr }) => {
+      const q = see(at), r = rr * scaleAt(q);
+      return Array.from({ length: 36 }, (_, m) => [X(q) + r * Math.cos((m / 36) * Math.PI * 2), Y(q) + r * Math.sin((m / 36) * Math.PI * 2)] as [number, number]);
+    });
+    const far = side === "R", depth = depthOf(seen[`hip${side}` as const], seen[`knee${side}` as const]);
+    let thigh = <path d={smooth(hull(circles(rounds)))} />;
+    // Her left thigh comes out of the robe's bottom through its opening. Drawn in front of the bottom egg (a thigh coming forward), the part of it still inside the
+    // egg would show over the gray round the opening: so over the egg's outline only the rounds of it the egg does not hide are drawn (seen through the opening,
+    // the rest is the opening's own skin, the same white).
+    if (!far && pelvisEgg && depth < see(pelvisEgg.middle).depth) {
+      const shown = rounds.filter(({ at }) => clearOf(pelvisEgg!, at) > 0), m = `${clip}-thighL`;
+      thigh = (
+        <g>
+          <mask id={m} maskUnits="userSpaceOnUse" x={-1e4} y={-1e4} width={2e4} height={2e4}>
+            <rect x={-1e4} y={-1e4} width={2e4} height={2e4} style={{ fill: "white", stroke: "none" }} />
+            <path d={eggOutline(pelvisEgg)} style={{ fill: "black", stroke: "none" }} />
+            {shown.length > 0 && <path d={smooth(hull(circles(shown)))} style={{ fill: "white", stroke: "none" }} />}
+          </mask>
+          <g mask={`url(#${m})`}>{thigh}</g>
+        </g>
+      );
+    }
+    parts.push({ key: `thigh${side}`, depth, node: <g key={`thigh${side}`} className="fig-ribcage" style={far ? { fill: "var(--ink-far)" } : undefined}>{thigh}</g> });
   }
   // Which leg is over the other: each part is sorted by the depth of its middle, which a long limb pointing toward or away from the viewer (a knee raised to
   // the front) gets wrong against the other leg. So where the two legs come nearest each other on the screen, the one nearer the viewer there is drawn over
@@ -543,11 +578,16 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     const hs = level(B.side), hf = unit(plus(level(B.fwd), hs, -dot(level(B.fwd), hs)));
     /** A ring of the skirt: a level ellipse, its middle (across and forward of the belt's middle, and its height), its round stretched by a 2×2 matrix, and how
      *  much it ruffles (a share of its size, for the hem spread on the floor). */
-    type Ring = { x: number; z: number; y: number; m: [number, number, number, number]; wave: number };
+    type Ring = { x: number; z: number; y: number; m: [number, number, number, number]; wave: number;
+      /** Raised round one way only (the lap over a knee higher than the belt): `up` higher at the angle `at`, easing back down to the ring's height `width` either side. */
+      hump?: { at: number; up: number; width: number } };
     const onRing = (r: Ring, a: number): P3 => {
       const c = Math.cos(a), s = Math.sin(a), k = 1 + r.wave * (0.8 * Math.sin(5 * a + 1.3) + 0.2 * Math.sin(11 * a + 0.4));
       const u = r.x + (r.m[0] * c + r.m[1] * s) * k, v = r.z + (r.m[2] * c + r.m[3] * s) * k;
-      return [axisC[0] + hs[0] * u + hf[0] * v, r.y, axisC[2] + hs[2] * u + hf[2] * v];
+      // (a hump: raised round one way only, smoothly)
+      let y = r.y;
+      if (r.hump) { const off = Math.abs(((a - r.hump.at + Math.PI * 3) % (Math.PI * 2)) - Math.PI); if (off < r.hump.width) y += r.hump.up * 0.5 * (1 + Math.cos((Math.PI * off) / r.hump.width)); }
+      return [axisC[0] + hs[0] * u + hf[0] * v, y, axisC[2] + hs[2] * u + hf[2] * v];
     };
     /** Widens a ring, as little as it can, so that it takes in a point (looked at from above), `pad` beyond it: its middle moves toward the point and it stretches
      *  that way, and a little across, so all it took in before it still does. */
@@ -575,23 +615,60 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     const rx = Math.abs(dot(minus(eggPoint(B, uLow, 0), axisC), hs)), rz = Math.abs(dot(minus(eggPoint(B, uLow, Math.PI / 2), axisC), hf));
     const seat: Ring = { x: 0, z: 0, y: ySeat, m: [rx * flare(axisC[1], ySeat), 0, 0, rz * flare(axisC[1], ySeat)], wave: 0 };
     for (const p of eggUnder) takeIn(seat, p);
-    // (and each thigh where it is as high as the seat's ring or higher, a knee raised to the front, so it does not come out through the top part. Her left leg
-    // too: the skirt is open on her left, but a left leg stepping back or out would push through the cloth hanging behind and beside it)
-    const LEGS = [[j.hipR, j.kneeR, j.footR], [j.hipL, j.kneeL, j.footL]] as const;
+    // (and each thigh where it is as high as the seat's ring or higher, a knee raised to the front, so it does not come out through the top part. Her right leg
+    // is under the skirt, and carries it wherever it goes; her left leg comes out through the opening, and only pushes the cloth where some of it is against
+    // cloth: a point of it round the skirt where the cloth hangs (not where it is open), stepping back or out into the cloth behind or beside it)
+    const LEGS = [[j.hipR, j.kneeR, j.footR, false], [j.hipL, j.kneeL, j.footL, true]] as const;
+    /** Whether the skirt hangs, on this ring, at the way round it of this point (looked at from above): not in the opening on her left. */
+    const clothAt = (r: Ring, p: P3) => {
+      const dx = p[0] - axisC[0], dz = p[2] - axisC[2], px = dx * hs[0] + dz * hs[2] - r.x, pz = dx * hf[0] + dz * hf[2] - r.z;
+      const [a, b, c, d] = r.m, det = a * d - b * c;
+      if (Math.abs(det) < 1e-12) return true;
+      return beyond(uLow, Math.atan2((-c * px + a * pz) / det, (d * px - b * pz) / det)) <= 0;
+    };
+    /** Takes a leg's point (and its round, `pad`) into a ring: any of her right leg's, her left leg's only where some of its round is against the cloth (its middle,
+     *  or either side of it, round the ring). */
+    const push = (r: Ring, p: P3, pad: number, left: boolean) => {
+      if (left) {
+        const dx = p[0] - axisC[0], dz = p[2] - axisC[2], l = Math.hypot(dx, dz) || 1, across: P3 = [-dz / l, 0, dx / l];
+        if (![0, 1, -1].some(k => clothAt(r, plus(p, across, k * pad)))) return;
+      }
+      takeIn(r, p, pad);
+    };
     // (each thigh's fuller back too: its second run of rounds, `THIGH_BACK`)
     const thighAt = (hip: P3, kn: P3, t: number) => {
       const r0 = LIMB / 2 + (THIGH_R - LIMB / 2) * (1 - t), c = mix(hip, kn, t);
       const b = thighBackAt(1 - t);
       return [{ p: c, r: r0 }, { p: plus(c, thighBack(hip, kn), r0 * b.off * U), r: r0 * b.size }];
     };
-    for (const [hip, kn] of LEGS) for (let i = 0; i <= 6; i++) for (const { p, r } of thighAt(hip, kn, i / 6)) {
-      if (p[1] >= ySeat) takeIn(seat, p, (r + SKIRT_THICK) * U);
+    // A thigh raised high, up near the belt (a knee raised to the front while she kneels low), would come out through the top part, which runs straight down
+    // from the belt: there the skirt has a lap, a ring of its own just under the belt, as high as the tops of those thighs, taking them in, so the cloth runs
+    // out from the belt over the lap and only then falls (the seat's ring hangs from the lap's edge). Lower down, the seat's ring takes the thighs in.
+    // (only for a leg whose knee is raised that high: every thigh starts up there, at the hip, inside the egg)
+    const high = (p: P3) => (axisC[1] - p[1]) / ((axisC[1] - ySeat) || 1e-6) < 0.5;
+    const thighs = LEGS.flatMap(([hip, kn, , left]) => Array.from({ length: 7 }, (_, i) => thighAt(hip, kn, i / 6).map(x => ({ ...x, left, raised: high(kn) }))).flat()).filter(x => x.p[1] >= ySeat);
+    const lapping = thighs.filter(x => x.raised && high(x.p));
+    let lap: Ring | null = null;
+    if (lapping.length) {
+      // (just under the belt all round her; but where a knee comes up higher than that, a hump rises over it, round its side only: the cloth goes up from the
+      // belt over the knee and falls from there, and behind her and on her other side it stays under the belt)
+      const top = Math.max(...lapping.map(x => x.p[1] + (x.r + SKIRT_THICK) * U)), yLap = Math.max(ySeat + 1 * U, Math.min(axisC[1] - 0.5 * U, top));
+      lap = { x: 0, z: 0, y: yLap, m: [rx * flare(axisC[1], yLap), 0, 0, rz * flare(axisC[1], yLap)], wave: 0 };
+      if (top > yLap) {
+        const peak = lapping.reduce((b, x) => (x.p[1] > b.p[1] ? x : b)), d = minus(peak.p, axisC);
+        lap.hump = { at: Math.atan2(dot(d, hf) / (rz || 1), dot(d, hs) / (rx || 1)), up: top - yLap, width: 1.1 };
+      }
+      for (const p of eggUnder) if (p[1] >= yLap) takeIn(lap, p);
+      // (with a little room over them: the bend from the lap down into the skirt is rounded off, which would cut in just over a knee)
+      for (const { p, r, left } of lapping) push(lap, p, (r + SKIRT_THICK + 1.5) * U, left);
+      for (let i = 0; i < 24; i++) takeIn(seat, [...onRing(lap, (i / 24) * TAU)] as P3);
     }
+    for (const { p, r, left, raised } of thighs) if (!lap || !raised || !high(p)) push(seat, p, (r + SKIRT_THICK) * U, left);
     const knee = grown(seat, yKnee, flare(ySeat, yKnee));
-    for (const [hip, kn] of LEGS) for (const t of [0.4, 0.7, 1]) for (const { p, r } of thighAt(hip, kn, t)) takeIn(knee, p, (r + SKIRT_THICK) * U);
+    for (const [hip, kn, , left] of LEGS) for (const t of [0.4, 0.7, 1]) for (const { p, r } of thighAt(hip, kn, t)) push(knee, p, (r + SKIRT_THICK) * U, left);
     const hemRing = grown(knee, yHem, flare(yKnee, yHem));
-    for (const [, kn, ft] of LEGS) for (const t of [0, 1 / 3, 2 / 3, 1]) takeIn(hemRing, mix(kn, ft, t), (LIMB / 2 + SKIRT_THICK) * U);
-    const rings: ((a: number) => P3)[] = [a => eggPoint(B, uLow, a), a => onRing(seat, a), a => onRing(knee, a)];
+    for (const [, kn, ft, left] of LEGS) for (const t of [0, 1 / 3, 2 / 3, 1]) push(hemRing, mix(kn, ft, t), (LIMB / 2 + SKIRT_THICK) * U, left);
+    const rings: ((a: number) => P3)[] = [a => eggPoint(B, uLow, a), ...(lap ? [(a: number) => onRing(lap!, a)] : []), a => onRing(seat, a), a => onRing(knee, a)];
     if (extra > 0) {
       // (it meets the floor as wide as it hangs, then the rest of it spreads out over the floor)
       const size = Math.sqrt(Math.abs(hemRing.m[0] * hemRing.m[3] - hemRing.m[1] * hemRing.m[2])), spread = extra * CRUMPLE;
@@ -692,7 +769,8 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
         (runs[k][runs[k].length - 1].near ? hem : hemFar).push(line([grid[k][N], grid[k + 1][N]]));
       }
     }
-    const inside = parts.filter(x => ["pelvis", "pelvis-open", "thighL", "thighR", "legL", "legR"].includes(x.key)).map(x => x.depth);
+    // (her left leg comes out through the opening, and is not always under the cloth: it is sorted with it by how far it is, in front where it is nearer)
+    const inside = parts.filter(x => ["pelvis", "pelvis-open", "thighR", "legR"].includes(x.key)).map(x => x.depth);
     // (the far wall, the inside of the skirt, is under everything already drawn: the legs, the eggs, the belt, the robe's top, the opening's skin)
     const nearDepth = Math.min(...inside) - 0.001, farDepth = Math.max(...parts.map(x => x.depth)) + 0.001;
     // Her right thigh is always under the robe: what of it the straight run of the cloth would leave outside (a knee raised to the front, the thigh level at the
@@ -779,15 +857,17 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
   // (a head resting on the floor stays there however he leans: `grounded`)
   const fl0 = flail3(wr), grounded = "grounded" in placed ? placed.grounded : undefined, flat = wr.flat;
   const fl = fl0.resting && grounded ? { ...fl0, ball: grounded(fl0.ball) } : fl0;
-  // The handle is plain dark wood, like the axe's haft, capped with a dome of black iron the chain hangs from.
-  bones("R-handle", [see(fl.butt), see(fl.tip)], "fig-flail-haft", 2.6);
+  // The handle is plain dark wood, like the axe's haft, capped with a dome of black iron the chain hangs from. Its two halves, either side of her fist, are
+  // sorted on their own (each by how far it is): one may pass over her forearm while the other runs under it.
+  bones("R-handle-butt", [see(fl.butt), see(j.handR)], "fig-flail-haft", 2.6);
+  bones("R-handle-tip", [see(j.handR), see(fl.tip)], "fig-flail-haft", 2.6);
   const knob = dome("R-dome", fl.butt, fl.tip);
   // Her right hand round the handle: the stretch of handle in her fist is white like the hand (so from any side it reads as the hand wrapped round it), always
   // over the handle, so the flail always looks held. It is a band round the handle, drawn as a cylinder is: only its outside's half that faces the viewer, so its
   // two edges are the near halves of the circles round the handle, curving as a cylinder's do.
   {
     const way = unit(minus(fl.tip, fl.butt)), g0 = plus(j.handR, way, -GRIP_HALF * U), g1 = plus(j.handR, way, GRIP_HALF * U);
-    const under = parts.filter(x => x.key === "R-handle" || x.key === "R-dome");
+    const under = parts.filter(x => x.key === "R-handle-butt" || x.key === "R-handle-tip" || x.key === "R-dome");
     parts.push({ key: "R-grip", depth: Math.min(see(j.handR).depth, ...under.map(x => x.depth)) - 0.0002, node: <polygon key="R-grip" points={pts(nearBand(g0, g1, GRIP_THICK / 2))} className={`fig-flail-hand${debug ? " dbg-red" : ""}`} /> });
   }
   /**
@@ -834,18 +914,85 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
   };
   const head = (key: string, p: P3) => waxBall(key, p, !!flailFire);
   const F: P3 = [Math.sin(wr.turn), 0, Math.cos(wr.turn)], R: P3 = [Math.cos(wr.turn), 0, -Math.sin(wr.turn)];
+  // The trail of a swing just made (`Stance.arch`), as every trail is drawn (`trailPart`): round her flail shoulder in a plane like the one the flail whirls
+  // in (upright, along the way her chest faces), through the flail's head, centred level with her flail shoulder; from low in front of her, up, and curving
+  // back over to the head, as thick there as the head.
+  /** That circle, for a pose: its centre, radius, and the angle the head is at round it (in the plane of `F` and `UP`). */
+  const archOf = (rig: typeof wr) => {
+    const ball = flail3(rig).ball, sh = rig.rig.joints.shoulderR, centre = plus(sh, R, dot(minus(ball, sh), R)), v = minus(ball, centre);
+    return { centre, radius: Math.hypot(dot(v, F), dot(v, UP)) || 1e-6, end: Math.atan2(dot(v, UP), dot(v, F)) };
+  };
+  if (isWardenPose(pose) && WARDEN_STANCE[pose].arch) {
+    const { centre, radius, end } = archOf(wr);
+    parts.push(trailPart(c, "R-arch", { centre, e1: F, e2: UP, radius, a0: end - (160 * Math.PI) / 180, a1: end, thick: 2 * FLAIL_BALL * U }));
+  }
+  // The second (`Stance.arch2`): that pose's arch carried on, round the same circle the same way, from where it had the flail's head (over her head) until
+  // it meets the ring of the whirl here (or, going round outside it, where it passes nearest it, running along it the same way, within its band); in the
+  // whirl's own plane, so it ends on its ring.
+  const arch2 = isWardenPose(pose) ? WARDEN_STANCE[pose].arch2 : undefined;
+  if (arch2 && flat.spin === "behind") {
+    const first = archOf(wardenRig(arch2)), ring = CHAIN_R * U, T = fl.tip;
+    // (in the plane's own terms: how far along `F` and up; the two circles' centres, and where on the first it first comes to the ring, going on round)
+    const c1 = [dot(first.centre, F), dot(first.centre, UP)], c2 = [dot(T, F), dot(T, UP)];
+    const off = (a: number) => Math.hypot(c1[0] + Math.cos(a) * first.radius - c2[0], c1[1] + Math.sin(a) * first.radius - c2[1]) - ring;
+    let hit = NaN, best = Infinity, bestAt = first.end;
+    for (let i = 1, was = off(first.end); i <= 360 && Number.isNaN(hit); i++) {
+      const a = first.end + (i / 360) * Math.PI * 2, now = off(a);
+      if (Math.abs(now) < best) { best = Math.abs(now); bestAt = a; }
+      if ((was > 0) !== (now > 0)) hit = a - ((now / (now - was)) * Math.PI * 2) / 360;
+      was = now;
+    }
+    const centre = plus(first.centre, R, dot(minus(T, first.centre), R));
+    parts.push(trailPart(c, "R-arch2", { centre, e1: F, e2: UP, radius: first.radius, a0: first.end, a1: Number.isNaN(hit) ? bestAt : hit, thick: 2 * FLAIL_BALL * U }));
+  }
+  // The trail of a blow swung up to the flail's head (`Stance.blowArc`): from where the pose says, bowing out before her chest (the way it faces) halfway,
+  // up to the head, as thick there as it (or as many times that as the pose says); as every trail is drawn.
+  const blow = isWardenPose(pose) ? WARDEN_STANCE[pose].blowArc : undefined;
+  if (blow) {
+    // (`reaching`: toward whoever she fights, which is straight ahead of where she faces before her hips turn, instead of before her chest)
+    const out: P3 = blow.reaching ? [-Math.sin(wr.yaw), 0, Math.cos(wr.yaw)] : F, mid = plus(mix(blow.from, fl.ball, 0.5), out, blow.bulge);
+    // (its thick end centred on the head: the circle widened by half its thickness, so the head is in the middle of the band, not on its outer edge)
+    const round = swingArc(blow.from, fl.ball, 2 * FLAIL_BALL * U * (blow.thick ?? 1), mid).circle;
+    parts.push(trailPart(c, "R-blow", { ...round, radius: round.radius + round.thick / 2 }));
+  }
+  // The trail of the flail brought down from a whirl overhead (`Stance.slamFrom`): from that pose's ring (its tip, on the level, out as far as the chain goes)
+  // at the back of it, away from where the head comes down, up over and down to the head here, bowing up and forward as a blow does; its thick end on the head.
+  const slamFrom = isWardenPose(pose) ? WARDEN_STANCE[pose].slamFrom : undefined;
+  if (slamFrom) {
+    const over = flail3(wardenRig(slamFrom)).tip, flatWay = unit([fl.ball[0] - over[0], 0, fl.ball[2] - over[2]]);
+    const start = plus(over, flatWay, -CHAIN_R * U), round = swingArc(start, fl.ball, 2 * FLAIL_BALL * U).circle;
+    parts.push(trailPart(c, "R-slam", { ...round, radius: round.radius + round.thick / 2 }));
+  }
+  // Clutch Arm's rewaxing, drawn on the pose he moves on to while it fades (`rewaxTrail` on the pose moved on from, as the sprite has it): a wide sweep of wax
+  // from where the flail's head was, held just under his wax fist there, through his wax hand now, to where the head hangs now; as every trail is drawn.
+  if (lingerFrom && WARDEN_POSES[lingerFrom]?.rewaxTrail && isWardenPose(lingerFrom)) {
+    const was = wardenRig(lingerFrom), turn = was.yaw - wr.yaw, ct = Math.cos(turn), st = Math.sin(turn);
+    // (a point of that pose, as this one's body has it: both stand on the same spot facing the same way, their hips turned differently)
+    const here = (p: P3): P3 => [p[0] * ct + p[2] * st, p[1], p[2] * ct - p[0] * st];
+    const from = here(plus(was.rig.joints.handL, UP, -6 * U));
+    parts.push(trailPart(c, "R-rewax", swingArc(from, fl.ball, 8 * U, j.handL).circle));
+  }
   if (flat.spin) {
-    // Whirling too fast to see: a faint ring where the head travels, and a few copies of the chain with a smudge of head, spread round it.
-    const r = CHAIN_R * U, [a1, a2] = flat.spin === "behind" ? [F, UP] : [R, F];
+    // Whirling too fast to see: a faint ring where the head travels.
+    // (or, `Stance.spinSquare`, square to the handle: round its line, upright; or, `Stance.spinFacing`, facing whoever she fights: square to the way to them,
+    // which is straight ahead of where she faces before her hips turn, upright)
+    const st = isWardenPose(pose) ? WARDEN_STANCE[pose] : undefined, along = unit(minus(fl.tip, fl.butt));
+    const across = unit(cross(UP, along)), squareUp = unit(cross(along, across)), toYou: P3 = [-Math.sin(wr.yaw), 0, Math.cos(wr.yaw)];
+    const r = CHAIN_R * U, [a1, a2] = st?.spinFacing ? [unit(cross(UP, toYou)), UP] : st?.spinSquare ? [across, squareUp] : flat.spin === "behind" ? [F, UP] : [R, F];
     const round = (a: number) => plus(plus(fl.tip, a1, Math.cos(a) * r), a2, Math.sin(a) * r);
     const ring = Array.from({ length: 32 }, (_, i) => round((i / 32) * Math.PI * 2));
-    parts.push({ key: "R-spin", depth: see(fl.tip).depth - 0.002, node: <polygon key="R-spin" points={pts(ring)} className="fig-spin-disc" /> });
-    parts.push({ key: "R-spin-path", depth: see(fl.tip).depth - 0.0021, node: <polygon key="R-spin-path" points={pts(ring)} className="fig-spin-path" /> });
-    [0.5, 2.3, 4.2].forEach((a, i) => {
-      const end = round(a), q = see(end), k = scaleAt(q);
-      chain(`R-spin-chain${i}`, knob, end, 0);
-      parts.push({ key: `R-spin-head${i}`, depth: q.depth - 0.003, node: <ellipse key={`R-spin-head${i}`} cx={X(q)} cy={Y(q)} rx={4.4 * k} ry={2.6 * k} className="fig-censer-smudge" /> });
+    // (drawn as the flail is: the disc the chain sweeps in its links' iron, faint, and the band the head runs round in its wax, as wide as the head there)
+    parts.push({ key: "R-spin", depth: see(fl.tip).depth - 0.002, node: <polygon key="R-spin" points={pts(ring)} className="fig-whirl-disc" /> });
+    parts.push({ key: "R-spin-path", depth: see(fl.tip).depth - 0.0021, node: <polygon key="R-spin-path" points={pts(ring)} className="fig-whirl-path" style={{ strokeWidth: 2 * FLAIL_BALL * scaleAt(see(fl.tip)) }} /> });
+    // And three whole flails, chain and head, going round it (`SpinningFlails`): each drawn once here at every step round the ring, far parts under near ones.
+    const frames = Array.from({ length: SPIN_STEPS }, (_, n) => {
+      const end = round((n / SPIN_STEPS) * Math.PI * 2), from = parts.length;
+      chain(`R-whirl${n}`, knob, end, 0, true);
+      head(`R-whirl${n}-head`, end);
+      const mine = parts.splice(from).sort((a, b) => b.depth - a.depth);
+      return <g key={n}>{mine.map(p => p.node)}</g>;
     });
+    parts.push({ key: "R-whirl", depth: see(fl.tip).depth - 0.0025, node: <SpinningFlails key="R-whirl" frames={frames} /> });
   } else if (fl.grip) {
     // (his candle hand holds the chain: it runs from the handle to that hand, and on from it to the head. Between the handle and the hand there is more
     // chain than the gap: it hangs slack, sagging as much as its length leaves it, a parabola's)
@@ -861,9 +1008,10 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
   } else if (flat.headInHand) {
     chain("R-chain", knob, fl.ball, 0, true);
     head("R-head", fl.ball);
-  } else if (!flat.spinTrail) {
-    // (just done spinning, no head hangs yet: it is still whirling)
-    chain("R-chain", knob, fl.ball, fl.resting ? -1 : 3, true);
+  } else if (!flat.spinTrail || wr.flailDirs) {
+    // (just done spinning, no head hangs yet: it is still whirling; unless the 3D pose holds it its own way, `Stance.flail`, and shows it where it is)
+    // (bowed as the pose says, `Stance.chainBow`: up, for a flail whipped up)
+    chain("R-chain", knob, fl.ball, (isWardenPose(pose) ? WARDEN_STANCE[pose].chainBow : undefined) ?? (fl.resting ? -1 : 3), true);
     head("R-head", fl.ball);
   }
 
@@ -874,7 +1022,7 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
   parts.push({ key: "hood", depth: hs.depth - 0.01, node: <circle key="hood" cx={X(hs)} cy={Y(hs)} r={HOOD_R * kh} className="fig-hood" /> });
   // The hood's opening is everything below a hem that runs round the head: low over his brow in front (over his eyes), lower down the sides, and lowest at the back,
   // where it wraps round the nape of his neck.
-  const f = unit(look), fh = unit([f[0], 0, f[2]]), sideH = unit(cross(UP, fh)), el0 = Math.asin(Math.max(-1, Math.min(1, f[1])));
+  const f = unit(look), faceUp = unit(minus(UP, f.map(v => v * dot(UP, f)) as unknown as P3)), fh = unit([f[0], 0, f[2]]), sideH = unit(cross(UP, fh)), el0 = Math.asin(Math.max(-1, Math.min(1, f[1])));
   const hemAt = (c: number) => el0 * c - (BROW + (NAPE - BROW) * (1 - c) / 2);
   const inside = (v: P3) => { const hz = Math.hypot(v[0], v[2]) || 1; return Math.asin(Math.max(-1, Math.min(1, v[1]))) < hemAt(dot(v, fh) / hz); };
   /** The neck cone's strips whose gray outside is seen, and how far each is (the beak is drawn over those farther than it). */
@@ -958,11 +1106,12 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     // hood's inside is left as a rim round it; and out of the face his wax beak sticks out.
     // (the beak's place is worked out first: the wax of his lower face ends along the line of its two base corners)
     // (its base is set on the face's own round, not out at the hood's: as far ahead of the head's middle as the face's surface is at that height)
+    // (all in the head's own frame: "down" is down her face, square to where she looks, so the beak is the same however far up or down she looks)
     const drop = 0.6 + BEAK_R, reach = Math.sqrt(Math.max(1, HEAD_R ** 2 - drop * drop));
-    const baseAt = plus(plus(headAt, f, reach * U), UP, -drop * U), tipAt = plus(baseAt, plus(f.map(v => v * Math.cos(BEAK_DOWN)) as unknown as P3, UP, -Math.sin(BEAK_DOWN)), BEAK_LEN * U);
-    const axis = unit(minus(tipAt, baseAt)), sideB = unit(cross(UP, axis));
+    const baseAt = plus(plus(headAt, f, reach * U), faceUp, -drop * U), tipAt = plus(baseAt, plus(f.map(v => v * Math.cos(BEAK_DOWN)) as unknown as P3, faceUp, -Math.sin(BEAK_DOWN)), BEAK_LEN * U);
+    const axis = unit(minus(tipAt, baseAt)), sideB = unit(cross(faceUp, axis));
     let upB = unit(cross(axis, sideB));
-    if (dot(upB, UP) < 0) upB = [-upB[0], -upB[1], -upB[2]];
+    if (dot(upB, faceUp) < 0) upB = [-upB[0], -upB[1], -upB[2]];
     const R = BEAK_R * U;
     // Its base is not flat but follows the face: each point of its edge is slid along the beak's axis until it is on the face's surface (a ball), so the beak
     // comes right up to the face and stops there, never going into it.
@@ -988,10 +1137,11 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
       openingRing = ring.map(p => `${X(p)},${Y(p)}`).join(" ");
       // The lower half of his face is wax, not skin: the part of the face's ball below the level of the beak's two base corners (so its border runs through them).
       // It is the cap round straight down, laid on the ball and cut to the near half like the opening; the opening's clip then trims it.
-      const waxDepth = (headAt[1] - onFace(plus(baseAt, sideB, R))[1]) / (HEAD_R * U), waxCap: ReturnType<typeof see>[] = [];
+      // (below as her face is: along its own down, square to where she looks)
+      const waxDepth = dot(minus(headAt, onFace(plus(baseAt, sideB, R))), faceUp) / (HEAD_R * U), waxCap: ReturnType<typeof see>[] = [];
       if (waxDepth > -1 && waxDepth < 1) {
-        const ct = waxDepth, st = Math.sqrt(1 - ct * ct), down: P3 = [-UP[0], -UP[1], -UP[2]];
-        const e1 = unit(cross(UP, f)), e2 = unit(cross(down, e1));
+        const ct = waxDepth, st = Math.sqrt(1 - ct * ct), down: P3 = [-faceUp[0], -faceUp[1], -faceUp[2]];
+        const e1 = unit(cross(faceUp, f)), e2 = unit(cross(down, e1));
         const wdirs = Array.from({ length: 72 }, (_, i) => (i / 72) * Math.PI * 2).map(a => unit(plus(plus(down.map(v => v * ct) as unknown as P3, e1, st * Math.cos(a)), e2, st * Math.sin(a))));
         for (const d of visibleCap(wdirs, headLook, v => dot(v, down) > ct)) waxCap.push(see(plus(headAt, d, HEAD_R * U)));
       }
@@ -1000,10 +1150,11 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
       parts.push({ key: "hood-dark", depth: hs.depth - 0.012, node: <g key="hood-dark" clipPath={`url(#${hoodClip})`}><clipPath id={hoodClip}><circle cx={X(hs)} cy={Y(hs)} r={HOOD_R * kh} /></clipPath><polygon points={ring.map(p => `${X(p)},${Y(p)}`).join(" ")} className="fig-hood-wax" /></g> });
       // His two eyes: half moons lying on the face's surface, turned the way he looks (each point laid back onto the ball, so they turn and narrow with the head).
       const eyes = [-1, 1].flatMap(sg => {
-        const a = sg * EYE_APART, ca = Math.cos(a), sa = Math.sin(a), k = dot(UP, f), vx = cross(UP, f);
-        const dir = [0, 1, 2].map(i => f[i] * ca + vx[i] * sa + UP[i] * k * (1 - ca)) as unknown as P3;
+        // (spread round the face's own up, so they sit across her face however far up or down she looks)
+        const a = sg * EYE_APART, ca = Math.cos(a), sa = Math.sin(a), vx = cross(faceUp, f);
+        const dir = [0, 1, 2].map(i => f[i] * ca + vx[i] * sa) as unknown as P3;
         if (see(plus(headAt, dir, HEAD_R * U)).depth >= hs.depth) return [];
-        const side = unit(cross(UP, dir)), upE = unit(cross(dir, side)), r = EYE_R / HEAD_R;
+        const side = unit(cross(faceUp, dir)), upE = unit(cross(dir, side)), r = EYE_R / HEAD_R;
         const onHead = (x: number, y: number) => see(plus(headAt, unit(plus(plus(dir, side, x * r), upE, y * r)), HEAD_R * U));
         const rim = Array.from({ length: 11 }, (_, i) => (Math.PI * i) / 10).map(t => onHead(Math.cos(t), -Math.sin(t)));
         return [<polygon key={`eye${sg}`} points={rim.map(p => `${X(p)},${Y(p)}`).join(" ")} className="fig-eyes" />];
@@ -1127,4 +1278,37 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
 const HEAD_REST_Y = 6, CHAIN_R = 34;
 
 /** The Warden, worked out again only when something it is drawn from has changed (`sameDrawing`). */
+/** How many steps round its ring a whirling flail is drawn at, and how long it takes to go round once (ms). */
+const SPIN_STEPS = 24, SPIN_TURN_MS = 400;
+/**
+ * Each whirling flail's fading, over and over: it rises from half seen to solid and back down over `SPIN_SHOW_MS` (the 2D trails' 0.3 s), then stays half
+ * seen, as faded as it goes, for `SPIN_FADED_MS`. And how far out of step the three are (shares of that round).
+ */
+const SPIN_SHOW_MS = 300, SPIN_FADED_MS = 450, SPIN_PHASES = [0, 0.37, 0.71];
+
+/**
+ * A flail whirling too fast to follow (Flail Spinning Behind, Overhead): three whole flails, a third of the way round from each other, going round its ring,
+ * each fading up to solid and back down to half seen, and staying half seen a while, out of step with the others. It moves on its own, every frame, without the rest of the figure being drawn
+ * again: `frames` is the flail drawn once at each step round the ring.
+ */
+function SpinningFlails({ frames }: { frames: ReactNode[] }) {
+  const [now, setNow] = useState(() => performance.now());
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => { setNow(performance.now()); raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <g>
+      {SPIN_PHASES.map((phase, i) => {
+        const round = (now / SPIN_TURN_MS + i / 3) % 1, step = Math.floor(round * frames.length) % frames.length;
+        const cycle = SPIN_SHOW_MS + SPIN_FADED_MS, at = ((now / cycle + phase) % 1) * cycle;
+        const fade = at >= SPIN_SHOW_MS ? 0.5 : 0.5 + 0.5 * Math.sin((Math.PI * at) / SPIN_SHOW_MS) ** 2;
+        return <g key={i} opacity={fade}>{frames[step]}</g>;
+      })}
+    </g>
+  );
+}
+
 export const Warden3D = memo(Warden3DView, sameDrawing);

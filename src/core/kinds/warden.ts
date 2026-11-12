@@ -143,7 +143,8 @@ export const WARDEN: EnemyKind = {
   // (Usurp Flame, Spin Guard and Dash borrow older poses until they get their own; Turn Away is Idle turned, for now.)
   actionPoses: {
     "Usurp Flame": { act: "wd-usurp", strike: "wd-usurp-dash" },
-    "Flail Swing": { act: "wd-clutch-flail", strike: "wd-swing" },
+    // (a leap past your left side, the flail swung through you as she passes, landing behind you and sliding round into Flail Spinning Behind)
+    "Flail Swing": { act: "wd-clutch-flail", windup: "wd-swing-windup", strike: "wd-swing", leap: { hold: 250, ms: 400, hop: 0.45, pass: 0.9, behind: 1.4, slide: { far: 1.2, ms: 700 } } },
     "Rising Flail": { act: "wd-spin-behind", strike: "wd-rising" },
     "Flail Slam": { act: "wd-spin-over", strike: "wd-slam", projectile: "impact" },
     "Wax Punch": { act: "wd-arm-back", strike: "wd-punch", projectile: "impact" },
@@ -151,9 +152,13 @@ export const WARDEN: EnemyKind = {
     "Flame Blast": { act: "wd-arm-back", strike: "wd-blast", projectile: "blast" },
     "Spin Guard": { act: "wd-chain-guard", windup: "wd-chain-ready" },
     "Wax Guard": { act: "wd-wax-guard", guard: "wd-wax-swat", windup: "wd-wax-ready" },
-    "Turn Away": { act: "wd-turn-away" },
-    Dash: { act: "wd-usurp-dash" },
-    "Flail Wind Up": { act: "wd-spin-behind", rest: "wd-wound-up", windup: "wd-winding-up" },
+    // (her dodge's dash runs on past the blow, and comes down in Dodge Lands and slides on, turning from a little past giving you her back round to Flail Clutched's way, her next stance)
+    "Turn Away": { act: "wd-turn-away", land: "wd-dodge-land", dash: { ms: 450, far: 0.6, hop: 0.18 }, slide: { far: 1.45, ms: 800, turn: 25, settle: "wd-clutch-flail" } },
+    // (her dodge forward is Flail Swing's leap, overshooting you further: attacked, she leaps past your left side as you lunge, into Flail Spinning Behind)
+    Dash: { act: "wd-swing", windup: "wd-swing-windup", leap: { hold: 250, ms: 400, hop: 0.45, pass: 0.9, behind: 2.6, slide: { far: 1.2, ms: 700 }, settle: "wd-spin-behind" } },
+    // (wound up from Idle, then the flail swung up over her head, then it lands: she takes Flail Spinning Behind, the flail whirling, as the Rest goes through)
+    // (from Kneeling it winds up there, half risen from the floor, instead of from Idle)
+    "Flail Wind Up": { act: "wd-spin-behind", rest: "wd-spin-land", windup: "wd-winding-up", windupFrom: { Kneeling: "wd-kneel-windup" }, prep: "wd-wound-up" },
     "Clutch Flame": { act: "wd-clutch-arm", rest: "wd-clutch-arm", windup: "wd-clutch-ready" },
   },
   // When he falls for good, every flame he lit goes out: the waxed die with him, sealed in wax, their candles snuffed.

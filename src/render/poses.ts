@@ -1080,7 +1080,7 @@ export function impactPoint(strike?: string): Pt | undefined {
 for (const [id, kind] of Object.entries(ENEMY_KINDS)) {
   const named = [
     ...Object.values(kind.stancePoses), kind.idlePose, kind.downPose, kind.flinchPose, kind.modelPoses?.front, kind.modelPoses?.back,
-    ...Object.values(kind.actionPoses ?? {}).flatMap(p => [p.act, p.strike, p.rest, p.windup, p.guard]),
+    ...Object.values(kind.actionPoses ?? {}).flatMap(p => [p.act, p.strike, p.rest, p.windup, ...Object.values(p.windupFrom ?? {}), p.guard, p.prep, p.land, p.slide?.settle, p.leap?.settle]),
   ];
   for (const name of named) if (name && !(name in ALL_POSES)) throw new Error(`${kind.name} (${id}): no pose named "${name}"`);
 }

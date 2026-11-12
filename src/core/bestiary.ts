@@ -90,10 +90,27 @@ export interface EnemyKind {
    * moment an attack lands, `rest` once a Rest actually happens at the end of the turn, and the
    * `projectile` a ranged attack throws (or, for a melee one, `impact`: a shockwave where it lands).
    * `guard`: a Block that holds the stance and only takes this pose as an attack on it lands.
-   * `windup`: a Rest or a Block takes this pose from the start of the turn, to show its intent: a Rest until it goes
+   * `windupFrom`: its `windup` instead, when it starts from one of these stances (by name): a wind-up that grows out of where it starts.
+   * `prep`: a Rest's second wind-up: it takes this pose for a moment just before the Rest goes through (its step waits for it), then lands in `rest`.
+   * `windup`: an Attack takes this pose as it closes in to strike (even one that attacks out of its stance, `attacksFromStance`).
+   * A Rest or a Block takes this pose from the start of the turn, to show its intent: a Rest until it goes
    * through (then `rest`) or is broken by a blow (it flinches); a Block until the blow lands (then `guard`).
+   * `land`: a Maneuver that dodges takes this pose once its dash has carried it to where it gets clear (it dodges in `act`), and keeps it to its next stance.
+   * `dash`: its dodge's dash lasts `ms` (instead of the end of the attacker's approach) and goes `far` meters further, slowing as it goes, so it is still
+   * on its way as the blow lands; with a `slide`, it slows only to the slide's own speed, and the slide takes over from it without a jerk. With `hop`, the
+   * dash is a jump, as high as that (meters) halfway: it flies at one speed, and lands as the slide begins, the slide starting slower (what the landing
+   * takes out of it: the slide's own starting speed, set by its `far` and `ms`, against the dash's).
+   * `leap`: an Attack that is a leap past its target instead of closing in: it winds up (`windup`) for `hold` ms, then jumps, in its `strike` pose,
+   * along a line that passes its target's left side `pass` meters off, and comes down `behind` meters past it; the blow lands as it passes. The jump
+   * lasts `ms`, as high as `hop` (meters) halfway, at one speed; landed, it loses speed and slides on (`slide`: how far, over how long), taking the
+   * pose its strike hands off to (its next stance) and turning to its right to face its target as it comes to a halt.
+   * A Maneuver may leap the same way to dodge (its `act` pose in the air, `settle` once landed): attacked, it winds up as its attacker comes at it and
+   * leaps past the attacker's left side as they lunge, the blow landing where it was.
+   * `slide`: and once landed (with a `dash`, when it ends) it slides on along its dodge, `far` meters more over `ms`, slowing to a halt: it lands turned `turn` degrees further to its left
+   * than its dodge faces, and turns (to its right) as it slides until it faces as it will in the `settle` pose (its next stance's), facing you, so that
+   * stance takes over without a jump.
    */
-  actionPoses?: Record<string, { act?: string; strike?: string; rest?: string; windup?: string; projectile?: "fan" | "blast" | "wax" | "impact" | "halo" | "burst"; guard?: string }>;
+  actionPoses?: Record<string, { act?: string; strike?: string; rest?: string; windup?: string; projectile?: "fan" | "blast" | "wax" | "impact" | "halo" | "burst"; guard?: string; windupFrom?: Record<string, string>; prep?: string; land?: string; dash?: { ms: number; far: number; hop?: number }; leap?: { hold: number; ms: number; hop: number; pass: number; behind: number; slide: { far: number; ms: number }; settle?: string }; slide?: { far: number; ms: number; turn: number; settle: string } }>;
   /** The hand that holds its weapon (default right): the `weaponArm` of every pose is the arm on this side. */
   weaponHand?: Side;
   /**

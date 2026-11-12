@@ -649,6 +649,9 @@ kbd {
 .wd-flaming .fig-ring-flash, .wd-flaming .fig-spin-path { stroke: #e0782f; }
 .wd-flaming .fig-censer-smudge { fill: #f0a040; }
 .fig-spin-disc { fill: var(--metal); opacity: 0.16; }
+/* The 3D flail's whirl (Warden3D): the disc its chain sweeps, in the links' iron, and the band its head runs round, in the head's wax (its width set there). */
+.fig-whirl-disc { fill: #2e2d33; opacity: 0.14; }
+.fig-whirl-path { fill: none; stroke: color-mix(in srgb, var(--wax) 88%, black); stroke-linejoin: round; opacity: 0.26; }
 @keyframes chain-blur { 0% { opacity: 0.15; } 50% { opacity: 0.85; } 100% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .fig-trail-seq { animation: none; opacity: 0.25; } .fig-chain-blur { animation: none; opacity: 0.5; } }
 @media (prefers-reduced-motion: reduce) { .fig-trail { animation: none; opacity: 0.3; } }
@@ -783,8 +786,8 @@ svg.wd-phase2 .fig-skirt-edge { --wax: var(--wax-edge); }
 svg.wd-phase2 .fig-belt { --wax: var(--wax-belt); }
 svg.wd-phase2 .fig-hand-wax { --wax: var(--wax-arm); }
 svg.wd-phase2 .fig-head { fill: #0b090b; }
-svg.wd-phase2 .fig-ball-wax, svg.wd-phase2 .fig-ball-lit, svg.wd-phase2 .fig-flail-wax { --wax: #b9a14e; }
-svg.wd-flaming .fig-ball-wax, svg.wd-flaming .fig-ball-lit, svg.wd-flaming .fig-flail-wax { --wax: var(--wax-ball); }
+svg.wd-phase2 .fig-ball-wax, svg.wd-phase2 .fig-ball-lit, svg.wd-phase2 .fig-flail-wax, svg.wd-phase2 .fig-whirl-path { --wax: #b9a14e; }
+svg.wd-flaming .fig-ball-wax, svg.wd-flaming .fig-ball-lit, svg.wd-flaming .fig-flail-wax, svg.wd-flaming .fig-whirl-path { --wax: var(--wax-ball); }
 @media (prefers-reduced-motion: reduce) { svg.wd-phase2, svg.wd-flaming { animation: none; --wax: #b66e37; --wax-edge: #b66e37; --wax-belt: #b66e37; --wax-arm: #b66e37; --wax-ball: #b66e37; } }
 .wd-phase2 .fig-stain, .wd-phase2 .fig-stain-run { fill: #0f0c0a; stroke: #0f0c0a; }
 .wd-phase2 .fig-cloak-inside { fill: #c4521c; animation: inner-fire 0.45s ease-in-out infinite alternate; }
@@ -798,6 +801,8 @@ svg.wd-flaming .fig-ball-wax, svg.wd-flaming .fig-ball-lit, svg.wd-flaming .fig-
 @keyframes usurp-trail { 0% { opacity: 0; } 15% { opacity: 0.95; } 100% { opacity: 0; } }
 .impact-flash { fill: #ffffff; }
 .impact-spike { fill: #f4f1ea; }
+/* (the shockwave's spikes, along their dome, partly see-through) */
+.shockwave .impact-spike { fill-opacity: 0.6; }
 .shockwave .impact-ring { stroke-width: 3; }
 .shockwave-ring { fill: none; stroke: #e0782f; stroke-width: 6; stroke-linecap: round; }
 .shockwave-ring-inner { fill: none; stroke: #f6d77a; stroke-width: 2.4; stroke-linecap: round; }
@@ -952,7 +957,7 @@ svg.wd-flaming .fig-ball-wax, svg.wd-flaming .fig-ball-lit, svg.wd-flaming .fig-
 .is-charred .fig-wax-drip { stroke: #1b1915; }
 .is-charred .fig-head-shine { opacity: 0.2; }
 .is-charred .fig-ball-wax, .is-charred .fig-ball-lit { fill: #1b1915; }
-.is-charred .fig-flail-wax { stroke: #1b1915; }
+.is-charred .fig-flail-wax, .is-charred .fig-whirl-path { stroke: #1b1915; }
 .is-charred .fig-cloak-wax, .is-charred .fig-skirt-edge { stroke: #1b1915; }
 
 /* The guide: a navy cloak that doubles as a hat, a glowing yarn orb on a black string, bare feet. */

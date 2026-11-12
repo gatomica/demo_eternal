@@ -78,7 +78,8 @@ export interface ViewerShow {
   on: Record<string, boolean>;
   /** The fight's turn as shown. Once it moves past this, the action has played. */
   turn: number;
-  /** Play a Block with nothing to block: the dummy does nothing (a "whiff"), to see the stances a block that wasn't attacked leads to. */
+  /** Play a Block with nothing to block, or a Maneuver with nothing to dodge: the dummy does nothing (a "whiff"; for a Maneuver, "Reposition"), to see the
+   *  stances a block that was not attacked leads to, or how a Maneuver moves to its new spot on its own. */
   whiff?: boolean;
   /** Play the Rest but break it with a blow (to see its flinch). */
   interrupt?: boolean;
@@ -177,18 +178,18 @@ function applyPart(e: CombatState["enemies"][number], part: PartShow, show: View
 
 /**
  * The poses of an action to hold still, each once, besides the stance's own: its wind-up (a Rest's or Block's `windup`; an attack's or
- * Maneuver's `act`, unless it attacks straight out of the stance), and how it lands (an attack's `strike`, a Block's `guard`, a Rest's `rest`).
+ * Maneuver's `act`, unless it attacks straight out of the stance), and how it lands (an attack's `strike`, a Block's `guard`, a Rest's `rest`, a Maneuver's `land`).
  */
 export function actionPosesOf(kindName: KindId, stanceName: string, actionName: string): { label: string; pose: string }[] {
   const kind = ENEMY_KINDS[kindName], a = kind.pattern.actions.get(actionName.toLowerCase()), p = kind.actionPoses?.[actionName];
   if (!a || !p) return [];
   const fromStance = a.type === "attack" && kind.attacksFromStance;
   const list: { label: string; pose?: string }[] = [
-    { label: "Wind-up", pose: a.type === "rest" || a.type === "block" ? p.windup ?? p.act : fromStance ? undefined : p.act },
+    { label: "Wind-up", pose: a.type === "rest" || a.type === "block" ? p.windupFrom?.[stanceName] ?? p.windup ?? p.act : p.windupFrom?.[stanceName] ?? p.windup ?? (fromStance ? undefined : p.act) },
     ...(a.type === "block" ? [{ label: "Guard", pose: p.guard ?? p.act }] : []),
     ...(a.type === "attack" ? [{ label: "Lands", pose: p.strike }] : []),
-    ...(a.type === "rest" ? [{ label: "Rests", pose: p.rest }] : []),
-    ...(a.type === "maneuver" ? [{ label: "Pose", pose: p.act }] : []),
+    ...(a.type === "rest" ? [{ label: "Wind-up 2", pose: p.prep }, { label: "Rests", pose: p.rest }] : []),
+    ...(a.type === "maneuver" ? [{ label: "Pose", pose: p.act }, { label: "Lands", pose: p.land }] : []),
   ];
   const seen = new Set([kind.stancePoses[stanceName]]);
   return list.filter((x): x is { label: string; pose: string } => !!x.pose && !seen.has(x.pose) && !!seen.add(x.pose));

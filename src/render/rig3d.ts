@@ -447,40 +447,66 @@ export function ribcageOf(rig: Rig3) {
 /** The ribcage's half width (as the sleepwalkers') and half depth, in figure units. */
 const RIB_HALF_WIDTH = 6.6, RIB_HALF_DEPTH = 4.5;
 
-/** How far an arch bows out from the line between its ends, and how thick it is at its end, as shares of that line's length. */
-const ARCH_BOW = 0.8, ARCH_THICK = 0.13;
+/** How much of a circle an arch sweeps round (degrees: the sprites' swing trails' 140), and how thick it is at its end, a share of the line between its ends. */
+const ARCH_SWEEP = 140, ARCH_THICK = 0.13;
 
 /**
- * A swing's arch in body space, from where a hand was (`from`) to where it ends (`to`): half a crescent moon. It starts at a point and grows
- * steadily thicker, and ends blunt where it is thickest. Its outer edge bows toward what the figure faces, square to the line between the two
- * points (so a swing that goes forward and down arches up and forward); the inner edge lies on the hollow side of it. Each edge is a function
- * of how far along it is, 0 to 1; the outer one passes through both points. `thick`: how thick it ends, in meters (the weapon's damaging part: a blade, a
- * brick; the arch is what that part sweeps through); by default a share of the line's length.
+ * A stretch of a circle a trail runs along: its centre, the two ways in its plane (`e1`, `e2`), its radius, the angles it runs between (`a0` to `a1`, the
+ * way `e1` turns toward `e2`), and how thick it is where it ends (meters). Drawn as the sprites draw their trails, from two true arcs (`trailPart`).
  */
-export function swingArc(from: P3, to: P3, thick?: number): { outer: (t: number) => P3; inner: (t: number) => P3; normal: P3 } {
+export interface ArcCircle { centre: P3; e1: P3; e2: P3; radius: number; a0: number; a1: number; thick: number }
+
+/**
+ * The trail on the circle through three points (`from`, on through `mid`, to `to`), as `swingArc` gives it; undefined if the three are in a line.
+ */
+function arcThrough(from: P3, mid: P3, to: P3, thick: number): ReturnType<typeof swingArc> | undefined {
+  const sub = (a: P3, b: P3): P3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], dot = (a: P3, b: P3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a: P3, b: P3): P3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const a = sub(mid, from), b = sub(to, from), n = cross(a, b), nn = dot(n, n);
+  if (nn < 1e-10) return undefined;
+  // (the centre: from `from`, the point in the three's plane as far from all three)
+  const k = cross(n, a).map(v => v * dot(b, b)) as unknown as P3, l = cross(b, n).map(v => v * dot(a, a)) as unknown as P3;
+  const centre: P3 = [from[0] + (k[0] + l[0]) / (2 * nn), from[1] + (k[1] + l[1]) / (2 * nn), from[2] + (k[2] + l[2]) / (2 * nn)];
+  const r0 = sub(from, centre), radius = Math.hypot(...r0) || 1e-6, e1: P3 = [r0[0] / radius, r0[1] / radius, r0[2] / radius];
+  const nl = Math.sqrt(nn), normal: P3 = [n[0] / nl, n[1] / nl, n[2] / nl], e2 = cross(normal, e1);
+  const angle = (p: P3) => { const v = sub(p, centre), x = Math.atan2(dot(v, e2), dot(v, e1)); return x < 0 ? x + Math.PI * 2 : x; };
+  // (round from `from` the way that passes `mid` before `to`)
+  const am = angle(mid), at0 = angle(to), a1 = at0 > am ? at0 : at0 - Math.PI * 2, sweep = a1;
+  const at = (t: number, r: number): P3 => {
+    const x = sweep * t, c = Math.cos(x), s = Math.sin(x);
+    return [centre[0] + (e1[0] * c + e2[0] * s) * r, centre[1] + (e1[1] * c + e2[1] * s) * r, centre[2] + (e1[2] * c + e2[2] * s) * r];
+  };
+  return { outer: t => at(t, radius), inner: t => at(t, radius - thick * t), normal, circle: { centre, e1, e2, radius, a0: 0, a1: sweep, thick } };
+}
+
+/**
+ * A swing's arch in body space, from where a hand was (`from`) to where it ends (`to`): half a crescent moon, as the sprites' swing trails are. It starts
+ * at a point and grows steadily thicker, and ends blunt where it is thickest. Its outer edge is a stretch of a circle (`ARCH_SWEEP` of it) through both
+ * points, bowing toward what the figure faces, square to the line between them (so a swing that goes forward and down arches up and forward); the inner
+ * edge lies on the hollow side of it, toward the circle's centre. Each edge is a function of how far along it is, 0 to 1. `thick`: how thick it ends, in
+ * meters (the weapon's damaging part: a blade, a brick; the arch is what that part sweeps through); by default a share of the line's length. `through`: a
+ * point it passes through on its way (where the swing reached furthest, its middle), the circle then the one through all three points.
+ */
+export function swingArc(from: P3, to: P3, thick?: number, through?: P3): { outer: (t: number) => P3; inner: (t: number) => P3; normal: P3; circle: ArcCircle } {
   const chord: P3 = [to[0] - from[0], to[1] - from[1], to[2] - from[2]], length = Math.hypot(...chord) || 1;
   const dir: P3 = [chord[0] / length, chord[1] / length, chord[2] / length];
+  if (through) { const round = arcThrough(from, through, to, thick ?? ARCH_THICK * length); if (round) return round; }
   // Forward, with the part along the chord taken out: the way the arch bows (up, if the chord runs straight forward).
   const ahead = dir[2], bowRaw: P3 = [-dir[0] * ahead, -dir[1] * ahead, 1 - dir[2] * ahead], n = Math.hypot(...bowRaw);
   const bow: P3 = n > 0.2 ? [bowRaw[0] / n, bowRaw[1] / n, bowRaw[2] / n] : [0, 1, 0];
-  // (A quadratic curve bows half as far as its control point is off the chord.)
-  const control: P3 = [(from[0] + to[0]) / 2 + bow[0] * ARCH_BOW * length * 2, (from[1] + to[1]) / 2 + bow[1] * ARCH_BOW * length * 2, (from[2] + to[2]) / 2 + bow[2] * ARCH_BOW * length * 2];
-  const outer = (t: number): P3 => {
-    const a = (1 - t) * (1 - t), b = 2 * t * (1 - t), c = t * t;
-    return [a * from[0] + b * control[0] + c * to[0], a * from[1] + b * control[1] + c * to[1], a * from[2] + b * control[2] + c * to[2]];
+  // (the circle: half its sweep either side of its top, the middle of the arch, which bows furthest out; its centre on the hollow side)
+  const half = (ARCH_SWEEP * Math.PI) / 360, radius = length / 2 / Math.sin(half), back = radius * Math.cos(half);
+  const centre: P3 = [(from[0] + to[0]) / 2 - bow[0] * back, (from[1] + to[1]) / 2 - bow[1] * back, (from[2] + to[2]) / 2 - bow[2] * back];
+  const end = thick ?? ARCH_THICK * length;
+  const at = (t: number, r: number): P3 => {
+    const a = -half + 2 * half * t, c = Math.cos(a), s = Math.sin(a);
+    return [centre[0] + (bow[0] * c + dir[0] * s) * r, centre[1] + (bow[1] * c + dir[1] * s) * r, centre[2] + (bow[2] * c + dir[2] * s) * r];
   };
-  const inner = (t: number): P3 => {
-    // The hollow side: square to the way the curve is going, toward the line between the ends (against the bow).
-    const tan: P3 = [2 * (1 - t) * (control[0] - from[0]) + 2 * t * (to[0] - control[0]), 2 * (1 - t) * (control[1] - from[1]) + 2 * t * (to[1] - control[1]), 2 * (1 - t) * (control[2] - from[2]) + 2 * t * (to[2] - control[2])];
-    const tl = Math.hypot(...tan) || 1, tu: P3 = [tan[0] / tl, tan[1] / tl, tan[2] / tl];
-    const along = -(bow[0] * tu[0] + bow[1] * tu[1] + bow[2] * tu[2]);
-    const hollow: P3 = [-bow[0] - tu[0] * along, -bow[1] - tu[1] * along, -bow[2] - tu[2] * along], hl = Math.hypot(...hollow) || 1;
-    const p = outer(t), width = (thick ?? ARCH_THICK * length) * t; // nothing at the start, all of it at the end
-    return [p[0] + (hollow[0] / hl) * width, p[1] + (hollow[1] / hl) * width, p[2] + (hollow[2] / hl) * width];
-  };
+  const outer = (t: number): P3 => at(t, radius);
+  const inner = (t: number): P3 => at(t, radius - end * t); // nothing at the start, all of it at the end
   // The plane it lies in: square to the chord and to the way it bows.
   const cr: P3 = [dir[1] * bow[2] - dir[2] * bow[1], dir[2] * bow[0] - dir[0] * bow[2], dir[0] * bow[1] - dir[1] * bow[0]], cl = Math.hypot(...cr) || 1;
-  return { outer, inner, normal: [cr[0] / cl, cr[1] / cl, cr[2] / cl] };
+  return { outer, inner, normal: [cr[0] / cl, cr[1] / cl, cr[2] / cl], circle: { centre, e1: bow, e2: dir, radius, a0: -half, a1: half, thick: end } };
 }
 
 /**
@@ -588,9 +614,10 @@ export interface Seen { sx: number; sy: number; ppm: number; depth: number }
  * A rig standing on the floor at `at`, facing `yaw`, seen through `cam` on a screen of w × h: where each
  * joint lands, how far ahead of the camera it is and how big a meter is there. `scale`: its size relative to a normal figure.
  */
-export function placeRig(rig: Rig3, at: Vec, yaw: number, cam: Cam, w: number, h: number, scale = 1) {
+/** (`rise`: all of it lifted this far off the floor, meters: in the air, as in a jump.) */
+export function placeRig(rig: Rig3, at: Vec, yaw: number, cam: Cam, w: number, h: number, scale = 1, rise = 0) {
   const fwd = facingVec(yaw), rgt = rightOf(yaw);
-  const see = (p: P3): Seen => projectPoint(cam, { x: at.x + (rgt.x * p[0] + fwd.x * p[2]) * scale, z: at.z + (rgt.z * p[0] + fwd.z * p[2]) * scale }, p[1] * scale, w, h);
+  const see = (p: P3): Seen => projectPoint(cam, { x: at.x + (rgt.x * p[0] + fwd.x * p[2]) * scale, z: at.z + (rgt.z * p[0] + fwd.z * p[2]) * scale }, p[1] * scale + rise, w, h);
   const seen = Object.fromEntries(JOINTS.map(j => [j, see(rig.joints[j])])) as Record<Joint, Seen>;
   return { seen, see, prop: rig.prop && { kind: rig.prop.kind, at: see(rig.prop.at) }, origin: see([0, 0, 0]) };
 }
