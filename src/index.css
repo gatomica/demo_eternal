@@ -78,6 +78,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---------- Exploration: one canvas, black beyond the walls ---------- */
 .explore { position: absolute; inset: 0; background: #000; }
+/* Normal gameplay (the map and fights) takes no mouse at all, and shows no pointer; only the pause menu does (the Model viewer, which has a panel, keeps its mouse). */
+.no-mouse, .no-mouse * { pointer-events: none; cursor: none; }
+.no-mouse .pause-menu, .no-mouse .pause-menu * { pointer-events: auto; cursor: auto; }
 .explore-canvas { display: block; width: 100%; height: 100%; filter: brightness(var(--ambient)); } /* (the ambient shade: see render/shade.ts) */
 /* The stir at the edge of your light, toward enemies hunting you out of sight. */
 .explore-disturb { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }

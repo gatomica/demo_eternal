@@ -1179,7 +1179,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   }, []);
 
   return (
-    <div className="explore">
+    <div className="explore no-mouse">
       <canvas ref={canvasRef} className="explore-canvas" />
       <canvas ref={disturbRef} className="explore-disturb" aria-hidden="true" />
       {preparing !== null && <div className="explore-loading">Preparing the map… {Math.round(preparing * 100)}%</div>}

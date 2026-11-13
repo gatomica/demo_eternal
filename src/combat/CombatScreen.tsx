@@ -1711,7 +1711,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   }, [armsSig]);
 
   return (
-    <div className={`hud ${busy ? "is-cinematic" : ""}`} ref={hudRef}>
+    <div className={`hud ${busy ? "is-cinematic" : ""}${panel ? "" : " no-mouse"}`} ref={hudRef}>
       <section className="stage" aria-label="Battlefield">
         <DebugLimbsContext.Provider value={debugLimbs}>
         <Scene
