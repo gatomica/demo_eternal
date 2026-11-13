@@ -187,6 +187,8 @@ export interface Enemy extends Fighter {
   reviving: boolean;
   /** How it left the fight, once it has. */
   fate?: "fallen" | "encased";
+  /** The turn it was first seen lying fallen (the Warden raises the one that has lain longest, never one that fell that very turn). */
+  fellTurn?: number;
   /**
    * A part of a multi-target enemy (the Wax Blob): the id of its body, shared by all its parts. The parts of a body
    * share one pool of health and one place (line), each acting on its own.

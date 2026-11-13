@@ -42,6 +42,7 @@ function light(r: TurnReport, ally: Enemy, by?: string) {
   ally.staggered = true;
   ally.reviving = false;
   ally.last = null;
+  ally.fellTurn = undefined;
   r.event({ kind: "raised", who: ally.id, by });
 }
 
@@ -249,38 +250,20 @@ export const WARDEN: EnemyKind = {
       // Smashed into the ground, the flail's fire goes out.
       if (action === "Flail Slam") setFlaming(r, false);
     }
-    // The way into phase two opens only when he falls with his revive; it happens as his revive lands
-    // and he gets back up. A stagger just puts his flame out.
+    // Note when each waxed ally first lies fallen (the turn it was last seen up, +1): the oldest are raised first.
+    for (const ally of alliesOf(r)) {
+      if (ally.alive) ally.fellTurn = undefined;
+      else if (ally.fellTurn === undefined) ally.fellTurn = r.state.turn;
+    }
+    // A stagger puts his flame out. (The way into phase two opens only when he falls with his revive; it happens as his revive lands and he gets back up.)
     if (r.staggered) {
       setSealed(r, true);
-      // In phase two, staggering him raises a fallen waxed again.
+      // In phase two, staggering him raises one fallen waxed again: the one that has lain fallen the longest, never one that fell this very turn.
       if (self.flags.phase2) {
-        const fallen = alliesOf(r).find(e => !e.alive);
+        const fallen = alliesOf(r)
+          .filter(e => !e.alive && (e.fellTurn ?? 0) < r.state.turn)
+          .sort((x, y) => (x.fellTurn ?? 0) - (y.fellTurn ?? 0))[0];
         if (fallen) light(r, fallen, self.id);
-      }
-    }
-    // The way into phase two opens only when he falls with his revive; it happens as his revive lands
-    // and he gets back up. A stagger just puts his flame out.
-    if (r.staggered) {
-      setSealed(r, true);
-      // In phase two, staggering him raises a fallen waxed again.
-      if (self.flags.phase2) {
-        const fallen = alliesOf(r).find(e => !e.alive);
-        if (fallen) light(r, fallen, self.id);
-      }
-    }
-    // In phase two, a lit waxed that got staggered this turn dies as the turn ends: its flame streams into his hand,
-    // as long as he isn't staggered himself. (The ones raised staggered are on their forced Rest: they get back up.)
-    if (self.flags.phase2 && !self.staggered && !self.reviving) {
-      for (const ally of alliesOf(r)) {
-        if (!ally.alive || !ally.flags.lit || !ally.staggered || ally.intent.forced) continue;
-        ally.alive = false;
-        ally.fate = "encased";
-        ally.hp = 0;
-        ally.fatigue = 0;
-        ally.staggered = false;
-        r.event({ kind: "drained", who: ally.id, by: self.id });
-        r.event({ kind: "encased", who: ally.id });
       }
     }
     // The way into phase two opens only when he falls with his revive: it happens as his revive lands, at the end of the turn he fell.
