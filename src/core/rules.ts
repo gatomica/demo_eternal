@@ -13,7 +13,7 @@ import type { ArmorTier, Fighter, Player, Tier, WeaponTier } from "./types";
 
 /** `name`: the weapon of that weight in this demo (its eternal version is "Eternal <name>"). */
 export const WEAPONS: Record<WeaponTier, { weight: number; cost: number; damage: number; block: number; label: string; name: string }> = {
-  baseline: { weight: 0, cost: 1, damage: 1, block: 0, label: "None", name: "Bare hands" },
+  baseline: { weight: 0, cost: 2, damage: 2, block: 0, label: "None", name: "Bare hands" },
   light:  { weight: 0.5, cost: 1, damage: 2, block: 0.5, label: "Light", name: "Jagged Chisel" },
   normal: { weight: 1, cost: 3, damage: 3, block: 1, label: "Normal", name: "Waxed Torch" },
   heavy:  { weight: 1.5, cost: 5, damage: 4, block: 1.5, label: "Heavy", name: "Brick Hammer" },
