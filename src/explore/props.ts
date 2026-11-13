@@ -247,8 +247,8 @@ export const MAP_PROPS: Prop[] = [
   // Floor B (level 10): all four rooms are full of them, and the side room north of the east room most of all.
   // North room (the bridge comes in down column 26; the Wax Blob lies in the middle).
   ...sealed(10, scatter(10, [23, 5, 29, 10], 0.3, (x, y) => (x === 26 && y >= 9) || (x >= 25 && x <= 27 && y >= 5 && y <= 7))),
-  // South room (the bridge, and the three waxed).
-  ...sealed(10, scatter(10, [23, 26, 29, 31], 0.3, (x, y) => (x === 26 && y <= 27) || (x === 24 && y === 28) || (x === 28 && y === 28) || (x === 26 && y === 30))),
+  // South room (the bridge, the three waxed and the lit one among them).
+  ...sealed(10, scatter(10, [23, 26, 29, 31], 0.3, (x, y) => (x === 26 && y <= 27) || (x === 24 && y === 28) || (x === 28 && y === 28) || (x === 26 && y === 30) || (x === 26 && y === 28))),
   // West room (the bridge runs out of it along row 18; the stairs start in its south-west corner).
   ...sealed(10, scatter(10, [10, 15, 16, 21], 0.3, (x, y) => y === 18 || (x === 11 && y === 21))),
   // East room (the bridge comes in along row 18; the passage north is at column 44; the three enemies).

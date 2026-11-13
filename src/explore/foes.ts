@@ -176,11 +176,8 @@ export const MAP_FOES: MapFoe[] = [
   { id: "ne-1", kind: "waxed", home: { x: 41.5, y: 9.5, z: 8 }, fight: [{ kind: "waxed" }] },
   { id: "ne-2", kind: "waxed", home: { x: 41.5, y: 11.5, z: 8 }, fight: [{ kind: "waxed" }] },
 
-  // In the Nave: two lit waxed, sealed in wax with their flames burning (they get up again when you rest).
-  { id: "nave-lit-1", kind: "waxedLit", home: { x: 29.5, y: 16.5, z: 7 }, fight: [{ kind: "waxedLit" }] },
-  { id: "nave-lit-2", kind: "waxedLit", home: { x: 25.5, y: 14.5, z: 7 }, fight: [{ kind: "waxedLit" }] },
-  // In the NE hall, between the two waxed.
-  { id: "ne-lit", kind: "waxedLit", home: { x: 41.5, y: 10.5, z: 8 }, fight: [{ kind: "waxedLit" }] },
+  // In the east chapel (level 8), among its wax sculptures: a lit waxed, sealed in wax with its flame burning (it gets up again when you rest).
+  { id: "east-lit", kind: "waxedLit", home: { x: 44.5, y: 19.5, z: 8 }, fight: [{ kind: "waxedLit" }] },
 
   // Floor B, the Gallery (level 10). Coordinates are plan + 1.
   // The east room: a chisel sleepwalker and two chisel waxed.
@@ -194,7 +191,9 @@ export const MAP_FOES: MapFoe[] = [
   { id: "b-patrol-s", kind: "patrolWarden", home: { x: 27.5, y: 27.5, z: 10 }, fight: [{ kind: "patrolWarden" }], patrol: [{ x: 27.5, y: 27.5 }, { x: 27.5, y: 20 }] },
   // The north room: a Wax Blob, hugging its north wall.
   { id: "b-north-blob", kind: "blobMid", home: { x: 27.5, y: 7.05, z: 10 }, girth: 1, fightWithin: 3.5, fight: waxBlob("b-north-blob"), drop: { eternalString: true } },
-  // A lit chisel waxed in the middle of the east room and one in the south room.
+  // Among the wax sculptures of Floor B's rooms: a lit waxed in the west room, a lit chisel waxed in the east room and one in the south room (each stands on a tile
+  // kept clear of sculptures in `props.ts`).
+  { id: "b-west-lit", kind: "waxedLit", home: { x: 12.5, y: 19.5, z: 10 }, fight: [{ kind: "waxedLit" }] },
   { id: "b-east-lit", kind: "waxedChiselLit", home: { x: 40.5, y: 19.5, z: 10 }, fight: [{ kind: "waxedChiselLit" }] },
   { id: "b-south-lit", kind: "waxedChiselLit", home: { x: 27.5, y: 29.5, z: 10 }, fight: [{ kind: "waxedChiselLit" }] },
   // The south room: three chisel waxed.
