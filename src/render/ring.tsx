@@ -13,17 +13,20 @@ export const polar = (r: number, deg: number): [number, number] => [r * Math.cos
 /** The four diagonals that split the ring into one piece per direction. */
 const DIAGONALS = [-135, -45, 45, 135];
 
-/** A white line along a diagonal that swells from a point at each end to its full width in the middle. */
-function pointedLine(deg: number, half: number): string {
-  const mid = (R_IN + R_OUT) / 2;
-  const [x0, y0] = polar(R_IN, deg), [x1, y1] = polar(R_OUT, deg);
+/**
+ * A white line along a diagonal that swells from a point at each end to its full width in the middle.
+ * `from` and `to` are its radii (the whole ring's width by default; a shorter line sits in the middle of it).
+ */
+export function pointedLine(deg: number, half: number, from = R_IN, to = R_OUT): string {
+  const mid = (from + to) / 2;
+  const [x0, y0] = polar(from, deg), [x1, y1] = polar(to, deg);
   const [mx, my] = polar(mid, deg), [nx, ny] = polar(half, deg + 90);
   return `M${x0} ${y0} L${mx + nx} ${my + ny} L${x1} ${y1} L${mx - nx} ${my - ny} Z`;
 }
 
-/** The four dividing lines, in white, with pointed ends. */
-export function RingLines({ half = 1.1 }: { half?: number }) {
-  return <>{DIAGONALS.map(deg => <path key={deg} d={pointedLine(deg, half)} className="wheel-line" />)}</>;
+/** The four dividing lines, in white, with pointed ends (at `angles`, the four diagonals unless the wheel has moved them). */
+export function RingLines({ half = 1.1, angles = DIAGONALS }: { half?: number; angles?: readonly number[] }) {
+  return <>{angles.map((deg, i) => <path key={i} d={pointedLine(deg, half)} className="wheel-line" />)}</>;
 }
 
 /**

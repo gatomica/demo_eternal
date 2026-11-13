@@ -10,7 +10,8 @@ import { LessonBox } from "./LessonBox";
 import { prepareWalk, speak } from "../audio/walk";
 import { useDev } from "../ui/dev";
 import { DETOUR, isWanted, type Beat, lessonAllows, lessonMet, typeDelay } from "./lesson";
-import { defaultSelection, moveSelection, rowsOf, sameSel, type Selection, type Wheel, type WheelOption } from "./selection";
+import { preferredAlternative, rememberAlternative } from "./preferred";
+import { defaultSelection, moveSelection, rowsOf, sameSel, subKey, type Selection, type SubSlot, type Wheel, type WheelOption } from "./selection";
 import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveTurn, snapshotOf } from "../core/resolve";
 import { attackCost, restRecovery } from "../core/rules";
@@ -41,6 +42,8 @@ const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 
 /** The player is drawn in 3D in a fight, on the Sleepwalker's body (`player3dPose`, Sleepwalker3D's `gear`). */
 const PLAYER_3D = true;
+/** The poses a Punch is drawn mirrored in: its wind-ups and strikes (the stances around it are held as they are). */
+const PUNCH_POSES = new Set<PoseName>(["attack", "punch", "strike", "swing-left-up", "swing-left", "swing-right-up", "swing-right"]);
 /** Whether the game itself (fights, not the Model viewer) draws the Warden from the 3D rig. Off while it is built. */
 const WARDEN_3D_IN_GAME = true;
 
@@ -116,6 +119,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const [selection, setSelection] = useState<Selection>(() => defaultSelection(initial));
   const [wheelOpen, setWheelOpen] = useState(false);
   const [highlight, setHighlight] = useState<Dir | null>(null);
+  // The highlighted action opened up into its alternatives (Attack: Punch, nothing yet, the weapon's blow), and the part on.
+  const [expanded, setExpanded] = useState(false);
+  const [subSlot, setSubSlot] = useState<SubSlot>("right");
 
   const [paused, setPaused] = useState(false);
   /** The 3D Warden plays Usurp Flame as the attack it is (it launches at its target in its wind-up pose, as any attack does), not as the old scene (`USURP_STAGES`). */
@@ -298,13 +304,23 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       };
     }
     return {
-      up: opt("Attack", { type: "attack", target: sel.id }),
+      up: (() => {
+        // Opened up: the weapon's blow on the right, the empty left hand's Punch on the left (bare hands' cost and damage), the middle kept for later.
+        const alternatives: NonNullable<WheelOption["alternatives"]> = {
+          left: opt("Punch", { type: "attack", target: sel.id, weight: "baseline", hand: "left" }),
+          middle: null,
+          right: opt("Attack", { type: "attack", target: sel.id }),
+        };
+        // Closed, the attack is the alternative you used last (the lesson always teaches the plain one).
+        const preferred = alternatives[current ? "right" : preferredAlternative("attack")] ?? alternatives.right!;
+        return { ...preferred, alternatives };
+      })(),
       left: opt("Dodge", { type: "maneuver", target: sel.id }),
       down: null,
       right: opt("Block", { type: "block", target: sel.id }),
     };
   })();
-  const chosen = wheelOpen && highlight ? wheel[highlight] : null;
+  const chosen = wheelOpen && highlight ? (expanded ? wheel[highlight]?.alternatives?.[subSlot] ?? null : wheel[highlight]) : null;
   // Hovering an Attack (before you commit to it): the Fatigue it would cost flickers on your bar.
   const previewCost = !busy && chosen?.action.type === "attack" ? attackCost(p, chosen.action.weight) : 0;
   // Hovering a Rest: the Fatigue it would clear and the Health it would return flicker on your bar.
@@ -737,6 +753,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const closeWheel = () => {
     setWheelOpen(false);
     setHighlight(null);
+    setExpanded(false);
   };
 
   /** Resolve the turn, then play it back step by step. */
@@ -756,6 +773,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // (In the lesson, only the action it asks for, and not while it is still speaking.)
     if (current && (typing || current.goal?.until !== "commit" || !current.goal.want || !isWanted(option.action, current.goal.want) || !lessonStand?.onTarget)) return;
     if (current) nextBeat();
+    // An alternative you used becomes what its action does from now on.
+    const used = (["left", "right"] as const).find(slot => wheel.up?.alternatives?.[slot]?.action === option.action);
+    if (used && !current) rememberAlternative("attack", used);
     play(option.action);
   };
 
@@ -983,8 +1003,20 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       else if (key !== "back" && key !== "pause") moveCursor(key);
       return;
     }
+    if (expanded && highlight) {
+      // An action opened up: Q or the opposite direction closes it up again (Q again closes the wheel); its own direction and the
+      // ones beside it pick the middle, right and left parts; E commits the part (the empty one does nothing).
+      if (key === "back") { menuSound(key); setExpanded(false); return; }
+      if (key === "select") { if (chosen) menuSound(key); commit(chosen); return; }
+      if (key === "pause") return;
+      const at = subKey(highlight, key);
+      if (at === "collapse") { menuSound(key); setExpanded(false); }
+      else if (at !== subSlot) { menuSound(key); setSubSlot(at); }
+      return;
+    }
     if (key === "back") closeWheel();
     else if (key === "select") { if (chosen) menuSound(key); commit(chosen); }
+    else if (key !== "pause" && key === highlight && !current && wheel[key]?.alternatives) { menuSound(key); setSubSlot(current ? "right" : preferredAlternative("attack")); setExpanded(true); } // (not in the lesson)
     else if (key !== "pause" && wheel[key]) { if (key !== highlight) menuSound(key); setHighlight(key); }
   });
 
@@ -1225,6 +1257,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return poses.telegraph;
   };
   const punching = p.weapon === "baseline";
+  // A Punch (the empty left hand's blow, mirrored): drawn mirrored through its wind-up and its strike, not in the stances before and after it.
+  const leftPunch = playback?.action?.type === "attack" && playback.action.hand === "left";
   /** Your forced Rest (or revive) has landed this turn: you're back on your feet. */
   const playerBackUp = reached(stepOf("backUp", "player"));
   // You hold your stance (see core/stance.ts) between turns, whatever you hover; each action takes you out of it and, as it ends, into the next.
@@ -1247,11 +1281,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     swingPoses.left = { windUp: "swing-left-up", strike: "swing-left" };
   }
   const forcedTurn = playback?.playerPose === "kneel";
-  const playerPose: PoseName = !playback && walkOff?.player ? walkOff.player : playback
+  const playerPoseActing: PoseName = !playback && walkOff?.player ? walkOff.player : playback
     ? playbackPose("player", p.staggered, {
         // A forced turn kneels until the Rest (or revive) brings you back; then you're up. A Rest breathes in from the start of the turn.
         telegraph: forcedTurn ? (playerBackUp ? "idle" : "kneel") : playback.action?.type === "rest" ? "rest-in" : stancePose(startStance),
-        down: "kneel", windUp: swingPoses[swingOf].windUp, strike: swingPoses[swingOf].strike, idle: stancePose(fight.player.stance),
+        down: "kneel", windUp: swingPoses[swingOf].windUp, strike: swingPoses[swingOf].strike,
+        // (the stance the turn leaves you in: from the fight as resolved, which the Model viewer's `override` would otherwise put back to the stance it started in)
+        idle: stancePose(fightRaw.player.stance),
         // A Rest's pose, as it goes through: the breath out.
         rested: playback.action?.type === "rest" ? "rest" : undefined,
         // A Block or a Maneuver holds your stance, and only takes its pose as the blow lands: blocking, or dodging forward (a Maneuver at an enemy) or back.
@@ -1260,6 +1296,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           : undefined,
       })
     : forced ? "kneel" : playerHold ?? stancePose(fight.player.stance);
+  /** The step where a blow breaks your Rest (not a forced one): you flinch as it lands, and stay flinching to the end of the turn. */
+  const playerFlinchAt = playback && !forcedTurn && playback.action?.type === "rest" && turnIx?.interrupted.has("player")
+    ? turnIx.hit.get("player") ?? turnIx.broken.get("player") ?? -1
+    : -1;
+  const playerPose: PoseName = !p.staggered && reached(playerFlinchAt) ? "flinch" : playerPoseActing;
+  /** In 3D your Left leg leading stance is your Right leg leading one, mirrored (the gear not). */
+  const leftLeading = PLAYER_3D && playerPose === "low-left";
   // While you plan, an enemy only shows its stance; as the turn plays, its action shows.
   // After its attack, an enemy already settles into the stance it takes next (if it's still up).
   /** Still on its feet once the turn is over (not staggered, fallen or reviving). */
@@ -1589,8 +1632,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // Staggered while Waxed (or with your flame taken), you are sealed whole in wax, and stay that way until you recover:
       // your own stagger pose (down on one knee), the wax over all of it. No flame burns on your head, except while the Warden
       // is about to take it (his Usurp Flame scene lights it itself).
-      pose: track("player", PLAYER_3D ? player3dPose(playerPose) : playerPose),
+      // (Left leg leading is drawn as Right leg leading, mirrored.)
+      pose: track("player", PLAYER_3D ? player3dPose(leftLeading ? "low-right" : playerPose) : playerPose),
       player3d: PLAYER_3D,
+      mirror: leftLeading,
+      punch: PLAYER_3D && leftPunch && PUNCH_POSES.has(playerPose),
       dead: youDead ? "pieces" : undefined,
       encased: playerSealed,
       // Waxed (or waxed by a torch, which is only a look) but still standing: wax caked on you.
@@ -1603,7 +1649,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       armorItem: p.armorItem,
       headItem: p.headItem,
       // A sideways swing's level arc, as the blow lands (the poses are the two stances, which have no trail of their own).
-      trail: playback && impact && swingOf !== "overhead" && !punching && strikeStep("player") === playback.index ? 235 : undefined,
+      trail: playback && impact && swingOf !== "overhead" && !punching && !leftPunch && strikeStep("player") === playback.index ? 235 : undefined,
       // Fallen, you drop and stay there, a little faded (instead of fading out).
       classes: youDead
         ? [...(fx.get("player")?.classes ?? []).filter(c => c !== "fx-fall"), ...(justFell("player") ? ["fx-die"] : []), "is-remains"]
@@ -1790,6 +1836,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           wheel={wheel}
           open={wheelOpen}
           highlight={highlight}
+          opened={expanded ? highlight : null}
+          sub={subSlot}
           center={wheelCenter}
           anchor={anchor}
           onHighlight={d => { if (!lesson) { if (d !== highlight) menuSound(d); setHighlight(d); } }}

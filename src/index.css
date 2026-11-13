@@ -324,6 +324,8 @@ kbd {
 /* The lines are drawn thick as the small mark and thin as the wheel (a stroke adds to their width). */
 .wheel-line { fill: #fff; stroke: #fff; stroke-width: 3; stroke-linejoin: round; pointer-events: none; transition: stroke-width 0.22s ease-out; }
 .wheel-overlay.is-open .wheel-line { stroke-width: 0; }
+/* The two short lines that show an action has alternatives: they come in while it is selected, and are gone as the wheel is only a mark. */
+.wheel-line-sub { transition: stroke-width 0.22s ease-out, opacity 0.15s; }
 @media (prefers-reduced-motion: reduce) { .wheel-overlay, .wheel-line, .wheel-piece-label { transition: none; } }
 
 /* ---------- Setup and result screens ---------- */
@@ -908,9 +910,30 @@ svg.wd-flaming .fig-ball-wax, svg.wd-flaming .fig-ball-lit, svg.wd-flaming .fig-
 .inv-figure { left: calc(20vw - var(--fig-h) * 0.4167); }
 .guide-figure { right: calc(20vw - var(--fig-h) * 0.4167); }
 .inv-figure .figure, .guide-figure .figure { width: 100%; height: 100%; }
-.inv-column { display: grid; gap: 16px; }
-/* A slot: its name, then its places (eternal, ordinary, and on the ground while something lies within reach). */
+/* The columns of gear: what you wear at the left edge, before your figure (over it, as its options open toward the middle), your weapon on the right. */
+.inv-gear-col { display: grid; gap: 16px; }
+.inv-gear-col.is-left {
+  position: absolute; z-index: 3; left: 3vw; top: var(--strip-h); bottom: var(--strip-h);
+  align-content: center; justify-items: start;
+}
+.inv-stage .inv-gear-col { position: relative; z-index: 3; justify-items: end; }
+/* A slot, and beside it (once opened with E) its options: to the right of the worn gear, to the left of the weapon. */
 .inv-row { display: flex; align-items: center; gap: 12px; }
+.inv-gear-col.is-right .inv-row, .inv-gear-col.is-right .inv-sub { flex-direction: row-reverse; }
+/* The options, as more slots in the row (no box of their own): tucked under the slot and hidden while it is closed, each slid out from beneath it to its
+ * place as it opens (the farther ones farther), and back under as it closes. One step is a slot's width and the gap. */
+.inv-row { --step: 90px; }
+.inv-place.is-slot { z-index: 2; }
+.inv-sub { display: flex; align-items: center; gap: 12px; pointer-events: none; }
+.inv-place.is-option {
+  z-index: 1; opacity: 0; transform: translateX(calc(var(--i) * var(--step) * -1));
+  transition: transform 0.22s ease-out, opacity 0.12s ease-out 0.06s;
+}
+.inv-gear-col.is-right .inv-place.is-option { transform: translateX(calc(var(--i) * var(--step))); }
+.inv-row.is-open .inv-place.is-option { opacity: 1; transform: none; transition: transform 0.24s ease-out, opacity 0.12s ease-out; }
+@media (prefers-reduced-motion: reduce) { .inv-place.is-option { transition: none; } }
+.inv-place.is-unequip { background: transparent; border-style: dashed; }
+.gear-icon.is-unequip { opacity: 0.55; }
 .inv-place {
   position: relative; display: flex; align-items: center; gap: 10px; height: 78px; min-width: 78px; padding: 8px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); text-align: left;

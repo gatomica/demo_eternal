@@ -1,7 +1,7 @@
 /**
  * GearIcons.tsx — the inventory's pictures of gear. An empty place shows a flat, simple, faded
- * icon (a sword, a chestplate). Gear shows its 3D model: the weapon as modelled (render/gear3d.ts), and the armor and head gear as
- * they are worn on the 3D player.
+ * icon (a sword, a chestplate). Gear shows its 3D model: the weapon as modelled (render/gear3d.ts), and the armor and head gear by
+ * themselves, as they sit when worn on the 3D player (without the player).
  */
 import { type ReactNode, useMemo } from "react";
 import type { ArmorItem, ArmorTier, HeadItem, WeaponItem, WeaponTier } from "../core/types";
@@ -104,7 +104,7 @@ function Weapon3D({ model, tilted }: { model: GearModel; tilted: boolean }) {
 
 /**
  * The picture of a piece of gear, from its 3D model: a weapon as modelled (`tilted` slants it to fill a square place), armor and head gear
- * as they are worn on the 3D body the fights draw you with, cut down to the chest or the head.
+ * by themselves, shaped as they are worn on the 3D body the fights draw you with (the body itself not drawn), cut down to the chest or the head.
  */
 export function GearSprite({ slot, tier, tilted, item }: { slot: Slot; tier: WeaponTier | ArmorTier; tilted?: boolean; /** One of the starting classes' own pieces: its look. */ item?: string }) {
   if (slot === "weapon") {
@@ -120,7 +120,7 @@ export function GearSprite({ slot, tier, tilted, item }: { slot: Slot; tier: Wea
   return (
     <Crop region={head ? HEAD : CHEST} className={`gear-sprite ${head ? "is-head" : "is-armor"}`}>
       <Sleepwalker3D
-        pose="p3-idle" weapon="baseline" swayId="gear-icon"
+        pose="p3-idle" weapon="baseline" swayId="gear-icon" gearOnly
         gear={head ? { armor: "none", headItem: item as HeadItem | undefined } : { armor: tier as ArmorTier, armorItem: item as ArmorItem | undefined }}
         cam={BODY_CAM} at={BODY_AT} yaw={BODY_YAW} w={BODY_W} h={BODY_H} box={BODY_BOX}
       />

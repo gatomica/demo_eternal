@@ -12,8 +12,8 @@ import { cloneElement, memo, type ReactElement, type ReactNode, useContext, useI
 import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
 import { type Cam, METERS_PER_UNIT as U, type Vec } from "./camera";
 import { DebugLimbsContext } from "./debugLimbs";
-import { arcPart, canvas3d, ellipsoidPart, Figure3DSvg, ribcagePart, sameDrawing, weaponParts } from "./figure3d";
-import { held as heldAlong, type Joint, liftPose, type P3, placeRig, poseWeaponAxis, type Rig3, ribcageOf, type Seen, swingArc } from "./rig3d";
+import { arcPart, canvas3d, ellipsoidPart, Figure3DSvg, type Part, ribcagePart, sameDrawing, weaponParts } from "./figure3d";
+import { held as heldAlong, type Joint, JOINTS, liftPose, type P3, placeRig, poseWeaponAxis, type Rig3, ribcageOf, type Seen, swingArc } from "./rig3d";
 import { ALL_POSES, type PoseName } from "./poses";
 import { modelOfWeapon } from "./gear3d";
 import { visibleCap } from "./hoodCap";
@@ -80,7 +80,7 @@ const EYE_APART = 0.42, EYE_R = 1.8;
 
 /** The swings that leave an arch behind: the strike, and the wind-up it swings from. */
 const SWINGS: Partial<Record<PoseName, PoseName>> = {
-  "sw-chop": "sw-overhead", "sw-overhead-strike": "sw-overhead-leap", "sw-swing-l": "sw-swing-l-windup", "sw-swing-r": "sw-swing-r-windup",
+  "sw-chop": "sw-overhead", "sw-overhead-strike": "sw-overhead-leap", "p3-overhead-strike": "p3-overhead-leap", "sw-swing-l": "sw-swing-l-windup", "sw-swing-r": "sw-swing-r-windup",
 };
 /** Each wind-up's strike (Arms Overhead's is the Overhead Strike's): the swing it is about to make, which its weapon's edge side faces. */
 const STRIKE_OF: Partial<Record<PoseName, PoseName>> = Object.fromEntries(
@@ -94,6 +94,16 @@ export interface Sleepwalker3DProps {
   pose: PoseName;
   hand?: Side;
   weapon: WeaponTier;
+  /**
+   * The player's Punch, thrown with the empty left hand: the pose is drawn mirrored (the body, its turn and its legs; never the gear, which stays on
+   * the side it is worn), the weapon stays in the right hand held back, and the blow is a bare-handed one (its arch from the hand).
+   */
+  punch?: boolean;
+  /**
+   * The pose drawn mirrored, the gear not (as for a Punch), and the weapon still in the right hand, pointing as the mirrored pose points it: the
+   * player's Left leg leading stance, the mirror of Right leg leading.
+   */
+  mirror?: boolean;
   /** A patrol warden: the Penitent Warden's pointed hood over its head (its face in shadow). */
   hooded?: boolean;
   /** Wax sealing the whole body. */
@@ -108,6 +118,11 @@ export interface Sleepwalker3DProps {
    * the head.
    */
   gear?: { weaponItem?: WeaponItem; armor: ArmorTier; armorItem?: ArmorItem; headItem?: HeadItem };
+  /**
+   * Only the gear, without the body that wears it (the inventory's pictures of armor and head gear): the head, the eyes, the neck, a bare ribcage
+   * and the bare limbs are left out. The limbs stay where they are the gear's own cloth (the Hunter's garb, the Nomad's robe).
+   */
+  gearOnly?: boolean;
   eternalFlash?: string;
   title?: string;
   /** Which figure it is, so the sway of its cloth carries on from one drawing of it to the next (see sway.ts). */
@@ -126,6 +141,24 @@ export interface Sleepwalker3DProps {
 
 /** A pose lifted the sleepwalkers' way: two free legs, the weapon in both hands where the pose holds it so. */
 const lift = (pose: PoseName, hand: Side, reach: number) => liftPose(ALL_POSES[pose], hand, { freeLegs: true, weaponReach: reach });
+
+/**
+ * A rig mirrored left to right: the body's lateral side negated and every right joint swapped with its left, so the right shoulder is still on the right
+ * (the gear is placed from the joints, and stays on the side it is worn). The arm that was the weapon arm is now the left one, and the right arm is
+ * the mirror of the free arm (the weapon in its hand, held low).
+ */
+function punched(rig: Rig3): Rig3 {
+  const flip = (p: P3): P3 => [-p[0], p[1], p[2]];
+  const joints = {} as Record<Joint, P3>;
+  for (const j of JOINTS) {
+    const from = (j.endsWith("R") ? `${j.slice(0, -1)}L` : j.endsWith("L") ? `${j.slice(0, -1)}R` : j) as Joint;
+    joints[j] = flip(rig.joints[from]);
+  }
+  return { ...rig, joints, gaze: rig.gaze && flip(rig.gaze), prop: rig.prop && { ...rig.prop, at: flip(rig.prop.at) }, weaponHand: "right" };
+}
+
+/** In a Punch the weapon in the right hand points down and ahead, low, out of the blow's way. */
+const HELD_BACK_WAY: P3 = [0.08, -0.8, 0.6];
 
 /** The weapon in the hand that holds it, pointing as the pose's flat drawing points it, kept off the floor. */
 const weaponIn = (rig: Rig3, pose: PoseName, reach: number) =>
@@ -195,7 +228,7 @@ function hull(ps: [number, number][]): [number, number][] {
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
-function Sleepwalker3DView({ pose: shown, hand = "right", weapon, hooded: hoodedKind, encased, waxCaked, dead, gear, eternalFlash, title, swayId, cam, at, yaw, scale = 1, w, h, box }: Sleepwalker3DProps) {
+function Sleepwalker3DView({ pose: shown, hand = "right", weapon, punch: punching, mirror, gearOnly, hooded: hoodedKind, encased, waxCaked, dead, gear, eternalFlash, title, swayId, cam, at, yaw, scale = 1, w, h, box }: Sleepwalker3DProps) {
   const openingId = useId(); // (the clip that cuts the face to the black hood's opening)
   // The cloth that hangs from it (the tailcoat, the braid, the leather skirt) sways with its movement (sway.ts).
   const root = useRef<SVGSVGElement>(null);
@@ -207,7 +240,16 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, hooded: hooded
   const debug = useContext(DebugLimbsContext);
   // Its weapon, modelled in 3D (gear3d.ts); the flat sprite only if there were none.
   const model = modelOfWeapon(weapon, gear?.weaponItem), reach = model?.reach ?? WEAPON_REACH[weapon];
-  const rig = useMemo(() => (dead ? fallen(lift(pose, hand, reach)) : lift(pose, hand, reach)), [pose, hand, reach, dead]);
+  // A Punch: the very pose you see in the same blow with the weapon, mirrored (lifted the same way, with the weapon's length, so the arms are where
+  // that pose has them), both arms included.
+  const punch = !!punching && !dead;
+  /** Drawn mirrored: a Punch, or a mirrored stance. */
+  const flipped = (punch || !!mirror) && !dead;
+  const liftFor = (p: PoseName) => (flipped ? punched(lift(p, "right", reach)) : lift(p, hand, reach));
+  const rig = useMemo(() => (dead ? fallen(lift(pose, hand, reach)) : liftFor(pose)), [pose, hand, reach, dead, flipped]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** Nothing in the hand that swings: bare hands, or a Punch (the left hand's; the weapon is held back in the other). */
+  const bare = weapon === "baseline" || punch;
+  const fist: Joint = punch ? "handL" : "handR", fistShoulder: Joint = punch ? "shoulderL" : "shoulderR";
   /** A way on the body as it stood, as it is now (tipped onto its back, if dead). */
   const way = (v: P3): P3 => (dead ? fall(v, 0, false) : v);
   // The arch of a strike: from where the weapon's far end was in the wind-up to where it ends (bare-handed, from the hand), as thick as the
@@ -216,20 +258,20 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, hooded: hooded
   // (A level swing across her front, left or right, reached furthest straight ahead halfway through, the arm fully stretched out: its arch passes there.)
   const arc = useMemo(() => {
     if (!windUp) return undefined;
-    const before = lift(windUp, hand, reach);
-    const [from, to] = weapon === "baseline" ? [before.joints.handR, rig.joints.handR] : [weaponIn(before, windUp, reach).tip, weaponIn(rig, pose, reach).tip];
-    const sh = rig.joints.shoulderR, far = (RIG.upperArm + RIG.forearm + (weapon === "baseline" ? 0 : reach)) * U;
+    const before = liftFor(windUp);
+    const [from, to] = bare ? [before.joints[fist], rig.joints[fist]] : [weaponIn(before, windUp, reach).tip, weaponIn(rig, pose, reach).tip];
+    const sh = rig.joints[fistShoulder], far = (RIG.upperArm + RIG.forearm + (bare ? 0 : reach)) * U;
     const mid: P3 | undefined = ACROSS.has(pose) ? [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, sh[2] + far] : undefined;
-    return swingArc(from, to, weapon === "baseline" ? undefined : model && model.damage * U, mid);
-  }, [windUp, pose, hand, rig, weapon, reach, model]);
+    return swingArc(from, to, bare ? undefined : model && model.damage * U, mid);
+  }, [windUp, pose, hand, rig, weapon, reach, model, bare, fist, fistShoulder, flipped]); // eslint-disable-line react-hooks/exhaustive-deps
   // The swing this pose is part of, for the weapon's edge side to lead through: its own strike's arch, or (a wind-up) the one it is about to make.
   const swing = useMemo(() => {
-    if (weapon === "baseline") return undefined;
+    if (bare) return undefined;
     const strike = windUp ? pose : STRIKE_OF[pose], from = windUp ?? pose;
     if (!strike) return undefined;
     const arch = strike === pose && arc ? arc : swingArc(weaponIn(lift(from, hand, reach), from, reach).tip, weaponIn(lift(strike, hand, reach), strike, reach).tip);
     return { arc: arch, at: (strike === pose ? 1 : 0) as 0 | 1 };
-  }, [windUp, pose, hand, reach, weapon, arc]);
+  }, [windUp, pose, hand, reach, bare, arc]);
   const c = canvas3d(placeRig(rig, at, yaw, cam, w, h, scale), box);
   const { seen, see, X, Y, scaleAt, parts, bones, ball, behind, meet } = c;
   const red = (side: "R" | "L") => (debug && side === "R" ? " dbg-red" : "");
@@ -408,11 +450,12 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, hooded: hooded
         bones(`leg${side}`, [hip, knee, foot], `fig-limb${red(side)}`, LIMB);
       }
     }
-    // The player's torso: its armor over the ribcage (the bronze chestplate, the black garb, the white robe, or plain armor), and no ribs showing.
+    // The player's torso: its armor over the ribcage (the bronze chestplate, the black garb, the white robe, or plain armor), no ribs showing; with no
+    // armor on, the bare ribcage, ribs and all, as a sleepwalker's.
     const chest = !gear ? undefined
       : gear.armorItem === "bronze-chestplate" ? "fig-chest-bronze" : gear.armorItem === "garb" ? "fig-chest-garb" : gear.armorItem === "robe" ? "fig-chest-robe"
-      : gear.armor !== "none" ? "fig-armor-fill" : "fig-ribcage";
-    parts.push(ribcagePart(c, rig, gear ? { cls: chest, ribs: false, sternum: shod ? "fig-chest-line" : undefined } : {}));
+      : gear.armor !== "none" ? "fig-armor-fill" : undefined;
+    parts.push(ribcagePart(c, rig, chest ? { cls: chest, ribs: false, sternum: shod ? "fig-chest-line" : undefined } : {}));
     // The Nomad's collar: a V on the front of the chest, from high on each side of the neck down to a point on the breastbone, on the ribcage's surface (only what
     // faces the viewer shows), laid just over it.
     if (robed) {
@@ -804,6 +847,8 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, hooded: hooded
     const hand3 = rig.weaponHand === "right" ? rig.joints.handR : rig.joints.handL;
     const held = dead
       ? heldAlong([hand3[0], 1.2 * U, hand3[2]], way([rig.weaponHand === "right" ? 0.55 : -0.55, -0.83, 0]), reach, 0.5)
+      : punch ? heldAlong(hand3, HELD_BACK_WAY, reach)
+      : flipped ? ((a: P3) => heldAlong(hand3, [-a[0], a[1], a[2]], reach))(poseWeaponAxis(ALL_POSES[pose]))
       : weaponIn(rig, pose, reach);
     // (its middle, between the neck and the pelvis: out of a swing the weapon's edge side faces away from it)
     const wielder: P3 | undefined = dead ? undefined : [0, 1, 2].map(i => (rig.joints.neck[i] + rig.joints.pelvis[i]) / 2) as unknown as P3;
@@ -814,7 +859,7 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, hooded: hooded
     if (!dead && gear.length) {
       const over = Math.min(...gear.map(g => g.depth)) - 0.001;
       const asDrawn = raw.for3d ? { ...raw, ...raw.for3d } : raw;
-      const holding = asDrawn.grip ? (["R", "L"] as const) : ([rig.weaponHand === "right" ? "R" : "L"] as const);
+      const holding = asDrawn.grip && !flipped ? (["R", "L"] as const) : ([rig.weaponHand === "right" ? "R" : "L"] as const);
       for (const side of holding) {
         bones(`grip${side}`, [`hand${side}`, `hand${side}`] as Joint[], encased ? "fig-wax-shell" : `fig-limb${red(side)}`, encased ? SHELL : LIMB);
         const dot = parts[parts.length - 1];
@@ -869,7 +914,22 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, hooded: hooded
   }
   // The marker the cloth's sway is measured from: where the pelvis is on the screen (nothing to see).
   if (shod || garbed || masked) parts.push({ key: "sway-anchor", depth: 1e9, node: <circle key="sway-anchor" data-sway-anchor="" cx={X(seen.pelvis)} cy={Y(seen.pelvis)} r={0.2} fill="none" /> });
-  return <Figure3DSvg rootRef={root} parts={parts} title={title} className={gear?.armorItem ? `armor-${gear.armorItem}` : undefined} />;
+  const shownParts = gearOnly ? parts.filter(x => wornGear(x, gear)) : parts;
+  return <Figure3DSvg rootRef={root} parts={shownParts} title={title} className={gear?.armorItem ? `armor-${gear.armorItem}` : undefined} />;
+}
+
+/**
+ * Whether a part is gear rather than the body wearing it (`gearOnly`): never the head (but the Desert Mask, which is drawn as it), its eyes or the neck; the ribcage only under armor; a limb
+ * only where it is gear (leather, black or robe cloth) or the whole outfit is cloth (the Hunter's garb, the Nomad's robe dress the limbs themselves).
+ */
+function wornGear(x: Part, gear: Sleepwalker3DProps["gear"]): boolean {
+  const cls = ((x.node as ReactElement<{ className?: string }> | null)?.props?.className ?? "").replace(/\bdbg-\S+/g, "").trim();
+  // (the Desert Mask is drawn as the head's own ball, in its cloth: kept, its opening too, but not the eyes behind it)
+  if (/\bfig-mask\b/.test(cls)) return true;
+  if (/\bfig-(head|eyes)\b/.test(cls) || x.key === "neck" || x.key === "hood-face") return false; // (nor the face set back in the black hood's opening: its dark inside shows there instead)
+  if (x.key === "ribcage") return !!gear && (gear.armor !== "none" || !!gear.armorItem);
+  if (cls === "fig-limb") return gear?.armorItem === "garb" || gear?.armorItem === "robe";
+  return true;
 }
 
 /** The figure, worked out again only when something it is drawn from has changed (`sameDrawing`). */

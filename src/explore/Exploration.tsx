@@ -258,7 +258,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
     if (!item.gear) return;
     if (item.gear.eternal) { takeFromGround(item.id); return; }
     const row = Math.max(0, SLOTS.indexOf(item.gear.slot));
-    // An empty ordinary place takes it at once (not wielded); the inventory opens on it, to wield it with E.
+    // An empty ordinary place takes it at once (not wielded); the inventory opens on it, that slot's options open with it under the cursor, to wield it with E.
     if (!pieceAt(invRef.current, item.gear.slot, "normal")) {
       takeFromGround(item.id);
       setScreen({ kind: "inventory", start: { row, place: "normal" } });

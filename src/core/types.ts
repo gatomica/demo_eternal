@@ -25,6 +25,8 @@ export interface PlayerAction {
   target?: string;
   /** An Attack with its own weight (for future weapon skills). Otherwise the weapon's. */
   weight?: WeaponTier;
+  /** An Attack thrown with the empty left hand (the Punch): the blow is the left hand's, whatever the weapon in the right. */
+  hand?: Side;
 }
 
 /** What an enemy telegraphs during planning. */

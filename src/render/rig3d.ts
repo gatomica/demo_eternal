@@ -216,6 +216,30 @@ function liftPoseNow(drawn: Skeleton, handGiven: Side, opts: LiftOptions): Rig3 
       joints[`foot${side}` as Joint] = along(knee, plan[1], RIG.shin);
     }
   }
+  // The knees turned out (`kneesOut3`): each about the line from its hip to its foot, toward its own side, the hip and foot staying put.
+  if (opts.freeLegs && raw.kneesOut3) {
+    for (const side of ["R", "L"] as const) {
+      const sg = side === "R" ? 1 : -1, hip = joints[`hip${side}` as Joint], foot = joints[`foot${side}` as Joint], knee = joints[`knee${side}` as Joint];
+      const ax = [foot[0] - hip[0], foot[1] - hip[1], foot[2] - hip[2]], al = Math.hypot(...ax) || 1, u = [ax[0] / al, ax[1] / al, ax[2] / al];
+      const v = [knee[0] - hip[0], knee[1] - hip[1], knee[2] - hip[2]], dot = v[0] * u[0] + v[1] * u[1] + v[2] * u[2];
+      const cross = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+      // (Rodrigues, turned whichever way takes the knee out to its side)
+      const turned = (deg: number): P3 => {
+        const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+        return [0, 1, 2].map(i => hip[i] + v[i] * c + cross[i] * s + u[i] * dot * (1 - c)) as unknown as P3;
+      };
+      const plus = turned(raw.kneesOut3), minus = turned(-raw.kneesOut3);
+      joints[`knee${side}` as Joint] = sg * plus[0] >= sg * minus[0] ? plus : minus;
+    }
+  }
+  // The hips turned (`hips3`): the hips and legs yawed about the vertical through the pelvis, as `turn3` turns what is above it.
+  if (raw.hips3) {
+    const a = (raw.hips3 * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a), pv = joints.pelvis;
+    for (const j of ["hipR", "hipL", "kneeR", "kneeL", "footR", "footL"] as const) {
+      const p = joints[j];
+      joints[j] = [pv[0] + (p[0] - pv[0]) * c + (p[2] - pv[2]) * s, p[1], pv[2] - (p[0] - pv[0]) * s + (p[2] - pv[2]) * c];
+    }
+  }
   // A slouch: the shoulders rounded forward (and a little down), the arms going with them unless they reach their own spots after (`arms3`).
   if (raw.hunch3) {
     const f = raw.hunch3 * U, d = (raw.hunch3 / 3) * U;

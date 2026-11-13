@@ -8,8 +8,9 @@ import { isAvailable } from "../core/conditions";
 import { describeAction } from "../core/intents";
 import type { ActionDef } from "../core/patterns";
 import { createCombat } from "../core/setup";
+import { mirrorStance, swingFor } from "../core/stance";
 import type { PoseName } from "../render/poses";
-import type { ArmorItem, ArmorTier, CombatState, HeadItem, Line, PlayerAction, Stance, WeaponTier } from "../core/types";
+import type { ArmorItem, ArmorTier, CombatState, HeadItem, Line, PlayerAction, Stance, Swing, WeaponTier } from "../core/types";
 import { ITEMS } from "../explore/items";
 
 /** Kinds that are only a part of a multi-target enemy: the viewer shows the whole body instead. */
@@ -17,8 +18,8 @@ const PART_KINDS = new Set<KindId>(Object.values(BODIES).flatMap(b => b.parts.ma
 
 /**
  * The weapon and armor variants of an enemy: the same wretch with something else in its hand (or on its head). The viewer folds them into the enemy
- * as statuses to turn on and off (one at a time), instead of listing each as an enemy of its own. (The Wax Blob is not one of these: it is an enemy
- * of its own, with parts.)
+ * as statuses to turn on and off (one at a time), instead of listing each as an enemy of its own. A status is named by its label, so a body's parts
+ * share it: the Wax Blob's Hammer gives both its side parts the Super Wax Blob's hammers.
  */
 export const VARIANTS: Partial<Record<KindId, { kind: KindId; label: string }[]>> = {
   waxed: [{ kind: "waxedChisel", label: "Chisel" }, { kind: "waxedHammer", label: "Hammer" }],
@@ -27,6 +28,8 @@ export const VARIANTS: Partial<Record<KindId, { kind: KindId; label: string }[]>
     { kind: "sleepwalkerHammer", label: "Hammer" },
     { kind: "patrolWarden", label: "Patrol warden: torch, hood" },
   ],
+  blobLeft: [{ kind: "blobLeftHammer", label: "Hammer" }],
+  blobRight: [{ kind: "blobRightHammer", label: "Hammer" }],
 };
 
 /** The enemy a variant is a variant of. */
@@ -34,11 +37,18 @@ const BASE_OF = new Map<KindId, KindId>(Object.entries(VARIANTS).flatMap(([base,
 
 /** The statuses the viewer offers for an enemy's variants: one to turn on for each, all off for the enemy as it is. */
 export const variantToggles = (sub: EnemySubject): StatusToggle[] =>
-  (VARIANTS[sub as KindId] ?? []).map(x => ({ key: `variant:${x.kind}`, off: `${x.label}: off`, on: `${x.label}: on` }));
+  [...new Set(partsOf(sub).flatMap(k => (VARIANTS[k] ?? []).map(x => x.label)))].map(label => ({ key: `variant:${label}`, off: `${label}: off`, on: `${label}: on` }));
+
+/**
+ * Enemies the viewer does not list, since their own enemy shows them: the Lit waxed (the waxed with its Lit status on) and the Super Wax Blob (the
+ * Wax Blob with Hammer on).
+ */
+const NOT_LISTED = new Set<string>(["waxedLit", "waxedChiselLit", "waxedHammerLit", "superBlob"]);
 
 /** What the viewer can look at, besides you: each enemy (its variants folded into it), and each multi-target enemy as one body (all its parts at once). */
 export type EnemySubject = KindId | BodyId;
-export const VIEWER_SUBJECTS: EnemySubject[] = [...(Object.keys(ENEMY_KINDS) as KindId[]).filter(k => !PART_KINDS.has(k) && !BASE_OF.has(k)), ...(Object.keys(BODIES) as BodyId[])];
+export const VIEWER_SUBJECTS: EnemySubject[] = [...(Object.keys(ENEMY_KINDS) as KindId[]).filter(k => !PART_KINDS.has(k) && !BASE_OF.has(k)), ...(Object.keys(BODIES) as BodyId[])]
+  .filter(sub => !NOT_LISTED.has(sub));
 
 /** The name the viewer gives a subject. */
 export const subjectName = (sub: EnemySubject) => (sub in BODIES ? BODIES[sub as BodyId].name : ENEMY_KINDS[sub as KindId].name);
@@ -120,7 +130,7 @@ const shouldHold = (show: ViewerShow, i: number) => show.parts.length > 1 && typ
 function applyPart(e: CombatState["enemies"][number], part: PartShow, show: ViewerShow, played: boolean, hold: boolean) {
   // A variant that is on: it is that kind (its weapon, armor, health and looks); with none on, the enemy as it is. (Whichever the fight last held.)
   const base = BASE_OF.get(e.kind as KindId) ?? (e.kind as KindId);
-  const chosen = VARIANTS[base]?.find(x => show.on[`variant:${x.kind}`])?.kind ?? base;
+  const chosen = VARIANTS[base]?.find(x => show.on[`variant:${x.label}`])?.kind ?? base;
   if (e.kind !== chosen) {
     const k = ENEMY_KINDS[chosen];
     e.kind = chosen;
@@ -223,6 +233,16 @@ export const PLAYER_POSES: PoseName[] = ["idle", "low", "low-left", "low-right",
 /** What the dummy in front of you does while you act. */
 type FoeDoes = "strike" | "rest";
 
+/** The stances you can stand in, in the viewer (core/stance.ts), and Staggered (down on one knee: your only action is to recover). */
+export type PlayerViewStance = Stance | "staggered";
+export const PLAYER_STANCES: { id: PlayerViewStance; label: string }[] = [
+  { id: "idle", label: "Idle" },
+  { id: "low", label: "Lowered" },
+  { id: "lead-left", label: "Left Lead" },
+  { id: "lead-right", label: "Right Lead" },
+  { id: "staggered", label: "Staggered" },
+];
+
 /** An action of yours to play, and what the dummy does meanwhile (so there is something to block, dodge or hit). */
 export interface PlayerScenario {
   id: string;
@@ -230,33 +250,58 @@ export interface PlayerScenario {
   /** What it shows: its target is filled in with the dummy's id (or "self"). */
   action: { type: PlayerAction["type"]; target: "foe" | "self" };
   foe: FoeDoes;
-  /** You start staggered, so the turn is your forced recovery. */
-  staggered?: boolean;
-  /** The stance you start in (default idle), and the line the dummy stands on (default front): an attack swings by both. */
-  stance?: Stance;
+  /** The Punch: the empty left hand's blow (bare hands' weight), the mirror of the same blow with the right. */
+  punch?: boolean;
+  /** The line the dummy stands on (default front): an attack at the back line always swings overhead. */
   foeLine?: Line;
 }
 
-export const PLAYER_SCENARIOS: PlayerScenario[] = [
-  { id: "attack", label: "Attack", action: { type: "attack", target: "foe" }, foe: "rest" },
-  { id: "attack-low", label: "Attack from lowered", action: { type: "attack", target: "foe" }, foe: "rest", stance: "low" },
-  { id: "attack-lead-left", label: "Attack, left leg leading", action: { type: "attack", target: "foe" }, foe: "rest", stance: "lead-left" },
-  { id: "attack-lead-right", label: "Attack, right leg leading", action: { type: "attack", target: "foe" }, foe: "rest", stance: "lead-right" },
-  { id: "attack-back", label: "Attack the back line", action: { type: "attack", target: "foe" }, foe: "rest", stance: "low", foeLine: "back" },
-  { id: "block", label: "Block", action: { type: "block", target: "foe" }, foe: "strike" },
-  { id: "dodge-fwd", label: "Dodge forward", action: { type: "maneuver", target: "foe" }, foe: "strike" },
-  { id: "dodge-back", label: "Dodge back", action: { type: "maneuver", target: "self" }, foe: "strike" },
-  { id: "advance", label: "Advance", action: { type: "maneuver", target: "foe" }, foe: "rest" },
-  { id: "fall-back", label: "Fall back", action: { type: "maneuver", target: "self" }, foe: "rest" },
-  { id: "rest", label: "Rest", action: { type: "rest", target: "self" }, foe: "rest" },
-  { id: "rest-broken", label: "Rest, broken by a blow", action: { type: "rest", target: "self" }, foe: "strike" },
-  { id: "recover", label: "Staggered recovery", action: { type: "rest", target: "self" }, foe: "rest", staggered: true },
-];
+/**
+ * An attack's name in the viewer: a sideways swing from a leading stance is an Openhand Swing (a Swing Left, or the left hand's mirror of it) or a
+ * Backhand Swing (a Swing Right, or its mirror), whichever hand throws it; otherwise it is named by the hand (Mainhand, the right; Offhand, the left).
+ */
+function attackName(stance: Stance, swing: Swing, punch: boolean): string {
+  if (swing !== "overhead" && (stance === "lead-left" || stance === "lead-right")) return swing === "left" ? "Openhand Swing" : "Backhand Swing";
+  return `${punch ? "Offhand" : "Mainhand"} ${swing === "overhead" ? "Overhead" : "Swing"}`;
+}
+
+/**
+ * The actions you can play from a stance: the attacks it swings (core/stance.ts `swingFor`: overhead from Idle, otherwise to the side the stance
+ * swings to; the back line is always overhead, so it is only listed where it differs), each with the main hand and as a Punch (the left hand's,
+ * swung as the right would from the mirrored stance: from a leading stance, the other of the Openhand and Backhand), then every other action.
+ * Staggered, only the recovery.
+ */
+export function playerScenariosFrom(stance: PlayerViewStance): PlayerScenario[] {
+  if (stance === "staggered") return [{ id: "recover", label: "Staggered recovery", action: { type: "rest", target: "self" }, foe: "rest" }];
+  const front = { line: "front" as Line, staggered: false };
+  const attacks: PlayerScenario[] = [
+    { id: "attack", label: attackName(stance, swingFor(stance, front), false), action: { type: "attack", target: "foe" }, foe: "rest" },
+    { id: "punch", label: attackName(stance, swingFor(mirrorStance(stance), front), true), action: { type: "attack", target: "foe" }, foe: "rest", punch: true },
+  ];
+  if (stance !== "idle") {
+    attacks.push(
+      { id: "attack-back", label: "Mainhand Overhead, at the back line", action: { type: "attack", target: "foe" }, foe: "rest", foeLine: "back" },
+      { id: "punch-back", label: "Offhand Overhead, at the back line", action: { type: "attack", target: "foe" }, foe: "rest", foeLine: "back", punch: true },
+    );
+  }
+  return [
+    ...attacks,
+    { id: "block", label: "Block", action: { type: "block", target: "foe" }, foe: "strike" },
+    { id: "dodge-fwd", label: "Dodge forward", action: { type: "maneuver", target: "foe" }, foe: "strike" },
+    { id: "dodge-back", label: "Dodge back", action: { type: "maneuver", target: "self" }, foe: "strike" },
+    { id: "advance", label: "Advance", action: { type: "maneuver", target: "foe" }, foe: "rest" },
+    { id: "fall-back", label: "Fall back", action: { type: "maneuver", target: "self" }, foe: "rest" },
+    { id: "rest", label: "Rest", action: { type: "rest", target: "self" }, foe: "rest" },
+    { id: "rest-broken", label: "Rest, broken by a blow", action: { type: "rest", target: "self" }, foe: "strike" },
+  ];
+}
 
 /** The dummy's id in the player viewer's fight. */
 const FOE_ID = "e0";
 
-export const playerActionOf = (sc: PlayerScenario): PlayerAction => ({ type: sc.action.type, target: sc.action.target === "foe" ? FOE_ID : "self" });
+export const playerActionOf = (sc: PlayerScenario): PlayerAction => ({
+  type: sc.action.type, target: sc.action.target === "foe" ? FOE_ID : "self", ...(sc.punch ? { weight: "baseline" as const, hand: "left" as const } : {}),
+});
 
 /** The armor and head gear the viewer puts on you: the starting classes' own pieces, worn (none: plain armor of the picked tier, bare-headed). */
 export interface Wear { armor?: ArmorItem; head?: HeadItem }
@@ -274,11 +319,11 @@ export function playerViewerFight(weapon: WeaponTier, armor: ArmorTier): CombatS
 }
 
 /**
- * Sets the scene for a scenario (or for a held pose, with none): the dummy stands in front of
- * you, whole, doing what the scenario needs, and you start staggered if it says so. Always the
- * same start, so every play of an action begins from the same spot.
+ * Sets the scene for a stance and a scenario (none: just standing there): you in the stance (Staggered: down on one knee, your turn
+ * the recovery), the dummy in front of you, whole, doing what the scenario needs. Always the same start, so every play of an action
+ * begins from the same spot.
  */
-export function applyPlayerShow(s: CombatState, weapon: WeaponTier, armor: ArmorTier, scenario?: PlayerScenario, wear: Wear = {}): CombatState {
+export function applyPlayerShow(s: CombatState, weapon: WeaponTier, armor: ArmorTier, stance: PlayerViewStance, scenario?: PlayerScenario, wear: Wear = {}): CombatState {
   const v = structuredClone(s);
   v.player.weapon = weapon;
   // What you wear: a class's own armor (its tier is the item's) or plain armor of a tier, and its head gear (or none).
@@ -286,9 +331,9 @@ export function applyPlayerShow(s: CombatState, weapon: WeaponTier, armor: Armor
   v.player.armor = wear.armor ? (ITEMS[wear.armor].tier as ArmorTier) : armor;
   v.player.headItem = wear.head;
   v.player.head = wear.head ? (ITEMS[wear.head].tier as ArmorTier) : "none";
-  v.player.staggered = !!scenario?.staggered;
-  v.player.stance = scenario?.stance ?? "idle";
-  v.player.fatigue = scenario?.staggered ? v.player.hp : 0;
+  v.player.staggered = stance === "staggered";
+  v.player.stance = stance === "staggered" ? "idle" : stance;
+  v.player.fatigue = stance === "staggered" ? v.player.hp : 0;
   const e = v.enemies[0];
   const kind = kindOf(e);
   e.alive = true;
@@ -298,9 +343,9 @@ export function applyPlayerShow(s: CombatState, weapon: WeaponTier, armor: Armor
   e.fatigue = 0;
   e.line = scenario?.foeLine ?? "front";
   const strike = scenario?.foe === "strike";
-  const stance = strike ? "Charging" : "Struggling";
+  const foeStance = strike ? "Charging" : "Struggling";
   const action = kind.pattern.actions.get(strike ? "swing left" : "despair");
-  if (action) e.intent = { ...describeAction(e.kind, e.line, stance, action), pose: kind.stancePoses[stance] };
+  if (action) e.intent = { ...describeAction(e.kind, e.line, foeStance, action), pose: kind.stancePoses[foeStance] };
   v.status = "playing";
   return v;
 }

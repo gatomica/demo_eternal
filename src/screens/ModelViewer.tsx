@@ -10,11 +10,10 @@ import { ENEMY_KINDS, type StatusToggle } from "../core/bestiary";
 import { needText } from "../core/conditions";
 import { nextStances } from "../core/patterns";
 import type { CombatState } from "../core/types";
-import { ARMOR, WEAPONS } from "../core/rules";
+import { WEAPONS } from "../core/rules";
 import type { ArmorItem, ArmorTier, HeadItem, WeaponTier } from "../core/types";
 import { ITEMS } from "../explore/items";
-import type { PoseName } from "../render/poses";
-import { actionPosesOf, applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, variantToggles, type EnemySubject, LINE_TOGGLE, MODEL, MODEL_VIEW, partLabel, partsOf, PLAYER_POSES, PLAYER_SCENARIOS, playerActionOf, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow, type Wear, WEARABLES, wearOf } from "./viewerModel";
+import { actionPosesOf, applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, variantToggles, type EnemySubject, LINE_TOGGLE, MODEL, MODEL_VIEW, partLabel, partsOf, PLAYER_STANCES, playerActionOf, playerScenariosFrom, type PlayerViewStance, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow, type Wear, WEARABLES, wearOf } from "./viewerModel";
 import { GearViewer } from "./GearViewer";
 import { WearViewer } from "./WearViewer";
 import { GEAR_WEAPONS, type GearId } from "../render/gear3d";
@@ -382,30 +381,34 @@ function ViewerFight({ subject, onBack, onRetry, onExit }: {
 }
 
 /**
- * The player in the viewer: pick the weapon and armor, hold any pose still (or the Model stance:
- * a T-pose from four angles), or play one of your actions against a dummy Sleepwalker that does
+ * The player in the viewer: pick the weapon and armor, and a stance to stand in (or Dead, or the Model
+ * stance: a T-pose to orbit), then play the actions you have from that stance (the attacks it swings,
+ * each with the main hand and as a Punch, and everything else) against a dummy Sleepwalker that does
  * what the action needs (strikes, so there is something to block or dodge; or rests, so there is
- * something to hit). Every play starts from the same spot.
+ * something to hit). Every play starts from the same spot, in the stance picked.
  */
 function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?: Wear; onBack: () => void; onRetry: () => void; onExit: () => void }) {
   // What you wear: a class's armor (else plain armor of the Armor tier) and head gear; opened from the Wearing row, the piece picked there.
   const [armorItem, setArmorItem] = useState<ArmorItem | "none">(wearing.armor ?? "none");
   const [headItem, setHeadItem] = useState<HeadItem | "none">(wearing.head ?? "none");
   const [weapon, setWeapon] = useState<WeaponTier>("normal");
-  const [armor, setArmor] = useState<ArmorTier>("light");
-  /** The pose held still, or "model" for the T-pose. */
-  const [held, setHeld] = useState<PoseName | "model" | "dead">("idle");
+  // (Plain: no armor, as you look in the game without any; the Body row picks a class's armor instead.)
+  const armor: ArmorTier = "none";
+  /** The stance you stand in (and play your actions from), or "dead", or "model" for the T-pose. */
+  const [held, setHeld] = useState<PlayerViewStance | "model" | "dead">("idle");
+  const stance: PlayerViewStance = held === "model" || held === "dead" ? "idle" : held;
+  const scenarios = playerScenariosFrom(stance);
   const { orbit, reset } = useOrbit("player");
   const [scenarioId, setScenarioId] = useState<string | undefined>();
   const [lit, setLit] = useState(true);
   const [shade, setShade] = useState(true);
   const [debug, setDebug] = useState(false);
   const [playSignal, setPlaySignal] = useState(0);
-  const scenario = PLAYER_SCENARIOS.find(sc => sc.id === scenarioId);
+  const scenario = scenarios.find(sc => sc.id === scenarioId);
   const initial = useMemo(() => playerViewerFight("normal", "light"), []);
   const override = useCallback(
-    (s: CombatState) => applyPlayerShow(s, weapon, armor, scenario, { armor: armorItem === "none" ? undefined : armorItem, head: headItem === "none" ? undefined : headItem }),
-    [weapon, armor, scenario, armorItem, headItem],
+    (s: CombatState) => applyPlayerShow(s, weapon, armor, stance, scenario, { armor: armorItem === "none" ? undefined : armorItem, head: headItem === "none" ? undefined : headItem }),
+    [weapon, armor, stance, scenario, armorItem, headItem],
   );
   const model = held === "model";
   const play = (id: string) => {
@@ -436,16 +439,15 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
         </div>
       </div>
       {chips("Weapon", Object.keys(WEAPONS) as WeaponTier[], weapon, o => (o === "baseline" ? "None" : WEAPONS[o].name), setWeapon)}
-      {armorItem === "none" && chips("Armor", Object.keys(ARMOR) as ArmorTier[], armor, o => ARMOR[o].label, setArmor)}
       {chips("Body", ["none" as const, ...WEARABLES.filter(id => ITEMS[id].slot === "armor") as ArmorItem[]], armorItem, o => (o === "none" ? "Plain" : ITEMS[o].name), setArmorItem)}
       {chips("Head", ["none" as const, ...WEARABLES.filter(id => ITEMS[id].slot === "head") as HeadItem[]], headItem, o => (o === "none" ? "Bare" : ITEMS[o].name), setHeadItem)}
-      {chips("Pose", [...PLAYER_POSES, "dead" as const, "model" as const], held, o => (o === "model" ? MODEL : o === "dead" ? "Dead" : o), o => { setHeld(o); setScenarioId(undefined); })}
+      {chips("Stance", [...PLAYER_STANCES.map(st => st.id), "dead" as const, "model" as const], held, o => (o === "model" ? MODEL : o === "dead" ? "Dead" : PLAYER_STANCES.find(st => st.id === o)!.label), o => { setHeld(o); setScenarioId(undefined); })}
       {model && <ViewControl onReset={reset} />}
       {!model && held !== "dead" && (
         <div className="viewer-section">
           <span className="picker-label">Actions</span>
           <div className="picker-options">
-            {PLAYER_SCENARIOS.map(sc => (
+            {scenarios.map(sc => (
               <button key={sc.id} className="chip viewer-action" onClick={e => { e.currentTarget.blur(); play(sc.id); }}>
                 ▶ {sc.label} <span className="viewer-kind">{sc.action.type}</span>
               </button>
@@ -465,7 +467,9 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
       debugLimbs={debug}
       playSignal={playSignal}
       playerAction={scenario ? playerActionOf(scenario) : undefined}
-      playerHold={model ? "t-pose" : held === "dead" ? undefined : held}
+      // Once an action has played you stay in the stance it left you in (staggered: down on one knee), and its actions are offered next.
+      onTurnPlayed={s => setHeld(s.player.staggered ? "staggered" : s.player.stance)}
+      playerHold={model ? "t-pose" : undefined}
       playerDead={held === "dead"}
       orbit={model ? orbit : undefined}
       peek={{ focus: "player" }}

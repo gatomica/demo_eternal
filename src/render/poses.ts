@@ -183,6 +183,16 @@ export interface Skeleton {
    */
   splay3?: number;
   /**
+   * The 3D rig only, free legs: each knee turned out to its own side this many degrees, about the line from its hip to its foot, so the knees
+   * spread apart while the hips and feet stay where they are (and the legs keep their length).
+   */
+  kneesOut3?: number;
+  /**
+   * The 3D rig only: the hips and the legs turned (yawed) this many degrees to the figure's own right (negative: left), about the vertical through
+   * the pelvis, as `turn3` turns everything above it: a stance whose hips face the same way as its turned chest.
+   */
+  hips3?: number;
+  /**
    * The 3D rig only, free legs (`freeLegs`): a leg pointed its own way, the figure's own right or left: the direction of its thigh from the hip, then of
    * its shin from the knee, in body space (x the figure's right, y up, z ahead; any length), each bone its true length (a knee raised, the foot off
    * the floor). The other leg is as the pose has it.
@@ -228,7 +238,7 @@ export type PoseName =
   | "strike" | "fallen" | "kneel" | "punch"
   | "t-pose" | "t-pose-b" | "w-t" | "w-t-b"
   | "sw-windup" | "sw-brace" | "sw-flinch" | "sw-down" | "sw-idle" | "sw-charging" | "sw-struggling" | "sw-shoulder-in"
-  | "sw-overhead" | "sw-overhead-leap" | "sw-dead" | "p3-idle" | "p3-low" | "sw-chop" | "sw-overhead-strike" | "sw-swing-l-windup" | "sw-swing-l" | "sw-swing-r-windup" | "sw-swing-r" | "sw-parry" | "sw-charge" | "sw-backstep" | "p3-backstep" | "sw-despair"
+  | "sw-overhead" | "sw-overhead-leap" | "sw-dead" | "p3-idle" | "p3-low" | "sw-chop" | "sw-overhead-strike" | "p3-overhead-leap" | "p3-overhead-strike" | "p3-flinch" | "p3-right-lead" | "sw-swing-l-windup" | "sw-swing-l" | "sw-swing-r-windup" | "sw-swing-r" | "sw-parry" | "sw-charge" | "sw-backstep" | "p3-backstep" | "sw-despair"
   | "w-idle" | "w-hands" | "w-scratch" | "w-wax-hand" | "w-hurl"
   | "w-staggered" | "w-dead" | "w-cower" | "w-reared" | "w-hurl-windup" | "w-clutch-eat" | "w-brace" | "w-brace-block" | "w-overhead-windup" | "w-overhead-strike" | "w-crawl" | "w-low-windup" | "w-low-strike" | "w-drag" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
   | WardenPoseName
@@ -583,6 +593,37 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
       weapon3: [0.08, -0.55, 0.83],
     },
   },
+  // The player's Flinch in 3D (a Rest broken by a blow): Idle recoiling. The knees give a little, bent and the body dropped with them; the arms come up,
+  // bent at the elbows, the forearms raised ahead of him and the weapon with them; the neck bowed a little forward and the head angled down, the eyes lowered.
+  "p3-flinch": {
+    head: [56, 33], neck: [51, 43], hip: [48, 72],
+    weaponArm: { elbow: [53, 58], hand: [58, 56] },
+    freeArm: { elbow: [45, 58], hand: [50, 56] },
+    leadLeg: { knee: [55, 93], foot: [53, 114] },
+    rearLeg: { knee: [51, 93], foot: [46, 114] },
+    weapon: { at: [58, 56], angle: 10 }, gaze: 3,
+    for3d: {
+      // (the upper arms down and a little out and ahead, the forearms bent up to about level, ahead of him)
+      arms3: { right: { dirs: [[0.24, -0.92, 0.3], [0.12, 0.1, 0.99]] }, left: { dirs: [[-0.24, -0.92, 0.3], [-0.12, 0.1, 0.99]] } },
+      weapon3: [0.08, -0.2, 0.98],
+    },
+  },
+  // The player's Right Lead in 3D: the Sleepwalker's Shoulder In (`sw-shoulder-in`), the hips turned to its left with the chest (`hips3`), so the
+  // whole stance faces that way. (Left Lead is this, mirrored.)
+  "p3-right-lead": {
+    head: [55, 52], neck: [52, 63], hip: [48, 89],
+    adjust: { torso: 0.85, leadThigh: 0.8, rearThigh: 0.8, leadShin: 0.65, rearShin: 0.65 },
+    weaponArm: { elbow: [66, 80], hand: [49, 77] },
+    freeArm: { elbow: [41, 76], hand: [53, 72] },
+    leadLeg: { knee: [62, 100], foot: [66, 114] },
+    rearLeg: { knee: [38, 101], foot: [32, 114] },
+    weapon: { at: [49, 77], angle: -140 }, torso34: "front", leadSide: "right", weaponOver: true,
+    for3d: {
+      turn3: -40, hips3: -40,
+      arms3: { right: { aim: { dir: [-0.7, -0.4, 0.6], reach: 0.8, bend: [0.3, 0, 1] } }, left: { aim: { dir: [-0.3, -0.55, -0.8], reach: 0.85 } } },
+      weapon3: [-0.8, -0.45, -0.3],
+    },
+  },
   // The player's Lowered stance in 3D: centred, square to what it faces, neither leg leading (the feet set apart either side), the knees bent into a
   // crouch, the back straight over them; the arms lowered at its sides, the weapon pointing down ahead.
   "p3-low": {
@@ -596,6 +637,8 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
     weapon: { at: [62, 68], angle: -45 },
     for3d: {
       splay3: 12,
+      // (the knees a little further apart, the hips and feet where they were)
+      kneesOut3: 12,
       // (the arms lowered, hanging at its sides, the forearms a little forward; the weapon pointing down ahead)
       arms3: { right: { dirs: [[0.22, -0.97, 0.08], [0.1, -0.93, 0.35]] }, left: { dirs: [[-0.22, -0.97, 0.08], [-0.1, -0.95, 0.3]] } },
       weapon3: [0.08, -0.5, 0.86],
@@ -647,6 +690,29 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
     weapon: { at: [72, 68], angle: 60 }, leadSide: "right", grip: true,
     // (in 3D the arms brought down low, the weapon pointing down ahead, a little higher than the arms point: about 45 degrees down to their 57)
     for3d: { arms3: { right: { aim: { dir: [0.15, -1, 0.65] } }, left: { aim: { dir: [0, -1, 0.65], reach: 0.9 } } }, weapon3: [0.07, -0.7, 0.7] },
+  },
+  // The player's Overhead Strike in 3D, held in one hand (the right): the Sleepwalker's (`sw-overhead-leap`, `sw-overhead-strike`) with the left hand
+  // off the weapon, and the chest turned 45 degrees to his right (`spin3`), the striking shoulder drawn back. Winding up, the left arm reaches out
+  // ahead of him, close to shoulder level, for balance, while the right holds the weapon up over his head.
+  "p3-overhead-leap": {
+    head: [38, 36], neck: [39, 47], hip: [44, 74],
+    weaponArm: { elbow: [50, 31], hand: [36, 20] },
+    freeArm: { elbow: [50, 51], hand: [64, 52] },
+    leadLeg: { knee: [62, 82], foot: [52, 100] },
+    rearLeg: { knee: [36, 94], foot: [28, 114] },
+    weapon: { at: [36, 20], angle: -160 }, torso34: "front", leadSide: "right",
+    for3d: { pitch3: 18, spin3: 45, hip: [44, 66], leadLeg: { knee: [62, 72], foot: [54, 90] }, rearLeg: { knee: [38, 84], foot: [28, 101] } },
+  },
+  // Landing: the right arm brings the weapon straight down ahead of him, as the Sleepwalker's does in both hands, the chest still turned with the striking
+  // shoulder back; the left arm swung back and out, close to shoulder level.
+  "p3-overhead-strike": {
+    head: [64, 42], neck: [58, 52], hip: [44, 76],
+    weaponArm: { elbow: [62, 60], hand: [72, 68] },
+    freeArm: { elbow: [52, 66], hand: [44, 76] },
+    leadLeg: { knee: [64, 96], foot: [74, 114] },
+    rearLeg: { knee: [34, 96], foot: [24, 114] },
+    weapon: { at: [72, 68], angle: 60 }, leadSide: "right",
+    for3d: { spin3: 45, arms3: { right: { aim: { dir: [0.15, -1, 0.65] } }, left: { aim: { dir: [-0.5, -0.3, -0.55], reach: 0.95 } } }, weapon3: [0.07, -0.7, 0.7] },
   },
   // Each swing runs between the two turned stances, its wind-up and its landing close to them: Swing Left from Charging (turned to its right) into
   // Shoulder In (turned to its left), Swing Right the other way. Their bodies, legs and free arms are those stances'; only the weapon arm and the turn
@@ -1044,13 +1110,13 @@ export const poseForIntent = (e: Enemy): PoseName =>
 export const PLAYER_3D_POSES: Partial<Record<PoseName, PoseName>> = {
   idle: "p3-idle",
   // the stances: lowered its own, centred (`p3-low`), left-leading Charging's, right-leading Shoulder In's
-  low: "p3-low", "low-left": "sw-charging", "low-right": "sw-shoulder-in",
-  // the overhead swing (bare-handed, the same), the swings to each side
-  attack: "sw-overhead-leap", strike: "sw-overhead-strike", punch: "sw-overhead-strike",
+  low: "p3-low", "low-left": "sw-charging", "low-right": "p3-right-lead",
+  // the overhead swing, in one hand (bare-handed, the same), the swings to each side
+  attack: "p3-overhead-leap", strike: "p3-overhead-strike", punch: "p3-overhead-strike",
   "swing-left-up": "sw-swing-l-windup", "swing-left": "sw-swing-l", "swing-right-up": "sw-swing-r-windup", "swing-right": "sw-swing-r",
   // a Block is a Parry, a dodge forward the Chase, back the Retreat; staggered, flinching, fallen
   block: "sw-parry", "dodge-fwd": "sw-charge", "dodge-back": "p3-backstep", maneuver: "sw-charge",
-  kneel: "sw-down", flinch: "sw-flinch", fallen: "sw-dead",
+  kneel: "sw-down", flinch: "p3-flinch", fallen: "sw-dead",
 };
 export const player3dPose = (pose: PoseName): PoseName => PLAYER_3D_POSES[pose] ?? pose;
 

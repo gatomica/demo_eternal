@@ -3,8 +3,8 @@
 A Vite + React 19 + TypeScript browser game, hosted on Netlify (`npm run build`, publishes `dist/`).
 Screens from the main menu: **Test combat** (pick a loadout and an encounter), **Exploration**
 (walk a multi-floor map; touching an enemy starts its fight), the **Model viewer** (one enemy, its
-stances and actions, played against a dummy that never gets hurt; an enemy's weapon and armor variants (the Waxed's Chisel and Hammer; the Sleepwalker's bare hands, Hammer and Patrol Warden) are statuses to turn on and off, one at a time (`VARIANTS` in `screens/viewerModel.ts`); an enemy with several targetable parts, like the Wax Blob, is shown as one body with all its parts at once, each with its own stance and actions; or "You": the player with any weapon
-and armor, any pose held, and your actions played against a dummy Sleepwalker) and the **Map viewer**
+stances and actions, played against a dummy that never gets hurt; an enemy's weapon and armor variants (the Waxed's Chisel and Hammer; the Sleepwalker's bare hands, Hammer and Patrol Warden; the Wax Blob's Hammer, on both side parts: the Super Wax Blob) are statuses to turn on and off, one at a time (`VARIANTS` in `screens/viewerModel.ts`, named by label so a body's parts share them); the Lit waxed and the Super Wax Blob are not listed of their own (the waxed's Lit status, the Wax Blob's Hammer); an enemy with several targetable parts, like the Wax Blob, is shown as one body with all its parts at once, each with its own stance and actions; or "You": the player with any weapon
+and armor, in the stance you pick, and the actions you have from that stance played against a dummy Sleepwalker) and the **Map viewer**
 (the map drawn exactly as the game draws it, with a free camera and no light radius: WASD pans, Q and E go down and up a level).
 
 The design doc is `docs/enemies.md`. Read it before changing rules or enemies, and

@@ -7,10 +7,27 @@ import type { Dir } from "../ui/input";
 /** What the cursor is on: you, or an enemy. */
 export type Selection = { kind: "player" } | { kind: "enemy"; id: string };
 
+/** The three parts an action with alternatives opens into, as they lie on the wheel (left, middle, right of the action's own direction). */
+export type SubSlot = "left" | "middle" | "right";
+
 /** An option on the action wheel. */
 export interface WheelOption {
   label: string;
   action: PlayerAction;
+  /** Alternative actions: pressing the option's own direction again opens it into these three parts (an empty part is for later). Without them it cannot be opened. */
+  alternatives?: Record<SubSlot, WheelOption | null>;
+}
+
+/** The clockwise order of the wheel's directions. */
+const CLOCKWISE: Dir[] = ["up", "right", "down", "left"];
+
+/**
+ * What a key does on an opened-up action (`open` is its direction): its own direction picks the middle part, the
+ * directions beside it the left and right parts (as they lie on the wheel), and the opposite direction closes it up again.
+ */
+export function subKey(open: Dir, key: Dir): SubSlot | "collapse" {
+  const d = (CLOCKWISE.indexOf(key) - CLOCKWISE.indexOf(open) + 4) % 4;
+  return d === 0 ? "middle" : d === 1 ? "right" : d === 3 ? "left" : "collapse";
 }
 
 export type Wheel = Record<Dir, WheelOption | null>;

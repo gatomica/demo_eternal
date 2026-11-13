@@ -19,8 +19,22 @@ export function swingFor(stance: Stance, target?: Pick<Enemy, "line" | "staggere
   return stance === "lead-right" ? "right" : "left";
 }
 
-/** The stance you take after acting. */
+/** A stance as a mirror shows it: the leading leg is the other one. */
+export const mirrorStance = (st: Stance): Stance => (st === "lead-left" ? "lead-right" : st === "lead-right" ? "lead-left" : st);
+
+/**
+ * The stance you take after acting. A Punch, thrown with the left hand, is the mirror of a right-hand blow: it swings (`swingFor`) as the right hand
+ * would from the mirrored stance, and leaves you in the mirrored stance the right hand would. So each leading stance offers both sideways swings,
+ * the Openhand (a Swing Left, or its mirror) and the Backhand (a Swing Right, or its mirror), the stance deciding which hand throws which: left leg
+ * leading, the right hand's Openhand or the left hand's Backhand; right leg leading, the right hand's Backhand or the left hand's Openhand. Either
+ * leaves the other leg leading.
+ */
 export function stanceAfter(act: PlayerAction, swing: Swing | undefined): Stance {
+  const st = stanceAfterRight(act, swing);
+  return act.type === "attack" && act.hand === "left" ? mirrorStance(st) : st;
+}
+
+function stanceAfterRight(act: PlayerAction, swing: Swing | undefined): Stance {
   switch (act.type) {
     case "attack":
       return swing === "right" ? "lead-left" : swing === "left" ? "lead-right" : "low";

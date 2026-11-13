@@ -4,7 +4,7 @@
  * rests.ts, movement.ts, endTurn.ts) reads and changes it in turn.
  */
 import { bodyOf } from "../body";
-import { swingFor } from "../stance";
+import { mirrorStance, swingFor } from "../stance";
 import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Line, Player, PlayerAction, Step, Swing, WeaponTier } from "../types";
 
 /** The action the player is locked into this turn, if any. */
@@ -112,7 +112,7 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
     wasStaggered: new Set(fighters.filter(f => f.staggered).map(f => f.id)),
     hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(), shifts: new Map(),
     cancelled: new Set(), blocked: new Set(), attacked: new Map(), interrupted: new Set(), fellReviving: new Set(),
-    swing: act?.type === "attack" ? swingFor(p.stance, alive.find(e => e.id === act.target)) : undefined,
+    swing: act?.type === "attack" ? swingFor(act.hand === "left" ? mirrorStance(p.stance) : p.stance, alive.find(e => e.id === act.target)) : undefined,
     steps: [],
     events: [],
     emit: ev => {
