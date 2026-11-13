@@ -42,7 +42,9 @@ export function createCombat(
     waxed: false,
     charges: player.charges,
     reviving: false,
-    eternal: !!player.eternal && player.weapon !== "baseline",
+    // Every weapon carries its effect; an ordinary (not eternal) one pays for it all in Death.
+    eternal: player.weapon !== "baseline",
+    mortalWeapon: !player.eternal,
     maxEternity: player.maxEternity ?? player.maxHP,
     eternity: Math.min(player.maxEternity ?? player.maxHP, player.eternity ?? player.maxEternity ?? player.maxHP),
   };

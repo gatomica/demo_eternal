@@ -33,6 +33,8 @@ const barValues =(f: { hp: number; fatigue: number; death: number }): BarValues 
 
 /** How many strings a boss's String bursts into. */
 const BOSS_STRINGS = 12;
+/** How long an enemy's bar stays up after its values last changed, once it would go: long enough for its slowest trail (a beat, then 0.8 s). */
+const BAR_LINGER_MS = 1200;
 
 /** How an enemy's look draws it differently (its kind's variant). */
 const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
@@ -248,6 +250,33 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const shownBefore = prevView?.enemies.find(e => e.id === shownId);
   /** Who the bar hangs below: the shown enemy, or the middle part of the body it is a part of. */
   const barHolder = shownEnemy?.body ? (view.enemies.find(e => e.body === shownEnemy.body && e.part === "mid" && e.alive) ?? shownEnemy).id : shownId;
+
+  /**
+   * An enemy's bar stays up until its trails have played out: when it would go (the turn moves on to someone else, the turn ends, it falls),
+   * it lingers while its values changed less than `BAR_LINGER_MS` ago. `barSeen`: each bar's values when last shown, and when they last changed.
+   */
+  const barSeen = useRef(new Map<string, { sig: string; at: number }>());
+  const [, setBarTick] = useState(0);
+  const barSig = (f: BarValues) => `${f.hp}|${f.fatigue}|${f.death}`;
+  /** Note what a shown bar shows (the time it changed, if it did). */
+  const noteBar = (id: string, f: BarValues) => {
+    const sig = barSig(f), seen = barSeen.current.get(id);
+    // (A bar first shown while you plan has nothing to play out; mid-turn it shows what the step changed.)
+    if (!seen) barSeen.current.set(id, { sig, at: busy ? performance.now() : 0 });
+    else if (seen.sig !== sig) barSeen.current.set(id, { sig, at: performance.now() });
+  };
+  /** Whether a bar that would go should still hang there, its trails still playing. */
+  /** When the last lingering bar of this render may go (0: none lingers). */
+  let lingerUntil = 0;
+  const lingers = (id: string, f: BarValues): boolean => {
+    const seen = barSeen.current.get(id);
+    if (!seen) return false;
+    if (seen.sig !== barSig(f)) { seen.sig = barSig(f); seen.at = performance.now(); }
+    const until = seen.at + BAR_LINGER_MS;
+    if (until <= performance.now()) return false;
+    lingerUntil = Math.max(lingerUntil, until);
+    return true;
+  };
 
   /** Whether a bar hangs below this enemy for a Rest this turn: it Rests (or recovers) now, or, for one part of a body, whichever part does, on the middle part. */
   const restingBar = (e: Enemy): boolean => {
@@ -1025,6 +1054,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return was ? { ...f, hp: was.hp, fatigue: was.fatigue, death: was.death, staggered: was.staggered } : f;
   };
 
+  /**
+   * A won fight heals you to full as it ends: once the last turn has played, your bars refill (the healing trail fills all the Health lost, and
+   * Death and Fatigue are gone). Between fights you are always whole, so this is only what you see of it.
+   */
+  const healedAtEnd = fight.status === "won" && !busy && !override;
+  const endHeal = (f: Player): Player => (healedAtEnd ? { ...f, hp: f.maxHP, death: 0, fatigue: 0, staggered: false } : f);
+
   // The red string of the revive knot: sent from the numeral once you lie down, to wind round your remains (then you rise: see above).
   useEffect(() => {
     if (!waitingForString || paused || reviveSent.current) return;
@@ -1649,14 +1685,24 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         // (A part of a body, the Wax Blob: the bar always hangs below its middle part, whichever part is the target.)
         // (Mid-turn too: the bar of whoever the turn is about hangs below it, with what is changing flashing as it lands, not in the corner of the screen.)
         bar: playing && e.id === barHolder && (e.alive || busy)
-          ? <HealthBar fighter={barsOf(shownEnemy ?? e)} before={shownBefore && barValues(shownBefore)} mirrored eternalFlash={busy && shownEnemy ? barFlashOf(shownEnemy.id) : undefined} />
+          ? (noteBar(e.id, barsOf(shownEnemy ?? e)), <HealthBar fighter={barsOf(shownEnemy ?? e)} before={shownBefore && barValues(shownBefore)} mirrored eternalFlash={busy && shownEnemy ? barFlashOf(shownEnemy.id) : undefined} />)
           // Mid-turn, whoever is Resting shows a bar below them from the moment the turn starts, as the Rest winds up, so you can see what the Rest changes
           // when it lands (it flashes white then). (A body of several parts has one bar, below its middle part.)
           : busy && e.alive && restingBar(e)
-            ? <HealthBar fighter={e} before={prevView?.enemies.find(x => x.id === e.id) && barValues(prevView.enemies.find(x => x.id === e.id)!)} mirrored />
-            : undefined,
+            ? (noteBar(e.id, e), <HealthBar fighter={e} before={prevView?.enemies.find(x => x.id === e.id) && barValues(prevView.enemies.find(x => x.id === e.id)!)} mirrored />)
+            // A bar that would go stays until its trails have played out (the same bar, so they carry on).
+            : lingers(e.id, barsOf(e))
+              ? <HealthBar fighter={barsOf(e)} mirrored />
+              : undefined,
       })),
   ];
+
+  // (A lingering bar goes by itself: look again once it may.)
+  useEffect(() => {
+    if (!lingerUntil) return;
+    const t = window.setTimeout(() => setBarTick(n => n + 1), Math.max(0, lingerUntil - performance.now()) + 30);
+    return () => window.clearTimeout(t);
+  });
 
   // Each enemy truly defeated (no revive left) sends its String to you as its remains lie down: its max health, and, as a string of its own, any String it held.
   // (The waxed the Warden raises pay nothing a second time: each pays once. A body of several parts pays once.)
@@ -1736,7 +1782,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
 
       {/* Your health bar sits in a fixed slot, so nothing else on screen can push it around. The target's hangs right below it, in the scene, planning or not. */}
-      <PlayerBars knot={knotOwned} eternalFlash={{ health: barFlashOf("player"), eternity: eternalHere.some(ev => ev.attacker === "player" && ev.spent > 0) ? stepKey : undefined }} player={barsOf(p)} preview={previewCost} recover={previewRecover} string={carried + landed} stringPops={pops} eternalString={eternalString} />
+      <PlayerBars knot={knotOwned} eternalFlash={{ health: barFlashOf("player"), eternity: eternalHere.some(ev => ev.attacker === "player" && ev.spent > 0) ? stepKey : undefined }} player={endHeal(barsOf(p))} preview={previewCost} recover={previewRecover} string={carried + landed} stringPops={pops} eternalString={eternalString} />
 
       {/* The ring over whoever you have selected: a small mark while you plan, grown into the wheel when you focus. */}
       {playing && !forced && !busy && !waking && intro === null && (

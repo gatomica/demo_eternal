@@ -200,7 +200,7 @@ export interface EnemyKind {
   settleFlags?: (flags: Record<string, boolean>) => void;
   /** What a stagger does to its statuses (shown by the viewer's Staggered). */
   staggerFlags?: (flags: Record<string, boolean>) => void;
-  /** Revives (a boss revives to full health, only when it falls). */
+  /** Revives (a boss revives to full health but for its Death, only when it falls). */
   revives?: number;
 }
 

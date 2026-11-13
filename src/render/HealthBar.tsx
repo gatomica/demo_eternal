@@ -61,7 +61,11 @@ function Segments({ v, maxHP, preview = 0, recover }: { v: BarValues; maxHP: num
  * The shared bar: waking room, then white Fatigue filling current health, then black Death
  * filling missing health, then what's left empty.
  *
- * Changes cut instantly, with a flash, while a lighter trail of the old values slowly catches up.
+ * Changes cut instantly, with a flash, while a lighter trail of the old values slowly catches up. Healing is the same the other way
+ * round: the Health gained shows at once in that light red, and the bar's own red slowly fills it. Fatigue has the same two trails: Fatigue
+ * cleared leaves a faint white where it was, slipping back to the Fatigue's new edge; Fatigue gained shows at once, but tinted red, and the
+ * clean white fills it after a beat. Death's trails are both a faint white: Death cleared leaves it where the black was, slipping back to
+ * Death's new edge; Death gained shows at once, greyed by it, until the clean black fills in.
  * `before` lets a freshly shown bar start from earlier values, so it still animates the change.
  * `mirrored` anchors the bar on the right and fills it right to left, for enemies.
  * A stagger bursts into shards.
@@ -86,6 +90,16 @@ export function HealthBar({ fighter, before, className, mirrored, preview, recov
   const startSig = before ? `${before.hp}|${before.fatigue}|${before.death}` : sig;
 
   const [trail, setTrail] = useState<BarValues>(before ?? now);
+  // Fatigue as drawn (it never spills past current Health), now and as the trail has it.
+  const hpNow = Math.max(0, now.hp);
+  const fNow = Math.min(Math.max(0, now.fatigue), hpNow);
+  const fTrail = Math.min(Math.max(0, trail.fatigue), hpNow);
+  // Death as drawn (it only fills missing health), now and as the trail has it.
+  const missing = Math.max(0, fighter.maxHP - hpNow);
+  const dNow = Math.min(Math.max(0, now.death), missing);
+  const dTrail = Math.min(Math.max(0, trail.death), missing);
+  /** A share of `whole` as a width in percent (all of it if there is no whole). */
+  const share = (part: number, whole: number) => `${whole > 1e-9 ? Math.min(100, (Math.max(0, part) / whole) * 100) : 100}%`;
   const [flash, setFlash] = useState(startSig !== sig ? 1 : 0);
   const [shatter, setShatter] = useState(0);
   const lastSig = useRef(sig);
@@ -118,6 +132,46 @@ export function HealthBar({ fighter, before, className, mirrored, preview, recov
       <span className="bar-layer bar-now">
         <Segments v={now} maxHP={maxHP} preview={preview} recover={recover} />
         {gain > 0 && <i className="bar-gain" style={{ width: barPct(gain, maxHP) }} />}
+      </span>
+      {/* Fatigue just cleared: over the waking room it opened, a faint white from where the Fatigue was to where it is, slipping back to it. */}
+      <span className="bar-layer bar-fatigue-trails" aria-hidden="true">
+        <i className="bar-fatigue-box" style={{ width: barPct(hpNow - fNow, maxHP) }}>
+          <i className="bar-fatigue-spacer is-clearing" style={{ width: share(hpNow - fTrail, hpNow - fNow), transition: fTrail > fNow ? "none" : undefined }} />
+          <i className="bar-fatigue-cleared" />
+        </i>
+      </span>
+      {/* Fatigue just gained: the new Fatigue, from its new edge to where it was, tinted red, until the clean white fills it. */}
+      <span className="bar-layer bar-fatigue-trails" aria-hidden="true">
+        <i style={{ width: barPct(hpNow - fNow, maxHP) }} />
+        <i className="bar-fatigue-box" style={{ width: barPct(fNow, maxHP) }}>
+          <i className="bar-fatigue-gained" />
+          <i className="bar-fatigue-spacer is-gaining" style={{ width: share(fTrail, fNow), transition: fTrail < fNow ? "none" : undefined }} />
+        </i>
+      </span>
+      {/* Death just cleared: past Death's new edge, a faint white where the black was, slipping back to it. */}
+      <span className="bar-layer bar-fatigue-trails" aria-hidden="true">
+        <i style={{ width: barPct(hpNow + dNow, maxHP) }} />
+        <i className="bar-fatigue-box" style={{ width: barPct(missing - dNow, maxHP) }}>
+          <i className="bar-death-cleared" />
+          <i className="bar-fatigue-spacer is-clearing" style={{ width: share(missing - dTrail, missing - dNow), transition: dTrail > dNow ? "none" : undefined }} />
+        </i>
+      </span>
+      {/* Death just gained: the new black, from where Death reached to its new edge, greyed with a faint white until the black fills it. */}
+      <span className="bar-layer bar-fatigue-trails" aria-hidden="true">
+        <i style={{ width: barPct(hpNow, maxHP) }} />
+        <i className="bar-fatigue-box" style={{ width: barPct(dNow, maxHP) }}>
+          <i className="bar-fatigue-spacer is-gaining" style={{ width: share(dTrail, dNow), transition: dTrail < dNow ? "none" : undefined }} />
+          <i className="bar-death-gained" />
+        </i>
+      </span>
+      {/* Health just gained (a revive, a Rest, the end of a fight): light red from where the trail stands to the new Health, filled by the bar's red as the trail catches up. */}
+      <span className="bar-layer bar-healing" aria-hidden="true">
+        {/* (As long as the new Health at once; inside it, the trail's part slides on and the rest is the light red still to fill.) */}
+        <i className="bar-healed" style={{ width: barPct(now.hp, maxHP) }}>
+          {/* (It drops back at once as Health is gained, and only its catching up slides.) */}
+          <i className="bar-filled" style={{ width: `${now.hp > 0 ? Math.min(100, (Math.max(0, trail.hp) / now.hp) * 100) : 100}%`, transition: trail.hp < now.hp ? "none" : undefined }} />
+          <i className="bar-gained" />
+        </i>
       </span>
       {flash > 0 && <span key={`flash-${flash}`} className="bar-flash" />}
       {eternalFlash && <span key={`eternal-${eternalFlash}`} className="bar-flash is-eternal" />}

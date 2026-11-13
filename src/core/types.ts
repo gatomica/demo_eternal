@@ -156,7 +156,7 @@ export interface Player extends Fighter {
   /** Healing item charges, spent automatically to revive. */
   charges: number;
   /** True during the protected turn after falling with a charge left. Health stays at 0 until the
-   *  turn ends, then comes back to full health (along with rests). */
+   *  turn ends, then comes back to full health but for its Death (along with rests). */
   reviving: boolean;
   /**
    * Eternity: what eternal weapons' effects are paid with (the thin bar under your health bar), up to
@@ -164,6 +164,8 @@ export interface Player extends Fighter {
    */
   eternity: number;
   maxEternity: number;
+  /** Your weapon is not eternal: its effect still works, but it can't draw on Eternity, and every bit of it is paid in Death. */
+  mortalWeapon?: boolean;
 }
 
 export interface Enemy extends Fighter {
@@ -181,7 +183,7 @@ export interface Enemy extends Fighter {
   stanceHistory?: string[];
   /** Its next stance is picked as if this had just happened (e.g. "Second Phase"), once it's free to act. */
   nextFrom?: string;
-  /** Revives left. A boss revives to full health, only when it falls. */
+  /** Revives left. A boss revives to full health but for its Death, only when it falls. */
   revives: number;
   /** True during its protected revive turn. */
   reviving: boolean;
@@ -341,7 +343,7 @@ export interface PlayerSetup {
   weapon: WeaponTier;
   armor: ArmorTier;
   charges: number;
-  /** Your weapon is eternal. */
+  /** Your weapon is eternal (its effect is paid with Eternity; otherwise all in Death). */
   eternal?: boolean;
   /** Your Eternity as the fight starts (default: full). */
   eternity?: number;

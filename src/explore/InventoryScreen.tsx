@@ -12,6 +12,7 @@
  * left on the ground). The map screen does what E does (`onUse`).
  */
 import { useState } from "react";
+import { attackCost } from "../core/rules";
 import type { Player } from "../core/types";
 import { PlayerBars } from "../render/HealthBar";
 import { PlayerFigure3D } from "../render/PlayerFigure3D";
@@ -80,6 +81,8 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, grou
 
   const look = loadoutOf(inv);
   const shown = place === "ground" ? ground[SLOTS[row]] : pieceAt(inv, SLOTS[row], place);
+  // A weapon under the cursor: what an attack with it would cost flickers on your health bar, as when Attack is lit in a fight.
+  const preview = shown?.slot === "weapon" ? attackCost(player, shown.tier) : 0;
   return (
     <div className="inv-screen is-cinematic" role="dialog" aria-label="Inventory">
       <div className="letterbox letterbox-top" aria-hidden="true" />
@@ -88,7 +91,7 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, grou
       <div className="inv-figure">
         <PlayerFigure3D look={look} title="You" swayId="inventory" />
       </div>
-      <PlayerBars player={player} string={string} eternalString={eternalString} knot={!!knot} />
+      <PlayerBars player={player} preview={preview} string={string} eternalString={eternalString} knot={!!knot} />
       {/* The piece under the cursor, between you and the slots. */}
       <div className="class-middle">
         <ItemCard key={`${row}-${place}`} slot={SLOTS[row]} info={shown ? cardOfGear(shown) : undefined} empty="Empty" />

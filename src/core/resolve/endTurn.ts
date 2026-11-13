@@ -3,6 +3,7 @@
  * spent, each enemy remembers how its action went, and each kind's own rules have their say.
  */
 import { kindOf } from "../bestiary";
+import { reviveHealth } from "../rules";
 import { stanceAfter } from "../stance";
 import { backOnFeet, fatigueGone } from "./statuses";
 import type { Turn } from "./turn";
@@ -12,12 +13,9 @@ export function endTurn(t: Turn) {
   for (const e of alive) {
     if (!e.alive) continue; // (gone with a boss that fell for good, say)
     if (t.fallen.has(e.id) && e.revives > 0) {
-      // A boss with a revive left rises at once, at the end of the turn it fell: full health, fresh, like a boss (no turn spent lying there).
+      // A boss with a revive left rises at once, at the end of the turn it fell: fresh, healed to full but for its Death (no turn spent lying there).
       e.revives -= 1;
-      e.hp = e.maxHP;
-      e.fatigue = 0;
-      e.death = 0;
-      e.staggered = false;
+      reviveHealth(e);
       e.reviving = false;
       backOnFeet(e);
       t.fellReviving.add(e.id);
@@ -39,12 +37,10 @@ export function endTurn(t: Turn) {
   let revivedNow = false;
   if (p.hp <= 0) {
     if (p.charges > 0) {
-      // A charge is spent, and you are up again at once, at the end of the turn you fell: back to full health, fresh (no turn spent lying there).
+      // A charge is spent, and you are up again at once, at the end of the turn you fell: fresh, healed to full but for your Death, which the
+      // healing clears first (no turn spent lying there).
       p.charges -= 1;
-      p.hp = p.maxHP;
-      p.fatigue = 0;
-      p.death = 0;
-      p.staggered = false;
+      reviveHealth(p);
       backOnFeet(p);
       revivedNow = true;
       t.emit({ kind: "revive", who: p.id });

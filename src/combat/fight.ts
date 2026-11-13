@@ -15,7 +15,7 @@ export interface Loadout {
   /** Your head gear's tier, and which of the classes' own it is, if any. */
   head?: ArmorTier;
   headItem?: HeadItem;
-  /** The weapon is eternal (its blows carry its eternal effect, paid with Eternity). */
+  /** The weapon is eternal: its effect is paid with Eternity (an ordinary weapon's effect is paid in Death). */
   eternal?: boolean;
 }
 

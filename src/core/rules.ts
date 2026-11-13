@@ -114,22 +114,28 @@ export function heal(f: Fighter, amount: number) {
 }
 
 /**
- * Death: it fills missing health first. Past that, the excess lowers Health by half of what is
- * left over, and the lowered Health is filled with Death too, which takes from the excess as well:
- * so every point of Health lost costs three of the excess. (1 missing, 0 Death, +4 Death: the room
- * takes 1, the other 3 lower Health by 1; now 2 missing, all Death.)
+ * Death: it fills missing health, and only that: whatever finds no missing health to fill is lost, and Death never takes Health
+ * itself. All it does is eat healing (see `heal`), a revive's too. (Only the living take it: a felled one has nothing left to fill.)
  */
 export function addDeath(f: Fighter, amount: number) {
-  if (amount <= 0) return;
-  const room = Math.max(0, f.maxHP - f.hp - f.death);
-  if (amount <= room) { f.death += amount; return; }
-  f.hp -= (amount - room) / 3;
-  f.death = f.maxHP - Math.max(0, f.hp);
+  if (amount <= 0 || f.hp <= 0) return;
+  f.death += Math.min(amount, Math.max(0, f.maxHP - f.hp - f.death));
 }
 
-/** Pays an eternal effect from your Eternity; whatever it can't pay becomes Death on you. */
+/**
+ * Up again with a revive: healed "to full", but healing clears Death first, so whatever Death it carried when it fell is taken off
+ * the Health it comes back with (and cleared by it). Fresh: no Fatigue, not staggered.
+ */
+export function reviveHealth(f: Fighter) {
+  f.hp = Math.max(0, f.hp);
+  heal(f, f.maxHP);
+  f.fatigue = 0;
+  f.staggered = false;
+}
+
+/** Pays an eternal effect from your Eternity; whatever it can't pay becomes Death on you. An ordinary weapon's effect can't use Eternity: it is all Death. */
 export function spendEternity(p: Player, amount: number): { spent: number; death: number } {
-  const spent = Math.min(Math.max(0, p.eternity), amount);
+  const spent = p.mortalWeapon ? 0 : Math.min(Math.max(0, p.eternity), amount);
   p.eternity -= spent;
   const death = amount - spent;
   addDeath(p, death);

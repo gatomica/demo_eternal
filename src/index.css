@@ -360,6 +360,26 @@ kbd {
 .bar-layer > i { display: block; height: 100%; flex: none; }
 .bar-trail > i { transition: width 0.6s ease-in 0.25s; }
 .bar-lost { background: var(--flesh-lost); }
+/* Health just gained: over the bar, the light red of the trail from the old Health to the new, shrinking as the bar's red fills in. */
+/* Fatigue's trails, over the bar: cleared, a faint white slipping back to the Fatigue's new edge; gained, the new white tinted red until it clears. */
+.bar-fatigue-trails { pointer-events: none; }
+.bar-fatigue-trails > i { display: block; height: 100%; flex: none; }
+.bar-fatigue-trails > i.bar-fatigue-box { display: flex; overflow: hidden; }
+.bar.is-mirrored .bar-fatigue-trails > i.bar-fatigue-box { flex-direction: row-reverse; }
+.bar-fatigue-box > i { display: block; height: 100%; }
+.bar-fatigue-box > i.bar-fatigue-spacer { flex: none; }
+.bar-fatigue-spacer.is-clearing { transition: width 0.6s ease-in 0.25s; }
+.bar-fatigue-spacer.is-gaining { transition: width 0.8s ease-out 0.25s; }
+.bar-fatigue-cleared { flex: 1; background: rgb(243 241 248 / 0.5); }
+.bar-fatigue-gained { flex: 1; background: rgb(162 80 90 / 0.5); }
+/* Death's trails (the same boxes): both a faint white, over the empty bar where it was cleared, over the new black where it was gained. */
+.bar-death-cleared, .bar-death-gained { flex: 1; background: rgb(243 241 248 / 0.5); }
+.bar-healing { pointer-events: none; }
+.bar-healing > i.bar-healed { display: flex; overflow: hidden; }
+.bar.is-mirrored .bar-healing > i.bar-healed { flex-direction: row-reverse; }
+.bar-healed > i { display: block; height: 100%; }
+.bar-healed > i.bar-filled { flex: none; transition: width 0.8s ease-out 0.25s; }
+.bar-healed > i.bar-gained { flex: 1; background: var(--flesh-lost); }
 .bar-room { background: var(--flesh); }
 .bar-fatigue { background: var(--sleep); }
 /* The Fatigue an action would cost, before you commit to it: flickers beside the Fatigue you have. */
@@ -383,7 +403,7 @@ kbd {
 .bar-eternity-trail { background: #7f9fb8; transition: width 0.6s ease-in 0.25s; }
 @media (prefers-reduced-motion: reduce) { .bar-eternity-trail { transition: none; } }
 .bar.is-staggered { border-color: var(--sleep); box-shadow: 0 0 6px rgb(243 241 248 / 0.45); }
-@media (prefers-reduced-motion: reduce) { .bar-trail > i { transition: none; } .bar-flash { animation: none; opacity: 0; } .bar-preview, .bar-heal { animation: none; opacity: 0.55; } .bar-recover { animation: none; opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .bar-trail > i, .bar-healed > i.bar-filled, .bar-fatigue-box > i.bar-fatigue-spacer { transition: none; } .bar-flash { animation: none; opacity: 0; } .bar-preview, .bar-heal { animation: none; opacity: 0.55; } .bar-recover { animation: none; opacity: 0.45; } }
 
 /* ---------- Guard break shards ---------- */
 .shards { position: absolute; left: 50%; top: 38%; width: 0; height: 0; pointer-events: none; z-index: 5; }
@@ -938,6 +958,11 @@ svg.wd-flaming .fig-ball-wax, svg.wd-flaming .fig-ball-lit, svg.wd-flaming .fig-
 @keyframes card-in { from { opacity: 0; } to { opacity: 1; } }
 .inv-place-icon.item-card-icon { width: 140px; height: 140px; }
 .item-card-name { font-size: 1.1rem; font-weight: 600; }
+/* A weapon's cost and damage: an empty bar (missing health's dark red), white Fatigue from the left for the cost, red health from the right for the damage. */
+.item-card-measure { position: relative; justify-self: stretch; height: 10px; margin: 2px 0; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: var(--flesh-missing); }
+.item-card-measure > i { position: absolute; top: 0; bottom: 0; }
+.measure-cost { left: 0; background: var(--sleep); }
+.measure-damage { right: 0; background: var(--flesh); }
 .item-card-type { margin-top: -4px; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .item-card-lore { margin: 0; font-size: 0.92rem; line-height: 1.45; opacity: 0.9; }
 .item-card-effect { margin: 0; font-size: 0.85rem; line-height: 1.4; color: #dcf1ff; }
