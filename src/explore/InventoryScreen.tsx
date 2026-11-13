@@ -14,19 +14,12 @@
 import { useState } from "react";
 import type { Player } from "../core/types";
 import { PlayerBars } from "../render/HealthBar";
-import { orbitBox, orbitCamera } from "../render/camera";
-import { Sleepwalker3D } from "../render/Sleepwalker3D";
+import { PlayerFigure3D } from "../render/PlayerFigure3D";
 import { useKeys, menuSound } from "../ui/input";
 import { equippedSide, type GearSpec, gearName, type Inventory as Bag, loadoutOf, pieceAt, type Slot, SLOTS } from "./gear";
 import { GearIcon, GearSprite } from "./GearIcons";
 import { cardOfGear, ItemCard } from "./ItemCard";
 import type { Knot } from "./tutorial";
-
-/** You, drawn on the 3D body as in a fight: seen from the front and a little above, turned to a three-quarter view facing right (turned in 3D, never mirrored, so you keep your right hand). */
-const PORTRAIT_W = 800, PORTRAIT_H = 600, PORTRAIT_AT = { x: 0, z: 6 };
-const PORTRAIT_CAM = orbitCamera(PORTRAIT_AT, 6, 0.9, 6);
-const PORTRAIT_BOX = orbitBox(PORTRAIT_CAM, PORTRAIT_AT, PORTRAIT_W, PORTRAIT_H);
-const PORTRAIT_YAW = Math.PI / 2 + 0.9;
 
 /** The places of a row, left to right. */
 export type Place = "eternal" | "normal" | "ground";
@@ -93,11 +86,7 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, grou
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
       {/* You, large, at the side: the bottom strip comes up to your knees (as in a visual novel). */}
       <div className="inv-figure">
-        <Sleepwalker3D
-          pose="p3-idle" weapon={look.weapon} title="You" swayId="inventory"
-          gear={{ weaponItem: look.weaponItem, armor: look.armor, armorItem: look.armorItem, headItem: look.headItem }}
-          cam={PORTRAIT_CAM} at={PORTRAIT_AT} yaw={PORTRAIT_YAW} w={PORTRAIT_W} h={PORTRAIT_H} box={PORTRAIT_BOX}
-        />
+        <PlayerFigure3D look={look} title="You" swayId="inventory" />
       </div>
       <PlayerBars player={player} string={string} eternalString={eternalString} knot={!!knot} />
       {/* The piece under the cursor, between you and the slots. */}

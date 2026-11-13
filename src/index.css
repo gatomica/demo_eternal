@@ -1014,7 +1014,7 @@ svg.wd-flaming .fig-ball-wax, svg.wd-flaming .fig-ball-lit, svg.wd-flaming .fig-
 .class-screen { gap: 0; justify-content: center; }
 .class-lineup { display: flex; gap: clamp(8px, 3vw, 48px); justify-content: center; align-items: flex-end; width: min(1100px, 96vw); }
 .class-figure { display: grid; justify-items: center; gap: 8px; width: min(22vw, 250px); padding: 0; border: 0; background: none; color: var(--text); font: inherit; cursor: pointer; opacity: 0.45; filter: saturate(0.7); transition: opacity 0.15s, transform 0.15s, filter 0.15s; }
-.class-figure .figure { transform: scaleX(-1); }
+.class-title { margin: 0 0 24px; font-size: 1.6rem; font-weight: 400; letter-spacing: 0.12em; text-align: center; }
 .class-figure.is-focused { opacity: 1; filter: none; transform: translateY(-8px) scale(1.05); }
 .class-name { font-size: 1.15rem; letter-spacing: 0.05em; }
 /* The preview's middle: what the slot under the cursor holds, between the character and the slots. */

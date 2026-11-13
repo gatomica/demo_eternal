@@ -1,11 +1,11 @@
 /**
- * ClassSelect.tsx — choosing your class at a new game: only the characters, side by side, looking at the camera, each in what they will carry
+ * ClassSelect.tsx — "Choose your Origin", at a new game: only the characters, side by side, each in the inventory's pose (the 3D player), in what they will carry
  * (the Depraved in nothing). A/D choose, E opens a preview of the chosen one's gear (see `ClassPreview.tsx`), where E again asks whether to begin as them;
  * Q (or Esc) goes back.
  */
 import { useState } from "react";
 import { CLASSES, type ClassId, lookOfClass } from "../explore/items";
-import { StickFigure } from "../render/StickFigure";
+import { PlayerFigure3D } from "../render/PlayerFigure3D";
 import { useKeys, wrapIndex, menuSound } from "../ui/input";
 import { ClassPreview } from "./ClassPreview";
 
@@ -23,10 +23,11 @@ export function ClassSelect({ onPick, onBack }: { onPick: (id: ClassId) => void;
   if (preview) return <ClassPreview classId={CLASSES[at].id} onClose={() => setPreview(false)} onConfirm={() => onPick(CLASSES[at].id)} />;
   return (
     <main className="menu class-screen">
-      <div className="class-lineup" role="listbox" aria-label="Class">
+      <h1 className="class-title">Choose your Origin</h1>
+      <div className="class-lineup" role="listbox" aria-label="Origin">
         {CLASSES.map((c, i) => (
           <button key={c.id} className={`class-figure ${i === at ? "is-focused" : ""}`} role="option" aria-selected={i === at} onMouseEnter={() => setAt(i)} onClick={() => (i === at ? setPreview(true) : setAt(i))}>
-            <StickFigure view="front" foe={false} pose="stand" {...lookOfClass(c.id)} title={c.name} />
+            <PlayerFigure3D look={lookOfClass(c.id)} title={c.name} swayId={`class-${c.id}`} />
             <span className="class-name">{c.name}</span>
           </button>
         ))}

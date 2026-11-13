@@ -8,7 +8,7 @@ import { GearIcon, GearSprite } from "../explore/GearIcons";
 import { SLOTS, type Slot } from "../explore/gear";
 import { cardOfItem, ItemCard } from "../explore/ItemCard";
 import { CLASSES, type ClassId, ITEMS, lookOfClass } from "../explore/items";
-import { StickFigure } from "../render/StickFigure";
+import { PlayerFigure3D } from "../render/PlayerFigure3D";
 import { useKeys, wrapIndex, menuSound } from "../ui/input";
 
 const LABEL: Record<Slot, string> = { weapon: "Weapon", armor: "Armor", head: "Head" };
@@ -38,7 +38,7 @@ export function ClassPreview({ classId, onClose, onConfirm }: { classId: ClassId
       <div className="letterbox letterbox-top" aria-hidden="true" />
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
       <div className="inv-figure">
-        <StickFigure view="front" foe={false} pose="stand" {...lookOfClass(c.id)} title={c.name} />
+        <PlayerFigure3D look={lookOfClass(c.id)} title={c.name} swayId={`class-${c.id}`} />
       </div>
       {/* What is in the slot under the cursor, between the character and the slots. */}
       <div className="class-middle">
