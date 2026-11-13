@@ -18,14 +18,20 @@ import { HeldWeapon } from "./StickFigure";
  */
 export function sameDrawing(a: object, b: object): boolean {
   const x = a as Record<string, unknown>, y = b as Record<string, unknown>;
-  for (const k of new Set([...Object.keys(x), ...Object.keys(y)])) {
+  // (no sets or spreads: this runs for every figure on every frame of a shot)
+  let n = 0;
+  for (const k in x) {
+    n++;
     const p = x[k], q = y[k];
     if (p === q) continue;
     if (!p || !q || typeof p !== "object" || typeof q !== "object" || Array.isArray(p) || isValidElement(p) || isValidElement(q)) return false;
     const u = p as Record<string, unknown>, v = q as Record<string, unknown>;
-    for (const f of new Set([...Object.keys(u), ...Object.keys(v)])) if (u[f] !== v[f]) return false;
+    let m = 0;
+    for (const f in u) { m++; if (u[f] !== v[f]) return false; }
+    m -= Object.keys(v).length;
+    if (m !== 0) return false;
   }
-  return true;
+  return n === Object.keys(y).length;
 }
 
 /** One thing drawn, and how far from the camera it is (far first). */

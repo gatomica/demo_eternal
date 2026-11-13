@@ -563,8 +563,8 @@ export const LEVEL_PLANS: string[][] = [
     "                                                    ",
     "                                                    ",
     "                                                    ",
-    "                     ###########                    ",
-    "                    #◢:::::::::◣#                   ",
+    "                     ###########◢.◤                 ",
+    "                    #◢:::::::::◢.◤                  ",
     "                   #◢.◺:::::::◿.◣#                  ",
     "                  #▛:◹.◺:::::◿.◸:▜#                 ",
     "                 #▛:::◹.......◸:::▜#                ",
@@ -602,8 +602,8 @@ export const LEVEL_PLANS: string[][] = [
     "                                                    ",
     "                                                    ",
     "                                                    ",
-    "                     ###########                    ",
-    "                    #▛:::::::::▜#                   ",
+    "                     ############ #                 ",
+    "                    #▛:::::::::# #                  ",
     "                   #▛:::::::::::▜#                  ",
     "                  #▛:::::::::::::▜#                 ",
     "                 #▛:::::::::::::::▜#                ",
@@ -1190,10 +1190,18 @@ export const GRATE_ZONES: [number, number, number, number, number][] = [
 ];
 
 /**
+ * The end of the demo: Floor C's NE bridge goes on past the Nave's wall as a diagonal corridor, three tiles wide (a floor tile between two diagonal wall halves, as the other
+ * diagonal corridors) and two levels tall (13 and 14), ending in a pitch-black wall (`BLACK_WALLS`). Its threshold is the second row of the corridor, `tiles`: crossing it ends
+ * the demo with a "Thanks for playing" card (`doorAt` in world.ts, `Exploration.tsx`). Plan coordinates.
+ */
+export const DEMO_DOOR = { levels: [13, 14] as const, tiles: [[32, 11], [33, 11], [34, 11]] as const };
+
+/**
  * Pitch-black walls: [first level, last level, x0, y0, x1, y1] in plan coordinates. Every empty cell in the box becomes a wall that is
  * painted solid black and always shows (like the other walls it is not drawn when you are below it and outside a walled room): a
  * curtain to cover what should not be seen.
  */
 export const BLACK_WALLS: [number, number, number, number, number, number][] = [
+  [DEMO_DOOR.levels[0], DEMO_DOOR.levels[1], 32, 10, 34, 10], // the dark at the end of the demo's corridor, one row past its threshold
   [7, 9, 9, 0, 17, 16], // beyond the main room's west edge (its west wall is at x=17), starting on the row above the plank corridor's north wall (row 17) and going up to the top of the map, as far left as the NW hall and as far right as the corridor's mouth: nothing of the room lies under it
 ];

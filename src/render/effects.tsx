@@ -1,7 +1,7 @@
 /**
  * effects.tsx — things flying and spreading across the field: projectiles, shockwaves, impact rings.
  */
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { NEAR, type Vec } from "./camera";
 import type { Pt } from "./geom";
 
@@ -106,7 +106,7 @@ const IMPACT_MS = 380;
  * advances. `impact`: a melee blow's version, white spikes, quicker; they bend in over where it struck as they rise, along a dome over it, instead of
  * standing straight up (a cylinder of them).
  */
-export function Shockwave({ center, reach, toward, flame, proj, impact, full }: {
+export function Shockwave({ center, reach, toward, flame, proj, impact, full, dome, fade = 1 }: {
   center: Vec; reach: number; toward: number; flame: number;
   /** Where a floor point lands on screen (the scene's camera). */
   proj: (p: Vec) => { sx: number; sy: number; ppm: number; depth: number };
@@ -114,6 +114,10 @@ export function Shockwave({ center, reach, toward, flame, proj, impact, full }: 
   full?: boolean;
   /** A melee blow's version: white spikes instead of flames, quicker, starting right away. */
   impact?: boolean;
+  /** The flames bend in over the middle as they rise, along a dome over it (as an `impact`'s spikes do), instead of standing straight up. */
+  dome?: boolean;
+  /** How strong it is, 0 to 1: a faded one (the Warden's phase-two flare) is fainter, its light too. */
+  fade?: number;
 }) {
   const [p, setP] = useState(0);
   useEffect(() => {
@@ -131,11 +135,21 @@ export function Shockwave({ center, reach, toward, flame, proj, impact, full }: 
   if (p <= 0) return null;
   const eased = 1 - (1 - p) ** 2.2;
   const r = reach * (0.08 + 0.92 * eased);
-  const opacity = p < 0.7 ? 1 : 1 - (p - 0.7) / 0.3;
+  const opacity = (p < 0.7 ? 1 : 1 - (p - 0.7) / 0.3) * fade;
   // Flames sit evenly along the burning arc, a fixed distance apart (in meters), whatever its size.
   const spacing = flame * (impact ? 0.24 : 0.16);
   const step = Math.max(0.02, spacing / r);
   const mid = proj(center);
+  // The fire's own light (the kind that domes): a flash of strong red at its middle that goes out as it spreads, lighting the floor out as far as the ring, which it follows.
+  const lit = dome && !impact;
+  let light: ReactNode = null;
+  if (lit) {
+    const edge = [0, 1, 2, 3].map(k => proj({ x: center.x + r * 1.15 * Math.cos((k * Math.PI) / 2), z: center.z + r * 1.15 * Math.sin((k * Math.PI) / 2) }));
+    const xs = edge.map(q => q.sx), ys = edge.map(q => q.sy), rx = (Math.max(...xs) - Math.min(...xs)) / 2, ry = (Math.max(...ys) - Math.min(...ys)) / 2;
+    const strength = fade * (1 - p) ** 1.3 * (1 - Math.exp(-p * 40));
+    // (a little above the floor, where the fire is)
+    light = <div className="shock-light" style={{ left: mid.sx - rx, top: mid.sy - 0.4 * mid.ppm - ry, width: rx * 2, height: ry * 2, opacity: Math.min(1, strength) }} />;
+  }
   const flames: { depth: number; d: string; core: string }[] = [];
   const arc: string[] = [];
   let pen = false;
@@ -158,14 +172,16 @@ export function Shockwave({ center, reach, toward, flame, proj, impact, full }: 
       const hh = hgt * k, ww = half * k;
       return `M${x - ww} ${y} Q${x - ww * 0.6 + lean * 0.5 * k} ${y - hh * 0.55} ${x + lean * k} ${y - hh} Q${x + ww * 0.7 + lean * 0.4 * k} ${y - hh * 0.45} ${x + ww} ${y} Z`;
     };
-    if (impact) {
-      // A melee blow's spike follows the dome over where it struck: from its foot on the ring it rises and bends in toward the middle, round the dome (a
-      // ball's, as wide as the ring), as far along it as the spike is tall; its sides drawn in to its tip as the flames' are.
-      const tall = flame * (0.25 + 0.95 * eased) * w ** 1.6, up = Math.min(Math.PI / 2 - 0.05, tall / r);
+    if (impact || dome) {
+      // A melee blow's spike (or a dome of flames') follows the dome over where it struck: from its foot on the ring it rises and bends in toward the middle, round the dome (a
+      // ball's, as wide as the ring), as far along it as the spike is tall; its sides drawn in to its tip as the flames' are. (A flame's inner core is the same, half the size.)
       const onDome = (u: number) => { const q = proj({ x: center.x + r * Math.cos(u) * Math.cos(t), z: center.z + r * Math.cos(u) * Math.sin(t) }); return [q.sx, q.sy - r * Math.sin(u) * q.ppm] as const; };
-      const [tx, ty] = onDome(up), [mx, my] = onDome(up / 2), cx = 2 * mx - (x + tx) / 2, cy = 2 * my - (y + ty) / 2;
-      const spike = `M${x - half} ${y} Q${cx - half * 0.35} ${cy} ${tx} ${ty} Q${cx + half * 0.35} ${cy} ${x + half} ${y} Z`;
-      flames.push({ depth: at.depth, d: spike, core: spike });
+      const spikeOf = (k: number) => {
+        const tall = flame * (0.25 + 0.95 * eased) * w ** 1.6 * k, up = Math.min(Math.PI / 2 - 0.05, tall / r), wide = half * k * (impact ? 1 : 1.3);
+        const [tx, ty] = onDome(up), [mx, my] = onDome(up / 2), cx = 2 * mx - (x + tx) / 2, cy = 2 * my - (y + ty) / 2;
+        return `M${x - wide} ${y} Q${cx - wide * 0.35} ${cy} ${tx} ${ty} Q${cx + wide * 0.35} ${cy} ${x + wide} ${y} Z`;
+      };
+      flames.push({ depth: at.depth, d: spikeOf(1), core: impact ? spikeOf(1) : spikeOf(0.5) });
       continue;
     }
     flames.push({ depth: at.depth, d: tongue(1), core: tongue(0.5) });
@@ -182,6 +198,7 @@ export function Shockwave({ center, reach, toward, flame, proj, impact, full }: 
   }
   return (
     <>
+      {light}
       {/* The glowing edge lies on the floor, under everyone. */}
       <svg className="shockwave" style={{ opacity, zIndex: 1 }} aria-hidden="true">
         <path d={arc.join(" ")} className={impact ? "impact-ring" : "shockwave-ring"} />

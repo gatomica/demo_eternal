@@ -187,7 +187,7 @@ export function actionPosesOf(kindName: KindId, stanceName: string, actionName: 
   const list: { label: string; pose?: string }[] = [
     { label: "Wind-up", pose: a.type === "rest" || a.type === "block" ? p.windupFrom?.[stanceName] ?? p.windup ?? p.act : p.windupFrom?.[stanceName] ?? p.windup ?? (fromStance ? undefined : p.act) },
     ...(a.type === "block" ? [{ label: "Guard", pose: p.guard ?? p.act }] : []),
-    ...(a.type === "attack" ? [{ label: "Lands", pose: p.strike }] : []),
+    ...(a.type === "attack" ? [{ label: "Lands", pose: p.strike }, { label: "After", pose: p.after }] : []),
     ...(a.type === "rest" ? [{ label: "Wind-up 2", pose: p.prep }, { label: "Rests", pose: p.rest }] : []),
     ...(a.type === "maneuver" ? [{ label: "Pose", pose: p.act }, { label: "Lands", pose: p.land }] : []),
   ];

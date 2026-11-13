@@ -13,7 +13,7 @@ import type { ActionDef, Pattern } from "./patterns";
 import { PATROL_WARDEN, SLEEPWALKER, SLEEPWALKER_BARE, SLEEPWALKER_HAMMER } from "./kinds/sleepwalker";
 import { WARDEN } from "./kinds/warden";
 import { GUIDE_KIND } from "./kinds/guide";
-import { WAXED, WAXED_CHISEL, WAXED_HAMMER } from "./kinds/waxed";
+import { WAXED, WAXED_CHISEL, WAXED_CHISEL_LIT, WAXED_HAMMER, WAXED_HAMMER_LIT, WAXED_LIT } from "./kinds/waxed";
 import { BLOB_BODY, BLOB_LEFT, BLOB_LEFT_HAMMER, BLOB_MID, BLOB_RIGHT, BLOB_RIGHT_HAMMER, SUPER_BLOB_BODY } from "./kinds/blob";
 import type { ArmorTier, CombatEvent, CombatState, Enemy, EnemySetup, Fighter, Intent, Line, Rng, Side, TurnReport, WeaponTier } from "./types";
 
@@ -110,7 +110,7 @@ export interface EnemyKind {
    * than its dodge faces, and turns (to its right) as it slides until it faces as it will in the `settle` pose (its next stance's), facing you, so that
    * stance takes over without a jump.
    */
-  actionPoses?: Record<string, { act?: string; strike?: string; rest?: string; windup?: string; projectile?: "fan" | "blast" | "wax" | "impact" | "halo" | "burst"; guard?: string; windupFrom?: Record<string, string>; prep?: string; land?: string; dash?: { ms: number; far: number; hop?: number }; leap?: { hold: number; ms: number; hop: number; pass: number; behind: number; slide: { far: number; ms: number }; settle?: string }; slide?: { far: number; ms: number; turn: number; settle: string } }>;
+  actionPoses?: Record<string, { act?: string; strike?: string; /** An attack: the pose it takes a moment after the blow lands (REST_POSE_MS), on its way to its next stance. */ after?: string; rest?: string; windup?: string; projectile?: "fan" | "blast" | "wax" | "impact" | "halo" | "burst"; guard?: string; windupFrom?: Record<string, string>; prep?: string; land?: string; dash?: { ms: number; far: number; hop?: number }; leap?: { hold: number; ms: number; hop: number; pass: number; behind: number; slide: { far: number; ms: number }; settle?: string }; slide?: { far: number; ms: number; turn: number; settle: string } }>;
   /** The hand that holds its weapon (default right): the `weaponArm` of every pose is the arm on this side. */
   weaponHand?: Side;
   /**
@@ -181,7 +181,9 @@ export interface EnemyKind {
   onBlocked?: (hit: Pick<DirectHit, "self" | "target" | "tags" | "wax">) => void;
   /** Its own rules at the end of each turn: statuses, phases, effects of its actions. */
   afterTurn?: (r: TurnReport) => void;
-  /** A scene played before the first turn of a fight it's in, if the setup calls for one. */
+  /** What it does before the fight's first turn can be planned: each pose in turn, for this many ms (it ends in the stance it has chosen for the turn). */
+  openingPoses?: { pose: string; ms: number }[];
+  /** A scene played before the first turn of a fight it's in, if the setup calls for one (or else a hook that only sets the fight up: it returns null). */
   opening?: (o: {
     self: Enemy;
     state: CombatState;
@@ -210,6 +212,9 @@ export const ENEMY_KINDS = {
   waxed: WAXED,
   waxedChisel: WAXED_CHISEL,
   waxedHammer: WAXED_HAMMER,
+  waxedLit: WAXED_LIT,
+  waxedChiselLit: WAXED_CHISEL_LIT,
+  waxedHammerLit: WAXED_HAMMER_LIT,
   blobLeft: BLOB_LEFT,
   blobMid: BLOB_MID,
   blobRight: BLOB_RIGHT,

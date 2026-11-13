@@ -46,6 +46,8 @@
  *    happen (a Rest cut short, a cancelled action), or it was the Recover after a stagger: evenly
  *    among the Recover stances (a Rest cut short, "flinched", avoids the stance it was broken out of).
  *    A Block counts as done even if it had nothing to block.
+ *    Not the one it took last: of the stances to pick among, the one it took most recently (whichever action it came from) is left out while there is
+ *    another to take. The history of stances taken resets when it is staggered (or revives).
  * 2. Within the stance: the first action, in the order written, whose conditions hold. Nothing
  *    random: write an action with no conditions last, as the one it falls back on.
  *    A stance with none of its actions available is disabled: it can't be picked, and the
@@ -217,6 +219,19 @@ export interface PatternMemory {
 
 const pick = <T>(items: readonly T[], rng: () => number): T => items[Math.floor(rng() * items.length)];
 
+/**
+ * Among these stances, all but the one taken most recently (`taken`: the stances it has taken, oldest first, whatever action each came from): it does not repeat a
+ * stance while another is open. With none of them taken lately, or only one to choose, all of them.
+ */
+export function notRepeated(pool: readonly StanceDef[], taken: readonly string[]): readonly StanceDef[] {
+  if (pool.length < 2) return pool;
+  for (let i = taken.length - 1; i >= 0; i--) {
+    const last = pool.find(s => s.name === taken[i]);
+    if (last) return pool.filter(s => s !== last);
+  }
+  return pool;
+}
+
 /** The stances that can follow the last action (or the Recover stances at the start of a fight). */
 export function nextStances(p: Pattern, last: PatternMemory | null): StanceDef[] {
   let key = last && last.outcome === "done" && last.action ? last.action.toLowerCase() : "recover";
@@ -248,6 +263,7 @@ export function choose(
   available: (a: ActionDef) => boolean,
   rng: () => number,
   holds: (needs: string[]) => boolean = () => false,
+  taken: readonly string[] = [],
 ): { stance: StanceDef; action: ActionDef } | null {
   // A stance its bracketed conditions call for comes before anything else.
   const called = p.stances.filter(s => s.when && holds(s.when) && s.actions.some(available));
@@ -258,12 +274,12 @@ export function choose(
   // A stance with nothing available can't be picked ("disabled"): the others share its turn.
   const open = nextStances(p, last).filter(s => s.actions.some(available));
   if (open.length) {
-    const stance = pick(open, rng);
+    const stance = pick(notRepeated(open, taken), rng);
     return { stance, action: pickAction(stance, available)! };
   }
   // Safety net: act as if it just Recovered.
   const recover = nextStances(p, null).filter(s => s.actions.some(available));
   if (!recover.length) return null;
-  const again = pick(recover, rng);
+  const again = pick(notRepeated(recover, taken), rng);
   return { stance: again, action: pickAction(again, available)! };
 }

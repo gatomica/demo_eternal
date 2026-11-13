@@ -229,6 +229,9 @@ function load(): Promise<void> {
   return ready;
 }
 
+/** Resolves when the combat's sounds are built and their reverb rooms rendered (starting that, if it has not begun): what a fight waits for before it opens. */
+export const sfxReady = (): Promise<void> => load();
+
 let unlockSet = false;
 
 /**

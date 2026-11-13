@@ -119,7 +119,7 @@ export type WardenPoseName =
   | "wd-swing" | "wd-rising" | "wd-slam" | "wd-punch" | "wd-fan" | "wd-blast"
   | "wd-chain-guard" | "wd-wax-guard" | "wd-stride" | "wd-turn-away" | "wd-dodge-land" | "wd-swing-windup" | "wd-spin-land" | "wd-kneel-windup" | "wd-usurp" | "wd-clutch-arm" | "wd-fallen"
   | "wd-wound-up" | "wd-wax-swat" | "wd-usurp-dash" | "wd-flinch"
-  | "wd-chain-ready" | "wd-wax-ready" | "wd-winding-up" | "wd-clutch-ready"
+  | "wd-punch-after" | "wd-dead" | "wd-chain-ready" | "wd-wax-ready" | "wd-winding-up" | "wd-clutch-ready"
   | "wd-t" | "wd-t-b";
 
 /** The poses as written; `WARDEN_POSES` (below) is these fitted to the rig. */
@@ -271,6 +271,20 @@ export const RAW_WARDEN_POSES: Record<WardenPoseName, WardenSkeleton> = {
     { elbow: [50, 38], hand: [62, 44], ball: [86, 127] },
     { elbow: [54, 89], hand: [71, 108] },
     { tilt: 28, punchTrail: "wax", handle: 70 },
+  ),
+  // Dead (the 3D figure draws it, `WARDEN_STANCE`): Wax Arm Raised's upper body, fallen where she knelt.
+  "wd-dead": pose(
+    { head: [52, 22], neck: [51, 33], hip: [48, 66], ...legs([58, 90], [64, 114], [42, 91], [36, 114]) },
+    { elbow: [45, 53], hand: [38, 70], ball: [5, 107] },
+    { elbow: [65, 33], hand: [44, 14] },
+    { armBehindHead: true, turn: 1 },
+  ),
+  // Wax Punch and Flame Blast, a moment after the blow: the same, risen a little (the 3D figure draws it, `WARDEN_STANCE`), on its way to the next stance.
+  "wd-punch-after": pose(
+    { head: [65, 52], neck: [58, 61], hip: [47, 87], ...legs([64, 90], [67, 114], [41, 108], [24, 114]) },
+    { elbow: [50, 38], hand: [62, 44], ball: [86, 127] },
+    { elbow: [54, 89], hand: [71, 108] },
+    { tilt: 28, handle: 70 },
   ),
   // Fan Flames lands: a backhand swat out of Wax Shoulder In. He turns the other way (flail
   // shoulder in, right leg forward, stance low), the candle arm flung out straight behind him,
@@ -556,6 +570,7 @@ const WARDEN_ADJUST: Partial<Record<WardenPoseName, BoneAdjust>> = {
   "wd-wax-swat": { torso: 1.024, leadThigh: 1.071, leadShin: 0.932, rearThigh: 1.043, rearShin: 0.883, weaponUpper: 1.216, freeUpper: 1.578, freeFore: 0.953 },
   "wd-blast": { torso: 0.882, leadThigh: 0.705, leadShin: 0.987, rearThigh: 0.891, rearShin: 0.736, weaponUpper: 1.951, weaponFore: 0.958, freeUpper: 1.716, freeFore: 1.821 },
   "wd-chain-guard": { torso: 1.012, leadThigh: 1.064, leadShin: 1.033, rearThigh: 1.046, weaponUpper: 1.04, freeUpper: 1.674, freeFore: 0.61 },
+  "wd-punch-after": { torso: 0.882, leadThigh: 0.705, leadShin: 0.987, rearThigh: 0.891, rearShin: 0.736, weaponUpper: 1.951, weaponFore: 0.958, freeUpper: 1.716, freeFore: 1.821 },
   "wd-wax-guard": { torso: 1.031, leadThigh: 1.061, leadShin: 0.921, rearThigh: 1.046, rearShin: 0.921, weaponUpper: 1.172, weaponFore: 0.904, freeUpper: 1.329, freeFore: 1.857 },
   "wd-turn-away": { torso: 0.965, leadThigh: 0.816, leadShin: 0.727, rearThigh: 0.924, rearShin: 0.77, weaponUpper: 0.742, weaponFore: 1.178, freeUpper: 1.1, freeFore: 0.904 },
   "wd-dodge-land": { torso: 0.965, leadThigh: 0.816, leadShin: 0.727, rearThigh: 0.924, rearShin: 0.77, weaponUpper: 0.742, weaponFore: 1.178, freeUpper: 1.1, freeFore: 0.904 },

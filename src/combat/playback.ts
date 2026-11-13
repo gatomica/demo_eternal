@@ -105,8 +105,8 @@ export const phaseTwoOf = (st: Step | undefined) => st?.events.find((ev): ev is 
  * The phase step `index` starts in, `elapsed` ms into the turn: the first step after the attacks holds ("approach",
  * nothing happening yet) until the attack phase has lasted MIN_ATTACK_PHASE_MS.
  */
-export function phaseAt(steps: Step[], index: number, elapsed: number): Playback["phase"] {
-  const phase = phaseFor(steps[index]);
+export function phaseAt(steps: Step[], index: number, elapsed: number, usurpScene = true): Playback["phase"] {
+  const phase = phaseFor(steps[index], usurpScene);
   const afterAttacks = steps.slice(0, index).every(isAttackStep);
   return phase === "impact" && afterAttacks && elapsed < MIN_ATTACK_PHASE_MS ? "approach" : phase;
 }
@@ -114,7 +114,12 @@ export function phaseAt(steps: Step[], index: number, elapsed: number): Playback
 /** The step where you rise again with a revive, if it is this one: it waits in its first beat (the red string winds round your remains) before it plays. */
 export const youReviveIn = (st: Step | undefined) => !!st?.events.some(ev => ev.kind === "revive" && ev.who === "player");
 
-export const phaseFor = (st: Step | undefined): Playback["phase"] => (phaseTwoOf(st) ? "ignite" : usurpOf(st) ? "usurp" : isAttackStep(st) || youReviveIn(st) ? "approach" : "impact");
+/**
+ * The phase a step starts in. Usurp Flame plays its scene first (`usurpScene`), unless it is to be played as the attack it is (the 3D Warden: it launches straight at its
+ * target, in its wind-up pose, like any attack); a step that is only the taking of the flame, with no attack in it (the opening scene's), is always the scene.
+ */
+export const phaseFor = (st: Step | undefined, usurpScene = true): Playback["phase"] =>
+  phaseTwoOf(st) ? "ignite" : usurpOf(st) && (usurpScene || !isAttackStep(st)) ? "usurp" : isAttackStep(st) || youReviveIn(st) ? "approach" : "impact";
 
 /** How long the arena shows before a fight's opening scene starts, in ms. */
 export const OPENING_LEAD_IN = 1200;
@@ -135,6 +140,8 @@ export const IGNITE_MARKS = [IGNITE_DARK, IGNITE.kindle, IGNITE.flare];
  * returns on him standing in Idle, the flame streaming from the target over him into his hand.
  * When each stage starts, in ms.
  */
+/** Usurp Flame played as an attack: how long its wisps take from the flame to the Warden's wax hand (ms), and the rest of the step after they arrive. */
+export const USURP_WISP_MS = 800, USURP_AFTER_MS = 300;
 export const USURP_STAGES = { focus: 0, dash: 900, black: 1500, reveal: 2000, done: 3000 } as const;
 
 export type UsurpStage = Exclude<keyof typeof USURP_STAGES, "done">;

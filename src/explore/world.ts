@@ -2,11 +2,14 @@
  * world.ts — the map as tiles: levels, stairs and ladders, and the questions asked of it.
  */
 import type { Dir } from "../ui/input";
-import { BLACK_WALLS, FENCED_ZONES, GRATE_ZONES, LEVEL_PLANS, OPEN_ABOVE, RAISED_WAX, ROCK_ZONES, RUBBLE_SPOTS, THIN_FLOORS, WAX_SPLODGES, WAX_TILES, WAX_WALLS, WOOD_TILES } from "./plans";
+import { BLACK_WALLS, DEMO_DOOR, FENCED_ZONES, GRATE_ZONES, LEVEL_PLANS, OPEN_ABOVE, RAISED_WAX, ROCK_ZONES, RUBBLE_SPOTS, THIN_FLOORS, WAX_SPLODGES, WAX_TILES, WAX_WALLS, WOOD_TILES } from "./plans";
 
 export const VOID = 0, FLOOR = 1, WALL = 2, STAIRS = 3, LADDER = 4, DIAG = 5;
 
 export type { Dir };
+
+/** Whether tile (tx, ty) (world coordinates) of level z is on the threshold of the demo's corridor: crossing it ends the demo (see `DEMO_DOOR`). */
+export const doorAt = (z: number, tx: number, ty: number) => z >= DEMO_DOOR.levels[0] && z <= DEMO_DOOR.levels[1] && DEMO_DOOR.tiles.some(([x, y]) => x + 1 === tx && y + 1 === ty);
 
 /** Which way a ramp goes uphill: straight, or (for a diagonal corridor's stairs) toward a corner. */
 export type RampDir = Dir | "ne" | "nw" | "se" | "sw";

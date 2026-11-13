@@ -25,7 +25,7 @@ import type { Player } from "../core/types";
 import { dirOf, menuSound, wrapIndex } from "../ui/input";
 import { type MenuOption, PauseMenu } from "../ui/Menu";
 import { Dialogue } from "./Dialogue";
-import { drawBlobTop, drawPickup, drawKeeper, drawRemains, drawStringAura, drawStringPile, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
+import { blobWeapons, drawBlob, drawPickup, drawKeeper, drawRemains, drawStringAura, drawStringPile, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
 import { StringCounter, YarnBall } from "../render/StringCounter";
 import { equippedSide, equipSide, gearName, type GearSpec, hasMemories, type Inventory as Bag, loadoutOf, pieceAt, readDreams, receive, setEternal, SLOTS, type Slot, unequip } from "./gear";
 import { GearSprite } from "./GearIcons";
@@ -45,10 +45,16 @@ import { createMapRenderer, type Light } from "./render";
 import { sight } from "./sight";
 import { type After, CHAT, FIRST_FLOOR_KEEPER, GIFT, type Knot, knotCharges, type Talk, type TutorialState } from "./tutorial";
 import { ACCEL, BODY_ABOVE_FEET, CAMERA_FOLLOW, FALL_DEATH_ALT, FALL_FATAL, GRAVITY, HALF_W, LADDER_SPEED, RISE, SPEED, STAIRS_SPEED, PLAYER_STRIDE, STEP_TOLERANCE, STRIDE, VISION_RADIUS } from "./tuning";
-import { type Dir, LADDER, ladderSpan, LEVELS, STAIRS, WORLD } from "./world";
+import { type Dir, doorAt, LADDER, ladderSpan, LEVELS, STAIRS, WORLD } from "./world";
 
 /** How long what you picked up stays on screen, fading at the end. */
 const PICKED_UP_MS = 2200;
+/**
+ * The end of the demo: the dark corridor past Floor C's NE bridge (`DEMO_DOOR` in plans.ts, three tiles wide and two tall). Crossing its
+ * threshold, your middle inside one of its tiles, is the end: a "Thanks for playing" card, and then the menu. `before` is where Continue puts you: in the middle of the bridge's last
+ * square (world tile 32, 14), right before the door.
+ */
+const DEMO_BEFORE = { x: 32.5, y: 14.5, alt: 13, facing: "right" as Dir };
 
 /** Resting is a sleep: how long the screen is dark in all, and when, in the dark, it happens. */
 const SLEEP_MS = 2400;
@@ -114,11 +120,13 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   const disturbRef = useRef<HTMLCanvasElement>(null);
   // The screen goes dark as a fight begins; input stops.
   const [entering, setEntering] = useState(false);
+  /** The demo is over: the "Thanks for playing" card is up. */
+  const [thanks, setThanks] = useState(false);
   // The map being got ready before the first frame (how far along it is, 0 to 1), or null once it is.
   const [preparing, setPreparing] = useState<number | null>(0);
   const leaving = useRef(false);
-  const latest = useRef({ journey, onEncounter, onSave, onDie });
-  latest.current = { journey, onEncounter, onSave, onDie };
+  const latest = useRef({ journey, onEncounter, onSave, onDie, onExit });
+  latest.current = { journey, onEncounter, onSave, onDie, onExit };
   /**
    * What is open over the map, if anything (the map stands still meanwhile): the inventory (E; `start`:
    * where its cursor begins), the guide's menu (E by a keeper), or the pause menu (Esc).
@@ -635,6 +643,13 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         safeRef.current = mid && Math.abs(mid.h - me.alt) < 1e-3 ? { x: tx + 0.5, y: ty + 0.5, alt: me.alt } : { x: me.x, y: me.y, alt: me.alt };
       }
 
+      // The demo ends in the dark corridor past Floor C's NE bridge: crossing its threshold, the "Thanks for playing" card comes up, and its button takes you back to the menu; Continue puts you right before it.
+      if (!leaving.current && Math.abs(me.alt - 13) < 0.4 && doorAt(13, Math.floor(me.x), Math.floor(me.y))) {
+        leaving.current = true;
+        held.current = [];
+        setThanks(true);
+      }
+
       // The music follows where you are: the lower labyrinth and its shaft, or the dungeon proper (Floor A's outer wheel, on level 6, and up).
       playMusic(me.alt >= 6 ? "quella" : "temple");
 
@@ -946,7 +961,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
             if (f.def.fight.some(m => m.body)) {
               if (kind === "blobMid") {
                 if (holding) drawStringAura(c, px, py, T, 1.9, performance.now(), "back", seedOf(key));
-                drawBlobTop(c, px, py, T, f.aimX, f.aimY, f.reach, performance.now());
+                drawBlob(c, px, py, T, f.facing, frame, blobWeapons(f.def.fight), f.aimX, f.aimY, f.reach, performance.now());
                 if (holding) drawStringAura(c, px, py, T, 1.9, performance.now(), "front", seedOf(key));
               }
               continue;
@@ -956,7 +971,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
             if (!f.def.girth) {
               // (Holding String you lost: a faint string coils round it, the back of the coil behind it and the front over it.)
               if (holdsRef.current[key]) drawStringAura(c, px, py, T, 1, performance.now(), "back", seedOf(key));
-              MAP_FIGURES[kind](c, px, py, T, facing, frame, howl);
+              MAP_FIGURES[kind](c, px, py, T, facing, frame, howl, f.chasing);
               if (holdsRef.current[key]) drawStringAura(c, px, py, T, 1, performance.now(), "front", seedOf(key));
               continue;
             }
@@ -967,7 +982,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
             c.translate(px, feet);
             c.scale(s, s);
             c.translate(-px, -feet);
-            MAP_FIGURES[kind](c, px, py, T, f.facing, frame, howl);
+            MAP_FIGURES[kind](c, px, py, T, f.facing, frame, howl, f.chasing);
             c.restore();
             if (holdsRef.current[key]) drawStringAura(c, px, py, T, s, performance.now(), "front", seedOf(key));
           }
@@ -1201,6 +1216,14 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         </div>
       )}
       {talk && <Dialogue speaker="The guide" text={talk.lines[talk.at]} written={written} last={talk.at + 1 >= talk.lines.length} />}
+      {thanks && (
+        <div className="result" role="dialog" aria-label="Thanks for playing">
+          <div className="result-card">
+            <h2>Thanks for playing</h2>
+            <div className="setup-buttons"><button className="commit" autoFocus onClick={() => latest.current.onExit({ ...snapshot.current(), at: DEMO_BEFORE })}>Main menu</button></div>
+          </div>
+        </div>
+      )}
       {entering && <div className="explore-fade" />}
       {screen?.kind === "inventory" && (
         <InventoryScreen inv={inv} player={barsPlayer()} string={stringRef.current} eternalString={eternalRef.current} knot={knotRef.current} ground={groundNear()} start={screen.start} onUse={useInventory} onClose={() => setScreen(null)} />

@@ -117,3 +117,14 @@ const armedWaxed = (name: string, weapon: "light" | "heavy"): EnemyKind => ({
 
 export const WAXED_CHISEL = armedWaxed("Chisel Waxed", "light");
 export const WAXED_HAMMER = armedWaxed("Hammer Waxed", "heavy");
+
+/**
+ * A Lit waxed (the dungeon's own): the same wretch with its flame already burning on its head, sealed whole in wax (a lit waxed always is). Unlike the
+ * ordinary waxed, it gets up again when you rest by a keeper, and on the map it is quicker (`FOE_TUNING`). Lit, it cradles its flame to burst it
+ * (Flame Immolation, which spends it); like every lit waxed, it does not die when staggered.
+ */
+const litWaxed = (base: EnemyKind): EnemyKind => ({ ...base, name: `Lit ${base.name}`, flags: { ...base.flags, lit: true }, respawns: true });
+
+export const WAXED_LIT = litWaxed(WAXED);
+export const WAXED_CHISEL_LIT = litWaxed(WAXED_CHISEL);
+export const WAXED_HAMMER_LIT = litWaxed(WAXED_HAMMER);

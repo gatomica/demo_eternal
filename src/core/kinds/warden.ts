@@ -5,7 +5,7 @@
  */
 import { kindOf, type EnemyKind } from "../bestiary";
 import { parsePattern } from "../patterns";
-import type { CombatEvent, CombatState, Enemy, TurnReport } from "../types";
+import type { CombatState, Enemy, TurnReport } from "../types";
 
 /** A flaming flail's direct hit deals this much of its damage again, as extra damage. */
 const FLAMING_BONUS = 1 / 4;
@@ -120,6 +120,8 @@ export const WARDEN: EnemyKind = {
   scale: 1.18,
   // When he falls for good: his cloak, draped over a thick pool of wax.
   deathLook: "cloak",
+  // Before the fight's first turn she stands in Wax Arm Raised, and goes through Wax Guard's animation (its wind-up, then its landing) into Wax Arm Back, the stance it leads to.
+  openingPoses: [{ pose: "wd-shoulder", ms: 900 }, { pose: "wd-wax-ready", ms: 650 }, { pose: "wd-wax-swat", ms: 600 }],
   // His fight takes place in his arena, among the sleepwalkers sealed into its floor and walls.
   arena: true,
   // He attacks straight out of whatever stance he's in (no wind-up pose of its own).
@@ -142,14 +144,15 @@ export const WARDEN: EnemyKind = {
   flinchPose: "wd-flinch",
   // (Usurp Flame, Spin Guard and Dash borrow older poses until they get their own; Turn Away is Idle turned, for now.)
   actionPoses: {
-    "Usurp Flame": { act: "wd-usurp", strike: "wd-usurp-dash" },
+    // (the lunge is her wind-up; she lands in whichever stance follows, Idle or Wax Arm Raised: the scene shows her next stance, `strike` is its Idle for the viewer)
+    "Usurp Flame": { act: "wd-usurp", windup: "wd-usurp-dash", strike: "wd-idle" },
     // (a leap past your left side, the flail swung through you as she passes, landing behind you and sliding round into Flail Spinning Behind)
     "Flail Swing": { act: "wd-clutch-flail", windup: "wd-swing-windup", strike: "wd-swing", leap: { hold: 250, ms: 400, hop: 0.45, pass: 0.9, behind: 1.4, slide: { far: 1.2, ms: 700 } } },
     "Rising Flail": { act: "wd-spin-behind", strike: "wd-rising" },
     "Flail Slam": { act: "wd-spin-over", strike: "wd-slam", projectile: "impact" },
-    "Wax Punch": { act: "wd-arm-back", strike: "wd-punch", projectile: "impact" },
-    "Fan Flames": { act: "wd-shoulder", strike: "wd-fan", projectile: "fan" },
-    "Flame Blast": { act: "wd-arm-back", strike: "wd-blast", projectile: "blast" },
+    "Wax Punch": { act: "wd-arm-back", strike: "wd-punch", after: "wd-punch-after", projectile: "impact" },
+    "Fan Flames": { act: "wd-shoulder", windup: "wd-wax-ready", strike: "wd-fan", projectile: "fan" },
+    "Flame Blast": { act: "wd-arm-back", strike: "wd-blast", after: "wd-punch-after", projectile: "blast" },
     "Spin Guard": { act: "wd-chain-guard", windup: "wd-chain-ready" },
     "Wax Guard": { act: "wd-wax-guard", guard: "wd-wax-swat", windup: "wd-wax-ready" },
     // (her dodge's dash runs on past the blow, and comes down in Dodge Lands and slides on, turning from a little past giving you her back round to Flail Clutched's way, her next stance)
@@ -256,6 +259,16 @@ export const WARDEN: EnemyKind = {
         if (fallen) light(r, fallen, self.id);
       }
     }
+    // The way into phase two opens only when he falls with his revive; it happens as his revive lands
+    // and he gets back up. A stagger just puts his flame out.
+    if (r.staggered) {
+      setSealed(r, true);
+      // In phase two, staggering him raises a fallen waxed again.
+      if (self.flags.phase2) {
+        const fallen = alliesOf(r).find(e => !e.alive);
+        if (fallen) light(r, fallen, self.id);
+      }
+    }
     // In phase two, a lit waxed that got staggered this turn dies as the turn ends: its flame streams into his hand,
     // as long as he isn't staggered himself. (The ones raised staggered are on their forced Rest: they get back up.)
     if (self.flags.phase2 && !self.staggered && !self.reviving) {
@@ -274,65 +287,28 @@ export const WARDEN: EnemyKind = {
     if (r.fell && !self.flags.phase2) enterPhaseTwo(r);
   },
   /**
-   * The fight's opening scene: he takes the flame an offering waxed cradles (Usurp Flame),
-   * showing the mechanic before the fight begins. The three waxed start on the front line, he on the back one, Sealed, his flame out; the
-   * scene leaves him Unsealed, on the front line in the waxed's place, the waxed encased for good, and every first intent chosen afresh (his
-   * comes from "Usurp Flame >": Idle).
+   * How the fight starts (no scene: he takes the flame in the first turn itself, with Usurp Flame as in any fight). He starts Sealed, his flame out, on the back line, the waxed
+   * on the front one; the first waxed (Waxed C, set up with `offering: true`, else any other still up) is about to Clutch Flame, so that the flame is his to take: seeing it,
+   * Usurp Flame comes first in Wax Arm Back. She always starts in Wax Arm Back: as if she had just guarded (Wax Guard leads to it), which she plays out before the first turn
+   * can be planned (`openingPoses`).
    */
   opening: ({ self, state, setups, describe, chooseIntents, rng }) => {
-    // The offering's flame already taken in an earlier attempt (it lies dead from the start), he takes another waxed's, any still up.
+    self.flags.sealed = true;
+    // The named offering, or, if its flame was taken in an earlier attempt (it lies dead from the start), any other lit waxed still up.
     const named = state.enemies.find((e, i) => setups[i]?.offering && kindOf(e).flame);
     const others = state.enemies.filter(e => e.alive && e !== self && !!kindOf(e).flame);
-    const offering = named && !named.alive && others.length ? others[Math.floor(rng() * others.length)] : named;
-    // None left (every waxed beaten before): no scene, the fight begins as the scene would leave him, Unsealed, on the front line, his
-    // stance coming from Usurp Flame.
-    if (offering && !offering.alive) {
-      self.line = "front";
-      self.flags.sealed = false;
-      self.last = { name: "Usurp Flame", outcome: "done" };
-      chooseIntents(state, rng);
-      return null;
+    const offering = named?.alive ? named : others[Math.floor(rng() * others.length)];
+    if (offering) offering.script = [kindOf(offering).flame!.action];
+    // (Her stance comes from Wax Guard's, which she plays out before the turn: Wax Arm Back, with or without a flame to take.)
+    self.nextFrom = "Wax Guard";
+    for (const e of state.enemies) e.stanceHistory = [];
+    chooseIntents(state, rng);
+    // (The scripted Clutch Flame has no stance, so it would stand in the pose of the action, not in Cradle Flame, as the others who are about to clutch theirs do: it is shown
+    // in its stance, the same action.)
+    if (offering) {
+      const flame = kindOf(offering).flame!, clutch = kindOf(offering).pattern.actions.get(flame.action.toLowerCase());
+      if (clutch) offering.intent = describe(offering.kind, offering.line, flame.stance, clutch);
     }
-    const usurp = WARDEN.pattern.actions.get("usurp flame");
-    const flame = offering && kindOf(offering).flame!;
-    const clutch = offering && kindOf(offering).pattern.actions.get(flame!.action.toLowerCase());
-    if (!offering || !usurp || !clutch) return null;
-
-    // After: the flame his, the waxed sealed whole in wax, and everyone's first move chosen.
-    const after = structuredClone(state);
-    const w = after.enemies.find(e => e.id === self.id)!;
-    const o = after.enemies.find(e => e.id === offering.id)!;
-    w.flags.sealed = false;
-    w.last = { name: "Usurp Flame", outcome: "done" };
-    // The fight begins with all that are left on the front line: he has stepped into the offering's place.
-    w.line = "front";
-    o.alive = false;
-    o.fate = "encased";
-    o.hp = 0;
-    o.fatigue = 0;
-    after.lastTurn = [];
-    chooseIntents(after, rng);
-
-    // Before: the same (so the others hold the stances they'll fight from), but his flame out
-    // and the waxed holding its own out to him.
-    const from = structuredClone(after);
-    // (Before it, he is on the back line, as he starts, and the waxed on the front.)
-    from.enemies.find(e => e.id === self.id)!.line = "back";
-    const w0 = from.enemies.find(e => e.id === self.id)!;
-    const o0: Enemy = from.enemies.find(e => e.id === offering.id)!;
-    w0.flags.sealed = true;
-    w0.last = null;
-    w0.intent = { ...describe(w0.kind, w0.line, "Wax Arm Back", usurp), target: o0.id };
-    o0.alive = true;
-    o0.fate = undefined;
-    o0.hp = o0.maxHP;
-    o0.intent = describe(o0.kind, o0.line, flame!.stance, clutch);
-
-    const events: CombatEvent[] = [
-      { kind: "usurp", who: w.id, target: o.id },
-      { kind: "encased", who: o.id },
-      { kind: "flag", who: w.id, flag: "sealed", on: false },
-    ];
-    return { from, after, events };
+    return null;
   },
 };

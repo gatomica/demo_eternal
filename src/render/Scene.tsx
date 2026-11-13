@@ -2,7 +2,7 @@
  * Scene.tsx — the battlefield: the floor and every figure, seen through the camera.
  */
 import { StringAura } from "./StringCounter";
-import { Fragment, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Variant } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
 import { BODY_FORWARD, BODY_RADIUS, EYE_HEIGHT, orbitBox, orbitCamera, BODY_SIDE_SLOT, type Cam, darkAt, floorDisc, SHADE_RADIUS, ease, easeOut, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, facingVec, focusOf, NEAR, planningCamera, project, projectPoint, right, type MoveStage, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec, yawOf } from "./camera";
@@ -16,12 +16,17 @@ import { StickFigure } from "./StickFigure";
 import { AMBIENT } from "./shade";
 import { facingYaw, liftPose, type P3, placeRig, ribcageOf } from "./rig3d";
 import { LittleFlame } from "./LittleFlame";
+import { UsurpWisps, WispStreams } from "./UsurpWisps";
+import { FlameStrings } from "./FlameStrings";
 import { FlameAnchor, HeadFlame } from "./HeadFlame";
 import { HEAD_TOP, Waxed3D } from "./Waxed3D";
 import { Sleepwalker3D } from "./Sleepwalker3D";
 import { Warden3D } from "./Warden3D";
 import { isWardenPose, placeWarden, wardenFist, wardenFlame, wardenRig } from "../warden/pose3d";
 import { BlobPool, type BlobBox } from "./WaxBlob";
+
+/** How wide the pool of wax under the dead Warden is: its radius, in meters (at a figure scale of 1). */
+const DEAD_POOL_RADIUS = 0.85;
 import { ARENA_PROPS, PROP_FLAME, PROP_SCALE, SealedSleeper } from "../warden/arena";
 import { IGNITE } from "../warden/scenes";
 import type { CandleArm, WardenPoseName } from "../warden/skeleton";
@@ -97,6 +102,13 @@ export interface SceneFigure {
    * there, whatever the target does (knocked back, dodging past, backing off) until the blow is over.
    */
   faceToward?: { id: string; key: string };
+  /** The Warden gathering a Flame Blast: red wisps circle round her wax arm, as they do round a lit waxed gathering its flame (`FlameStrings`). */
+  armBlaze?: boolean;
+  /**
+   * Whom it stands facing before its blow: the one it has picked, when that is another enemy (the waxed whose flame the Warden's Usurp Flame goes for), instead of you. Its blow
+   * itself is faced as `faceToward` has it.
+   */
+  faceAt?: string;
   /** It fell as the turn now playing plays: the player still faces it (as it struck it) until the turn is over. */
   fellThisTurn?: boolean;
   /** The Warden's remains in his second form: the wax is burnt black. */
@@ -149,7 +161,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   /** The light dying (0 to 1, over `ms`), all but one figure's flame, which keeps burning (or the glow of one figure's own light, the guide's orb). */
   dark?: { level: number; ms: number; flame?: string; glow?: string };
   /** Flames streaming from figures, each arching over another, into its candle hand. */
-  usurpTrails?: { from: string; to: string; key: string }[];
+  usurpTrails?: { from: string; to: string; key: string; /** Red wisps (`UsurpWisps`) taking this many ms to reach the hand, instead of the fire arch. */ wisps?: number }[];
   /** The Warden's arena: sleepwalkers sealed into its floor and walls. */
   arena?: boolean;
   /** The sealed sleepwalkers' candles (and the waxed remains') burn. */
@@ -359,7 +371,27 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     return t <= 0 || t >= 1 ? 0 : 4 * hop.height * t * (1 - t);
   };
   /** The way a figure faces on the floor: along its dodge, else toward the player. */
+  // (worked out once a frame for each figure standing at a spot: it is asked a dozen times a frame, and it filters the figures each time)
+  /**
+   * What a figure's drawing is keyed by. A figure is drawn afresh every playback beat (its trails, arcs and effects play from their start), but one that shows
+   * the same as on the last beat and has no effect on it (no hit, step or break class) is the same picture: it is kept, instead of rebuilding its whole drawing.
+   */
+  const wrapKey = (f: SceneFigure) => {
+    const sig = `${f.pose}|${f.dead}|${f.arm}|${f.lingerFrom}|${f.flailFire}|${f.waxCaked}|${f.eternalFlash}|${f.encased}|${f.headFlame}|${f.holdsString}|${f.smokeSince}|${f.phase2Look}|${f.charred}|${f.hand}|${f.hooded}|${JSON.stringify(f.trail)}`;
+    const was = wrapKeys.current.get(f.id);
+    if (was && was.sig === sig && !f.classes.length) return was.key;
+    wrapKeys.current.set(f.id, { sig, key: f.stepKey });
+    return f.stepKey;
+  };
+  const wrapKeys = useRef(new Map<string, { sig: string; key: string }>());
+  const yaws = new Map<string, number>();
   const figureYaw = (f: SceneFigure, at: Vec) => {
+    const key = `${f.id}|${at.x}|${at.z}`;
+    let yaw = yaws.get(key);
+    if (yaw === undefined) yaws.set(key, yaw = figureYawNow(f, at));
+    return yaw;
+  };
+  const figureYawNow = (f: SceneFigure, at: Vec) => {
     // Orbiting: every figure is turned the same, `orbit.yaw` round from facing the camera.
     if (orbit) return Math.PI - (orbit.yaw * Math.PI) / 180;
     const dodgeWay = dodgeFacing(f);
@@ -399,6 +431,10 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
       const all = figures.filter(g => g.id !== "player"), up = all.filter(g => !g.dead || g.fellThisTurn);
       const foes = (up.length ? up : all).map(g => posNow(g.id)).filter((p): p is Vec => !!p);
       if (foes.length) return facingYaw(cFight, at, { x: foes.reduce((n, p) => n + p.x, 0) / foes.length, z: foes.reduce((n, p) => n + p.z, 0) / foes.length }, "front", false);
+    }
+    if (f.faceAt && !f.straight) {
+      const foe = posNow(f.faceAt);
+      if (foe) return facingYaw(cFight, at, foe, f.view, false);
     }
     return facingYaw(cFight, at, posNow("player"), f.view, !!f.straight);
   };
@@ -628,6 +664,16 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
           <div className="blob-slot" style={{ zIndex: b.lo, filter: b.filter }}><BlobPool box={b.box} /></div>
         </Fragment>
       ))}
+      {/* The dead Warden kneels in a low dome of wax (the Wax Blob's pool, flatter: no sleepers' arms, a dome a tenth of her height), her body encased in it. */}
+      {w > 0 && placed.filter(({ f }) => f.warden3d && f.dead).map(({ f, at, box }) => {
+        const d = floorDisc(c, at, DEAD_POOL_RADIUS * (f.scale ?? 1), w, h);
+        const pool: BlobBox = { cx: d.cx, cy: d.cy, rx: d.rx, ry: d.ry, tall: box.h, slumped: true, links: [] };
+        return (
+          <div key={`dead-pool-${f.id}`} className="blob-slot" style={{ zIndex: 1000 - Math.round(box.depth * 10) - 20, filter: `brightness(${Math.max(0.68, Math.min(1, 1.12 - box.depth * 0.06)) * lightAt(at)})` }}>
+            <BlobPool box={pool} />
+          </div>
+        );
+      })}
       {placed.map(({ f, box, at }) => (
         <Fragment key={f.id}>
         <button
@@ -648,7 +694,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
           }}
         >
           {f.holdsString && !f.dead && <StringAura layer="back" spread={f.body ? 2.4 : 1} />}
-          <div key={f.stepKey} className={`fig-wrap ${f.classes.join(" ")}`}>
+          <div key={wrapKey(f)} className={`fig-wrap ${f.classes.join(" ")}`}>
             {f.dead === "pieces" && !((f.sleepwalker3d || f.player3d) && w > 0) ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.warden3d && w > 0 ? <Warden3D pose={f.pose} lingerFrom={f.lingerFrom} arm={f.arm} phase2Look={f.phase2Look} flailFire={f.flailFire} dead={!!f.dead} charred={f.charred} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} rise={riseOf(f)} w={w} h={h} box={box} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : (f.sleepwalker3d || f.player3d) && w > 0 ? <Sleepwalker3D pose={f.pose} hand={f.hand} weapon={f.weapon} gear={f.player3d ? { weaponItem: f.weaponItem, armor: f.armor, armorItem: f.armorItem, headItem: f.headItem } : undefined} hooded={f.hooded} encased={f.encased} waxCaked={f.waxCaked && !f.dead} dead={!!f.dead} eternalFlash={f.eternalFlash} swayId={f.id} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {headFlames.has(f.id) && <FlameAnchor id={f.id} x={headFlames.get(f.id)![0] - box.x} y={headFlames.get(f.id)![1] - box.y} />}
             {f.classes.includes("fx-break") && <Shards />}
@@ -663,6 +709,17 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         )}
         </Fragment>
       ))}
+      {/* The Warden gathering a Flame Blast: red wisps round her wax forearm and fist. */}
+      {w > 0 && placed.filter(({ f }) => f.armBlaze && f.warden3d && !f.dead).map(({ f, box, at }) => {
+        const { placed: wp } = placeWarden(f.pose, at, figureYaw(f, at), c, w, h, f.scale, riseOf(f));
+        const hand = wp.seen.handL, elbow = wp.seen.elbowL, z = 1001 - Math.round(box.depth * 10);
+        return (
+          <Fragment key={`armblaze-${f.id}`}>
+            <FlameStrings cx={(hand.sx + elbow.sx) / 2} cy={(hand.sy + elbow.sy) / 2} size={box.h * 0.62} zIndex={z} />
+            <FlameStrings cx={hand.sx} cy={hand.sy} size={box.h * 0.5} zIndex={z} />
+          </Fragment>
+        );
+      })}
       {/* The waxed remains burn as candles once the arena is lit, and a lit waxed carries its flame on its head. Gathering it to burst, the flame
           blazes: bigger and brighter, with red strings looping out of it and back in, and a red light round it. */}
       {placed.filter(({ f }) => headFlames.has(f.id)).map(({ f, box }) => {
@@ -713,6 +770,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         if (!a || !b) return null;
         const from = flameSpot(a.f, a.box, a.at);
         const hand = handSpot(b.f, b.box, b.at);
+        if (usurpTrail.wisps) return <UsurpWisps key={usurpTrail.key} from={from} to={hand} ms={usurpTrail.wisps} />;
         // Arching up over him: the control point well above both.
         const ctl: Pt = [(from[0] + hand[0]) / 2, Math.min(from[1], hand[1]) - b.box.h * 0.22];
         const N = 28, w = b.box.h * 0.05;
@@ -750,19 +808,15 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
           <>
             {/* Flames kindling in the dark. */}
             {t < IGNITE.flare && sources.filter(src => src.seen && t >= src.kindle && t < src.draw).map(src => flame(`src-${src.id}`, src.at, igniter.box.h * 0.1, "is-kindling"))}
-            {/* Each one streaming into his hand, arching up as it comes. */}
-            <svg className="shockwave usurp-trail-layer" aria-hidden="true">
-              {sources.filter(src => t >= src.draw && t < src.draw + 700).map(src => {
-                const ctl: Pt = [(src.at[0] + hx) / 2, Math.min(src.at[1], hy) - igniter.box.h * 0.35];
-                const d = `M${src.at[0]} ${src.at[1]} Q${ctl[0]} ${ctl[1]} ${hx} ${hy}`;
-                return (
-                  <g key={`trail-${src.id}`} className="ignite-trail">
-                    <path d={d} className="ignite-trail-outer" />
-                    <path d={d} className="ignite-trail-core" />
-                  </g>
-                );
-              })}
-            </svg>
+            {/* Each one bursting into red wisps that spiral into his hand (the Usurp Flame's), each from when it is drawn in. */}
+            {t >= IGNITE.draw && t < IGNITE.flare + 300 && (
+              <WispStreams
+                key={`wisps-${ignite.seed}`}
+                routes={sources.map(src => ({ from: src.at, to: [hx, hy] as Pt, at: src.draw - IGNITE.draw }))}
+                ms={900}
+                count={5}
+              />
+            )}
             {/* His flame, growing as they pour in. */}
             {t >= IGNITE.draw && t < IGNITE.flare + 300 && flame("hand", [hx, hy], igniter.box.h * (0.1 + 0.3 * drawn), "is-gathering")}
             {/* Then it flares, and a ring of fire rolls out from him. */}
@@ -771,7 +825,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
                 <div key={`flare-${ignite.seed}`} className="blast-flash ignite-flare" style={{ left: hx, top: hy, width: igniter.box.h * 1.4, height: igniter.box.h * 1.4 }}>
                   <FireballFlash />
                 </div>
-                {posNow(ignite.who) && <Shockwave key={`ring-${ignite.seed}`} center={posNow(ignite.who)!} reach={16} toward={0} flame={0.9} proj={proj} full />}
+                {posNow(ignite.who) && <Shockwave key={`ring-${ignite.seed}`} center={posNow(ignite.who)!} reach={16} toward={0} flame={1.4} proj={proj} full dome fade={0.5} />}
               </>
             )}
           </>
@@ -818,9 +872,9 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
                 if (!A || !B) return null;
                 // (from where the blow really lands on the floor: the Warden's flail's head or fist, from his 3D rig; else under it on the screen)
                 const at = thrower!.f.warden3d && w > 0 ? wardenFloorAt(thrower!.f, A) : floorAt(A, ax);
-                // A flaming flail's burns, as big as a Flame Blast's: out through the target, with flames as tall.
+                // A flaming flail's burns are the Flame Blast's: the same dome of flame all the way round, out past everyone in the fight, with its red light.
                 return pr.fiery
-                  ? <Shockwave center={at} reach={Math.hypot(B.x - at.x, B.z - at.z) * 1.25} toward={Math.atan2(B.z - at.z, B.x - at.x)} flame={1.4} proj={proj} />
+                  ? <Shockwave center={at} reach={Math.max(4, ...placed.map(({ at: p }) => Math.hypot(p.x - at.x, p.z - at.z))) * 1.25} toward={0} flame={1.4} proj={proj} full dome />
                   : <Shockwave center={at} reach={1.5} toward={Math.atan2(B.z - at.z, B.x - at.x)} flame={0.8} proj={proj} impact />;
               })()}
             </div>
@@ -845,7 +899,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
               <div className="blast-flash" style={{ left: hx, top: hy, width: ball, height: ball }}>
                 <FireballFlash />
               </div>
-              {A && <Shockwave center={A} reach={reach} toward={0} flame={1.4} proj={proj} full />}
+              {A && <Shockwave center={A} reach={reach} toward={0} flame={1.4} proj={proj} full dome />}
             </div>
           );
         }
@@ -866,11 +920,13 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
                 <FireballFlash />
               </div>
               {(() => {
-                const A = posNow(pr.from), B = posNow(pr.to);
-                if (!A || !B) return null;
-                const at = floorAt(A, ax);
-                // It passes on through the target.
-                return <Shockwave center={at} reach={Math.hypot(B.x - at.x, B.z - at.z) * 1.25} toward={Math.atan2(B.z - at.z, B.x - at.x)} flame={1.4} proj={proj} />;
+                const A = posNow(pr.from);
+                if (!A) return null;
+                // (from where the blow really lands on the floor: his fist, from his 3D rig; else under it on the screen)
+                const at = thrower!.f.warden3d && w > 0 ? wardenFloorAt(thrower!.f, A) : floorAt(A, ax);
+                // The same dome of flame as a lit waxed's Flame Immolation (`burst`): all the way round, on past everyone in the fight.
+                const reach = Math.max(4, ...placed.map(({ at: p }) => Math.hypot(p.x - at.x, p.z - at.z))) * 1.25;
+                return <Shockwave center={at} reach={reach} toward={0} flame={1.4} proj={proj} full dome />;
               })()}
             </div>
           );
@@ -915,7 +971,11 @@ function FireballFlash() {
 }
 
 /** Faint lines on the floor, drawn in perspective, so the ground visibly moves when the camera does. */
-function FloorGrid({ cam, w, h }: { cam: Cam; w: number; h: number }) {
+/** Whether two cameras look the same (a new `Cam` object is made every frame, even when the camera has not moved). */
+const sameCam = (a: Cam, b: Cam) => a.x === b.x && a.z === b.z && a.yaw === b.yaw && a.look?.x === b.look?.x && a.look?.z === b.look?.z && a.eye === b.eye && a.pitch === b.pitch;
+
+const FloorGrid = memo(FloorGridDrawn, (a, b) => a.w === b.w && a.h === b.h && sameCam(a.cam, b.cam));
+function FloorGridDrawn({ cam, w, h }: { cam: Cam; w: number; h: number }) {
   const SPACING = 2;
   const RANGE = 40;
   // Snap the grid to whole cells around the camera, so lines stay put in the world as it moves.
@@ -955,7 +1015,8 @@ function FloorGrid({ cam, w, h }: { cam: Cam; w: number; h: number }) {
  * figures, which are shaded by their own distance instead (see `lightAt`), so no sprite inside
  * the light is darkened by it.
  */
-function LightFall({ cam, center, w, h }: { cam: Cam; center: Vec; w: number; h: number }) {
+const LightFall = memo(LightFallDrawn, (a, b) => a.w === b.w && a.h === b.h && a.center.x === b.center.x && a.center.z === b.center.z && sameCam(a.cam, b.cam));
+function LightFallDrawn({ cam, center, w, h }: { cam: Cam; center: Vec; w: number; h: number }) {
   const STEP = 0.25, POINTS = 72, BIG = 60000;
   /** The ring of floor at distance `r` from the player, as screen points (what lies behind the camera is pinned to its near edge). */
   const ring = (r: number) => {

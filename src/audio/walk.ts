@@ -79,6 +79,9 @@ function load(): Promise<void> {
   return ready;
 }
 
+/** Resolves when the map's sounds are built (starting that, if it has not begun). */
+export const walkReady = (): Promise<void> => load();
+
 /** Starts loading now (when the map opens), so the first step is not lost. */
 export const prepareWalk = () => { void load(); };
 

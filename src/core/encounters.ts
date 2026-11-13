@@ -61,8 +61,8 @@ export const ENCOUNTERS: Encounter[] = [
     label: "Penitent Warden",
     charges: 1,
     enemies: [
-      // The three waxed start on the front line, he on the back one. In the opening scene he takes the flame of the middle one (Waxed C, the
-      // offering) and steps into its place: the fight begins with the three left (Waxed A, him, Waxed B) all on the front line.
+      // The three waxed start on the front line, he on the back one, Sealed, in Wax Arm Raised. Waxed C (the offering) is about to Clutch Flame in the first turn, so that she
+      // takes Wax Arm Back and Usurp Flame at once: its flame is taken in that turn, as in any fight.
       { kind: "waxed", name: "Waxed A", line: "front" },
       { kind: "waxed", name: "Waxed C", line: "front", offering: true },
       { kind: "warden", name: "Penitent Warden" },

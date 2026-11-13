@@ -105,8 +105,20 @@ export function poseWeaponAxis(drawn: Skeleton): P3 {
   return [ahead * Math.sin(t), -Math.sin(a), ahead * Math.cos(t)];
 }
 
-/** A flat pose lifted into 3D space: see the file's note. `hand`: the hand that holds the weapon. */
+/** `liftPose`'s results, by pose, then by hand and free legs: a rig is the same every time for the same pose (and Scene asks for the same one a dozen times a frame). */
+const lifted = new WeakMap<Skeleton, Map<string, Rig3>>();
+
+/** A flat pose lifted into 3D space: see the file's note. `hand`: the hand that holds the weapon. The result is shared: do not change it. */
 export function liftPose(drawn: Skeleton, handGiven: Side = "right", opts: LiftOptions = {}): Rig3 {
+  let byKey = lifted.get(drawn);
+  if (!byKey) lifted.set(drawn, byKey = new Map());
+  const key = `${handGiven}${opts.freeLegs ? "F" : ""}${opts.weaponReach ?? ""}`;
+  let rig = byKey.get(key);
+  if (!rig) byKey.set(key, rig = liftPoseNow(drawn, handGiven, opts));
+  return rig;
+}
+
+function liftPoseNow(drawn: Skeleton, handGiven: Side, opts: LiftOptions): Rig3 {
   // (A pose may be drawn differently in 3D, and say which hand its weapon arm is.)
   const asDrawn: Skeleton = drawn.for3d ? { ...drawn, ...drawn.for3d } : drawn;
   const raw: Skeleton = opts.freeLegs && asDrawn.adjust

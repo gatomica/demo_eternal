@@ -489,7 +489,14 @@ export interface GearView {
 const LINE_PIECE = 3;
 
 const hex = (c: string) => [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16));
-const tone = (c: string, k: number) => `rgb(${hex(c).map(v => Math.max(0, Math.min(255, Math.round(v * k)))).join(",")})`;
+const toned = new Map<string, string>();
+/** A colour at a share of its brightness, as a CSS colour (kept: a gear piece asks for the same few every frame). */
+const tone = (c: string, k: number) => {
+  const key = `${c}|${k}`;
+  let out = toned.get(key);
+  if (out === undefined) toned.set(key, out = `rgb(${hex(c).map(v => Math.max(0, Math.min(255, Math.round(v * k)))).join(",")})`);
+  return out;
+};
 const sub3 = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const cross3 = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const unit3 = (a: V3): V3 => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };

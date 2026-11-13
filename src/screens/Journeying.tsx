@@ -4,10 +4,12 @@
  * wake by the keeper you last rested by, having lost all your gear but the eternal. You set out
  * with nothing: a new game opens inside the guide's lesson, a fight in the dark.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CombatScreen } from "../combat/CombatScreen";
 import { newFight } from "../combat/fight";
+import { FightLoading } from "../combat/FightLoading";
 import { LESSON } from "../combat/lesson";
+import { hasWarden, useFightGate, warmFights } from "../combat/preload";
 import { ENCOUNTERS } from "../core/encounters";
 import type { CombatState, EnemySetup, Opening } from "../core/types";
 import { Exploration, type Journey } from "../explore/Exploration";
@@ -111,6 +113,9 @@ export function Journeying({ fresh = false, skip = false, classId = "soldier", o
   // A game whose lesson is not passed opens inside it: you wake in the dark as the guide comes.
   const [fight, setFight] = useState<Fight | null>(() => (journey.tutorial.beaten ? null : { id: 1, foes: [], ...lessonFight(journey), backTo: journey, lesson: true, wake: true }));
   const [visit, setVisit] = useState(0);
+  // The slow parts of a fight (its sounds, music and figures) are made ready quietly from the start, while you walk.
+  const { progress, gate } = useFightGate();
+  useEffect(() => { warmFights(); }, []);
 
   if (fight) {
     const { backTo, foes } = fight;
@@ -192,6 +197,7 @@ export function Journeying({ fresh = false, skip = false, classId = "soldier", o
     );
   }
   return (
+    <>
     <Exploration
       key={visit}
       journey={journey}
@@ -199,9 +205,12 @@ export function Journeying({ fresh = false, skip = false, classId = "soldier", o
       onDie={(j, at) => { fall(j, 0, undefined, at); setVisit(v => v + 1); }}
       onEncounter={(foes, backTo) => {
         saveJourney(backTo);
-        setFight(f => ({ id: (f?.id ?? 0) + 1, foes, ...fightFor(foes, backTo), backTo }));
+        // (The fight opens once its sounds, music and figures are ready: at once, when the map has already warmed them.)
+        gate({ warden: hasWarden(foes.flatMap(f => f.fight.map(e => e.kind))) }, () => setFight(f => ({ id: (f?.id ?? 0) + 1, foes, ...fightFor(foes, backTo), backTo })));
       }}
       onExit={leave}
     />
+    {progress !== null && <FightLoading progress={progress} />}
+    </>
   );
 }

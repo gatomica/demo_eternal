@@ -55,6 +55,8 @@ export interface Intent {
    * (or is broken), or until the blow it blocks lands.
    */
   windupPose?: string;
+  /** An attack's pose a moment after its blow lands, before its next stance (a smoother way out of a low strike). */
+  afterPose?: string;
   /** For a Block: it holds its stance, and only takes this pose as an attack on it lands. */
   guardPose?: string;
   /** For a Rest: its second wind-up, taken for a moment just before the Rest goes through. */
@@ -175,6 +177,8 @@ export interface Enemy extends Fighter {
   last: LastAction | null;
   /** Statuses of its own, by name (the Warden's "sealed", "phase2"). Patterns check them as conditions. */
   flags: Record<string, boolean>;
+  /** The stances it has taken, oldest first (the last few): it does not repeat the one it took most recently while it has another to take. Cleared when it is staggered. */
+  stanceHistory?: string[];
   /** Its next stance is picked as if this had just happened (e.g. "Second Phase"), once it's free to act. */
   nextFrom?: string;
   /** Revives left. A boss revives to full health, only when it falls. */

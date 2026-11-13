@@ -4,6 +4,7 @@
  * loops out round it and goes back in, and the next comes out somewhere else.
  */
 import { useEffect, useRef, useState } from "react";
+import { canvasLoop } from "./canvasLoop";
 import { strokeSmooth } from "./smoothTrail";
 
 /** How many strings are out at once, and how long each takes to loop out of the flame and back in (ms). */
@@ -62,21 +63,9 @@ export function FlameStrings({ cx, cy, size, zIndex }: { cx: number; cy: number;
   // (Each flame on a clock of its own, so two of them don't loop together.)
   const [seed] = useState(() => Math.random());
   useEffect(() => {
-    let raf = 0;
-    const frame = () => {
-      const cv = canvas.current;
-      if (cv) {
-        const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
-        if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
-        const g = cv.getContext("2d")!;
-        g.setTransform(dpr, 0, 0, dpr, 0, 0);
-        g.clearRect(0, 0, w, h);
-        drawFlameStrings(g, w / 2, h / 2, w * 0.42, Math.max(1.2, w * 0.012), performance.now(), seed);
-      }
-      raf = requestAnimationFrame(frame);
-    };
-    raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
+    const cv = canvas.current;
+    if (!cv) return;
+    return canvasLoop(cv, (g, w, _h, now) => drawFlameStrings(g, w / 2, _h / 2, w * 0.42, Math.max(1.2, w * 0.012), now, seed));
   }, [seed]);
   return <canvas ref={canvas} className="flame-strings" style={{ left: cx - size / 2, top: cy - size / 2, width: size, height: size, zIndex }} aria-hidden="true" />;
 }

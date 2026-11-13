@@ -185,6 +185,11 @@ function context() {
   return { ctx, master: master! };
 }
 
+/** Fetches and decodes a track now, so that it starts the moment it is asked for. (The Warden's two halves are one file.) A failure is left for `playMusic` to meet. */
+export function preloadMusic(track: Track): Promise<void> {
+  return load(TRACKS[track].file).then(() => undefined, () => undefined);
+}
+
 function load(file: string) {
   let buf = buffers.get(file);
   if (!buf) {

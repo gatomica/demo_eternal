@@ -1,186 +1,147 @@
 /**
- * sprites.ts — the map's figures drawn with the fight's own figures.
+ * sprites.ts — the map's figures drawn with the fight's own 3D figures.
  *
- * A figure in a fight (`render/StickFigure.tsx`) is an SVG with the true proportions (the rig). Here the very same component is
- * rendered once per look, facing and step, turned into a picture and kept; the map then only copies that picture onto the ground
- * (`drawSprite`). Nothing about a figure's shape is written down twice: change a pose, a weapon or the rig, and the map follows.
+ * A figure in a fight (`render/Sleepwalker3D.tsx`, `render/Waxed3D.tsx`) is an SVG drawn from a 3D rig. Here the very same components are
+ * rendered once per look, facing and step through a fixed camera, turned into a picture and kept; the map then only copies that picture onto the
+ * ground (`drawSprite`). Nothing about a figure's shape is written down twice: change a pose, a weapon or the rig, and the map follows.
  *
- * The fight sees a figure from a 3/4 angle (side-on, `stand`/`sw-idle`...). On the map there are four ways to face:
- *  - left and right: the fight's 3/4 view (the player seen from behind, an enemy from the front), turned round for the other side;
- *  - down (toward you) and up (away): the same figure seen straight on, from the front and from behind (the Model viewer's views).
- * Walking is two more frames of each (a foot lifted, a stride); the poses for them are made here from the fight's.
+ * There are four ways to face: left, right, down (toward you) and up (away), each a yaw of the 3D figure (the sides turned a little toward the
+ * camera for an enemy, away from it for you, as the fight shows each). Walking is two more frames of each, made here from the fight's own poses:
+ *  - you: Idle (`p3-idle`), the feet shuffling along the floor;
+ *  - the sleepwalkers: Idle (`sw-idle`) with the feet shuffling, and once they have seen you the Chase (`sw-charge`), its legs swapping each step;
+ *  - the waxed: the Crawl (`w-crawl`), one hand reaching ahead while the other pulls back;
+ *  - the Wax Blob: its three parts, the waxed sealed in wax (`encased`), crawling out of the low dome of wax they share (`BlobPool`).
  *
  * The picture is made when first asked for (it is an image that has to load), so `drawSprite` says whether it drew anything:
  * until it has, the caller draws the figure its old way.
  */
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { WeaponTier } from "../core/types";
+import { type Cam, FEET_Y, floorDisc, orbitBox, orbitCamera, type Vec } from "../render/camera";
 import type { Pt } from "../render/geom";
 import { ALL_POSES, type PoseName, type Skeleton } from "../render/poses";
-import { stand } from "../render/playerPoses";
-import { StickFigure } from "../render/StickFigure";
+import { Sleepwalker3D } from "../render/Sleepwalker3D";
+import { liftPose, placeRig } from "../render/rig3d";
+import { HEAD_TOP, Waxed3D } from "../render/Waxed3D";
+import { BlobPool } from "../render/WaxBlob";
 import type { Frame, Look } from "./figures";
 import type { Dir } from "./world";
 
 /** A figure's units (100 wide, 120 tall: the fight's) per tile on the map: a quarter bigger than the map's old stick figure (115). */
 export const UNITS_PER_TILE = 92;
 /** Where the feet are in a figure's box, and how far below the figure's middle they stand on the map (in tiles). */
-const FOOT_Y = 114, FOOT_BELOW_MIDDLE = 0.36;
+const FOOT_Y = FEET_Y, FOOT_BELOW_MIDDLE = 0.36;
 /** The picture shows this much around the 100 × 120 box (a weapon held out, a hand raised): x from -30 to 130, y from -20 to 140. */
 const BOX = { x: -30, y: -20, size: 160 };
+/** The Wax Blob's picture: its dome is wider than a figure is tall (about 1.6 meters out from the middle each way). */
+const BLOB_BOX = { x: -55, y: -10, size: 210 };
 /** The pictures are made this many times finer than they are shown, so they stay sharp when the map is zoomed a little. */
 const SHARPNESS = 1.5;
 
-type Side = "side" | "up" | "down";
+type Box = typeof BOX;
 
-/** How a figure is seen, and the skeleton that makes it. */
-interface Spec {
-  pose: PoseName;
-  skeleton?: Skeleton;
-  view: "front" | "back";
-  straight: boolean;
-  /** The way the picture faces, if it is a side view: the player's faces right, an enemy's (turned to face the player) left. */
-  native?: "left" | "right";
+/* ---------- The camera ---------- */
+
+/** One fixed camera for every picture: a little above, looking down at a figure standing 6 meters off, on a screen of W × H pixels. */
+const W = 800, H = 600, SPOT: Vec = { x: 0, z: 6 };
+const CAM: Cam = orbitCamera(SPOT, 24, 1.0, 6);
+/** How far an enemy's side view is turned toward the camera (and yours away from it), radians: the fight's 3/4. */
+const TURN = 0.6;
+
+/** The way a figure faces on the map, as the yaw the camera sees it at (0 faces away from the camera, π toward it, π/2 faces right). */
+function yawFor(facing: Dir, enemy: boolean): number {
+  if (facing === "down") return Math.PI;
+  if (facing === "up") return 0;
+  const t = enemy ? TURN : -TURN;
+  return facing === "right" ? Math.PI / 2 + t : -Math.PI / 2 - t;
 }
-
-const sideOf = (facing: Dir): Side => (facing === "up" ? "up" : facing === "down" ? "down" : "side");
 
 /* ---------- The poses ---------- */
 
-/** One leg or none lifted a little, as a foot comes off the ground in a step. */
-const STEP_LIFT = 7;
+type Leg = Skeleton["leadLeg"];
 
-/** The player's walk, seen at 3/4 from behind: the idle's body, a stride either way, the arms swinging against the legs. */
-function playerStride(frame: Frame): Skeleton | undefined {
-  if (frame === "stand") return undefined;
-  const left = frame === "stepL";
-  return stand({ psiS: 15, psiH: 10, D: left ? 20 : -20, W: 5, c: 0, lean: 1, weaponHand: [left ? 13 : 2, 4], angle: 66, freeHand: [left ? -10 : 8, 3] });
+/** A pose made here for the map, kept with the fight's own (the 3D figures look their pose up by name). */
+function made(name: string, skeleton: Skeleton): PoseName {
+  (ALL_POSES as Record<string, Skeleton>)[name] = skeleton;
+  return name as PoseName;
 }
 
-/** An enemy's walk: the same body, the legs set one ahead and one behind, whichever leads swapping each step. */
-function enemyStride(base: Skeleton, frame: Frame): Skeleton {
-  if (frame === "stand") return base;
-  const s = frame === "stepL" ? 1 : -1;
-  const hx = base.hip[0], hy = base.hip[1];
-  const leg = (ahead: number): Skeleton["leadLeg"] => ({ knee: [hx + ahead * 0.5, hy + (FOOT_Y - hy) * 0.5 - 1], foot: [hx + ahead, FOOT_Y] });
-  return { ...base, leadLeg: leg(s * 12), rearLeg: leg(-s * 12) };
+/** One foot set `reach` ahead along the floor and a little lifted, the other as far behind, whichever leads swapping with `lead` (1 or -1). */
+function shuffle(base: Skeleton, lead: 1 | -1, reach: number, lift: number): Skeleton {
+  const leg = (l: Leg, d: number, up: number): Leg => ({ knee: [l.knee[0] + d * 0.5, l.knee[1] - up * 0.5] as Pt, foot: [l.foot[0] + d, l.foot[1] - up] as Pt });
+  return { ...base, leadLeg: leg(base.leadLeg, lead * reach, lead > 0 ? lift : 0), rearLeg: leg(base.rearLeg, -lead * reach, lead > 0 ? 0 : lift) };
 }
 
-/**
- * A figure seen straight on, standing or stepping: the body upright on the middle, the arms hanging at the shoulders, the legs
- * straight down (the foot that steps is lifted and its shin foreshortened, as it comes toward or away from you).
- * `kneeling`: the waxed, down on their knees, the bound shins behind them out of sight.
- */
-function straightOn(view: "front" | "back", frame: Frame, o: { kneeling: boolean; hunch: number; weapon: boolean }): Skeleton {
-  const front = view === "front";
-  // The waxed crawl on all fours: seen straight on the torso leans toward or away from you, so it is short, the head sunk low in front of
-  // the shoulders and the arms reaching down to the ground (as `w-crawl` is seen from the side). The kneeling thigh is shortened to
-  // match, with the feet placed where the fitted legs end so nothing is dragged.
-  const THIGH = 0.74, CRAWL_TORSO = 0.5, CRAWL_ARM = 1.3, SHIN = 0.25;
-  const hipY = o.kneeling ? 90 : 65, neckY = hipY - (o.kneeling ? 32 * CRAWL_TORSO : 32);
-  // (The shoulders sit 6 either side of the neck, the hips 3.5 either side of the middle; the weapon arm is the figure's right,
-  // the page's left from the front. See `straight` in StickFigure.)
-  const wx = 50 + (front ? -6 : 6), fx = 100 - wx;
-  const arm = (x: number, out: number) => ({ elbow: [x + out * 0.6, neckY + 17] as Pt, hand: [x + out, neckY + 31] as Pt });
-  const weaponArm = arm(wx, front ? -1.6 : 1.6), freeArm = arm(fx, front ? 1.6 : -1.6);
-  // The left leg is the lead one, on the page's right from the front and its left from behind.
-  const leadX = 50 + (front ? 3.5 : -3.5), rearX = 100 - leadX;
-  const pageLeftIsLead = !front;
-  const lifted = frame === "stepL" ? pageLeftIsLead : frame === "stepR" ? !pageLeftIsLead : null;
-  const kneeY = hipY + 24.5 * THIGH, footY = kneeY + 24.5 * SHIN;
-  const leg = (x: number, lift: boolean): Skeleton["leadLeg"] => {
-    if (o.kneeling) return { knee: [x, kneeY], foot: [x, footY] };
-    return lift ? { knee: [x, hipY + 22], foot: [x, hipY + 49 - STEP_LIFT] } : { knee: [x, hipY + 24.5], foot: [x, hipY + 49] };
-  };
-  const adjust: NonNullable<Skeleton["adjust"]> = {};
-  if (o.kneeling) {
-    adjust.torso = CRAWL_TORSO;
-    adjust.leadThigh = adjust.rearThigh = THIGH;
-    adjust.leadShin = adjust.rearShin = SHIN;
-    adjust.weaponUpper = adjust.weaponFore = adjust.freeUpper = adjust.freeFore = CRAWL_ARM;
-    // The hand that reaches comes up off the ground, toward or away from you, so its forearm is foreshortened; the other pulls back, planted.
-    if (frame !== "stand") {
-      const weaponReaches = (frame === "stepL") === !front;
-      if (weaponReaches) adjust.weaponFore = CRAWL_ARM * 0.5; else adjust.freeFore = CRAWL_ARM * 0.5;
-    }
-  } else if (lifted !== null) { if (lifted) adjust.leadShin = 0.8; else adjust.rearShin = 0.8; }
-  const handAt = weaponArm.hand;
-  return {
-    head: [50, neckY - o.hunch], neck: [50, neckY], hip: [50, hipY],
-    weaponArm, freeArm,
-    leadLeg: leg(leadX, lifted === true), rearLeg: leg(rearX, lifted === false),
-    // A weapon hangs from the hand, its tip a little out from the body; the waxed carry theirs in the other hand, so nothing is drawn here.
-    weapon: { at: handAt, angle: o.weapon ? (front ? 100 : 80) : 0 },
-    adjust,
-  };
+/** Three frames of a walk (standing, then each foot leading), as the poses' names. */
+interface Walk { stand: PoseName; stepL: PoseName; stepR: PoseName }
+
+/** An idle that shuffles its feet: the same body, the feet sliding along the floor. */
+function shuffling(name: string, base: PoseName, reach: number, lift: number): Walk {
+  const sk = ALL_POSES[base];
+  return { stand: base, stepL: made(`${name}-L`, shuffle(sk, 1, reach, lift)), stepR: made(`${name}-R`, shuffle(sk, -1, reach, lift)) };
 }
 
-/** The waxed's crawl: on their hands, one reaching ahead and the other pulling back each step (the rest, planted, is `w-crawl` itself). */
-function crawlStride(frame: Frame): Skeleton {
-  const base = ALL_POSES["w-crawl"];
-  if (frame === "stand") return base;
-  const reach = (a: Skeleton["weaponArm"], by: number, lift: number): Skeleton["weaponArm"] => ({ elbow: [a.elbow[0] + by * 0.6, a.elbow[1] - lift * 0.5], hand: [a.hand[0] + by, a.hand[1] - lift] });
-  // (The hand reaching ahead is lifted a little off the ground, the one pulling back is planted.)
-  const weaponAhead = frame === "stepL";
-  return {
-    ...base,
-    weaponArm: weaponAhead ? reach(base.weaponArm, 8, 3) : reach(base.weaponArm, -5, 0),
-    freeArm: weaponAhead ? reach(base.freeArm, -5, 0) : reach(base.freeArm, 8, 3),
-    weapon: { at: weaponAhead ? [base.weaponArm.hand[0] + 8, base.weaponArm.hand[1] - 3] : [base.weaponArm.hand[0] - 5, base.weaponArm.hand[1]], angle: base.weapon.angle },
-  };
+/** The chase: the pose's own stride one way, its legs swapped the other, and the feet under it between. */
+function running(name: string, base: PoseName): Walk {
+  const sk = ALL_POSES[base];
+  const swapped: Skeleton = { ...sk, leadLeg: sk.rearLeg, rearLeg: sk.leadLeg };
+  const hip = sk.hip[0];
+  const planted: Skeleton = { ...sk, leadLeg: { knee: [hip - 2, 92], foot: [hip - 8, 114] }, rearLeg: { knee: [hip + 8, 92], foot: [hip + 8, 114] } };
+  return { stand: made(`${name}-stand`, planted), stepL: base, stepR: made(`${name}-R`, swapped) };
 }
 
-/** A howl, seen at 3/4: standing tall, the head thrown back, both arms flung up and forward with the weapon raised. */
-const HOWL_SIDE: Skeleton = {
-  head: [43, 19], neck: [47, 31], hip: [49, 63],
-  weaponArm: { elbow: [58, 27], hand: [66, 13] },
-  freeArm: { elbow: [53, 28], hand: [59, 14] },
-  leadLeg: { knee: [55, 89], foot: [57, 114] },
-  rearLeg: { knee: [44, 89], foot: [41, 114] },
-  weapon: { at: [66, 13], angle: -72 },
+/** The crawl: one hand reaching ahead off the floor while the other pulls back, then the other way. */
+function crawling(name: string): Walk {
+  const sk = ALL_POSES["w-crawl"], f3 = sk.for3d!;
+  const right = f3.arms3!.right as { to: readonly [number, number, number]; bend?: readonly [number, number, number] };
+  const left = f3.arms3!.left as { plant: { out: number; reach?: number; bend?: readonly [number, number, number]; shift?: number } };
+  const stride = (ahead: number, lift: number, pull: number): Skeleton => ({
+    ...sk,
+    for3d: {
+      ...f3,
+      arms3: {
+        right: { to: [right.to[0], right.to[1] + lift, right.to[2] + ahead], bend: right.bend },
+        left: { plant: { ...left.plant, shift: (left.plant.shift ?? 0) + pull } },
+      },
+    },
+  });
+  return { stand: "w-crawl", stepL: made(`${name}-L`, stride(8, 4, -4)), stepR: made(`${name}-R`, stride(-5, 0, 9)) };
+}
+
+/** A howl: standing tall, the head thrown back, both arms flung up and forward with the weapon raised. */
+function howling(): PoseName {
+  const sk = ALL_POSES["sw-idle"], f3 = sk.for3d!;
+  return made("map-howl", {
+    ...sk,
+    for3d: {
+      ...f3, hunch3: 0, head3: 38,
+      arms3: { right: { dirs: [[0.3, 0.9, 0.3], [0.15, 1, 0.3]] }, left: { dirs: [[-0.3, 0.9, 0.3], [-0.15, 1, 0.3]] } },
+      weapon3: [0.2, 0.9, 0.4],
+    },
+  });
+}
+
+const WALKS = {
+  player: shuffling("map-idle", "p3-idle", 4, 1.2),
+  sleepwalker: shuffling("map-sleepwalk", "sw-idle", 6, 1.5),
+  chasing: running("map-chase", "sw-charge"),
+  waxed: crawling("map-crawl"),
+  howl: howling(),
 };
 
-/** A howl seen straight on: the arms up either side of the head, the weapon raised. */
-function howlStraight(view: "front" | "back"): Skeleton {
-  const front = view === "front";
-  const wx = 50 + (front ? -6 : 6), fx = 100 - wx, out = front ? -1 : 1;
-  const hipY = 65, neckY = 33;
-  const up = (x: number, o: number): Skeleton["weaponArm"] => ({ elbow: [x + o * 5, neckY - 8], hand: [x + o * 6, neckY - 24] });
-  const weaponArm = up(wx, out);
-  return {
-    head: [50, neckY - 9], neck: [50, neckY], hip: [50, hipY],
-    weaponArm, freeArm: up(fx, -out),
-    leadLeg: { knee: [front ? 53.5 : 46.5, hipY + 24.5], foot: [front ? 53.5 : 46.5, hipY + 49] },
-    rearLeg: { knee: [front ? 46.5 : 53.5, hipY + 24.5], foot: [front ? 46.5 : 53.5, hipY + 49] },
-    weapon: { at: weaponArm.hand, angle: -90 },
-  };
-}
-
-/** The skeleton, the pose and the view for a figure facing `facing` in `frame`. */
-function specFor(look: Look, facing: Dir, frame: Frame): Spec {
-  const side = sideOf(facing);
-  const waxed = !!look.wax, sleepwalker = !waxed && !!look.reach;
-  const armed = (look.weapon ?? "baseline") !== "baseline";
-  if (side === "side") {
-    if (waxed) return { pose: "w-crawl", skeleton: crawlStride(frame), view: "front", straight: false, native: "left" };
-    if (sleepwalker && look.howl !== undefined) return { pose: "sw-idle", skeleton: HOWL_SIDE, view: "front", straight: false, native: "left" };
-    if (sleepwalker) return { pose: "sw-idle", skeleton: enemyStride(ALL_POSES["sw-idle"], frame), view: "front", straight: false, native: "left" };
-    return { pose: "idle", skeleton: playerStride(frame), view: "back", straight: false, native: "right" };
-  }
-  const view = side === "down" ? "front" : "back";
-  if (sleepwalker && look.howl !== undefined) return { pose: "sw-idle", skeleton: howlStraight(view), view, straight: true };
-  return {
-    pose: waxed ? "w-crawl" : sleepwalker ? "sw-idle" : "idle",
-    skeleton: straightOn(view, frame, { kneeling: waxed, hunch: waxed ? 6 : sleepwalker ? 8 : 11, weapon: armed && !waxed }),
-    view, straight: true,
-  };
+/** The pose a figure has in this frame of its walk. */
+function poseFor(look: Look, frame: Frame): PoseName {
+  if (look.wax) return WALKS.waxed[frame];
+  if (look.reach) return look.howl !== undefined ? WALKS.howl : (look.chasing ? WALKS.chasing : WALKS.sleepwalker)[frame];
+  return WALKS.player[frame];
 }
 
 /* ---------- Turning the figure into a picture ---------- */
 
 let cssText: string | undefined;
 
-/** The figure's styles (`.fig-*` and the armor classes of index.css), gathered once, to travel inside the picture. */
+/** The figure's styles (`.fig-*`, the armor classes and the Wax Blob's pool of index.css), gathered once, to travel inside the picture. */
 function figureCss(): string {
   if (cssText !== undefined) return cssText;
   let css = "";
@@ -188,35 +149,82 @@ function figureCss(): string {
     let rules: CSSRuleList;
     try { rules = sheet.cssRules; } catch { continue; }
     for (const rule of Array.from(rules)) {
-      if (rule instanceof CSSStyleRule && /\.(fig-|armor-)/.test(rule.selectorText)) css += `${rule.cssText}\n`;
+      if (rule instanceof CSSStyleRule && /\.(fig-|armor-|blob-)/.test(rule.selectorText)) css += `${rule.cssText}\n`;
     }
   }
   const root = getComputedStyle(document.documentElement);
-  const vars = ["--ink", "--ink-shade", "--ink-far", "--metal", "--grip", "--armor", "--wax", "--eyes"]
-    .map(v => `${v}:${root.getPropertyValue(v).trim()};`).join("");
+  // (Every variable those rules use, and the ones the figures always have.)
+  const names = new Set(["--ink", "--ink-shade", "--ink-far", "--metal", "--grip", "--armor", "--wax", "--eyes"]);
+  for (const m of css.matchAll(/var\((--[\w-]+)/g)) names.add(m[1]);
+  const vars = [...names].map(v => `${v}:${root.getPropertyValue(v).trim()};`).join("");
   cssText = `svg{${vars}}\n${css}`;
   return cssText;
 }
 
 /** Everything about a look that changes how its picture comes out. */
 const lookKey = (l: Look) =>
-  [l.ink, l.wax, l.weapon, l.armor, l.weaponItem, l.armorItem, l.headItem, l.hood, l.reach, l.howl !== undefined].join("|");
+  [l.ink, l.wax, l.weapon, l.armor, l.weaponItem, l.armorItem, l.headItem, l.hood, l.reach, l.howl !== undefined, l.chasing, l.lit].join("|");
 
-/** The SVG text of one figure, ready to load as an image `px` pixels square. */
-function svgOf(spec: Spec, look: Look, px: number): string | undefined {
-  const html = renderToStaticMarkup(createElement(StickFigure, {
-    view: spec.view, pose: spec.pose, skeleton: spec.skeleton, straight: spec.straight,
-    weapon: look.weapon ?? "baseline", armor: look.armor ?? "none",
-    weaponItem: look.weaponItem, armorItem: look.armorItem, headItem: look.headItem,
-    variant: look.wax ? "waxed" : undefined, hooded: look.hood,
-    foe: !!look.wax || !!look.reach,
-  }));
+/** What one figure is drawn as, in the camera's pixels: its inside markup (a group placed where its box is) and the class of its root. */
+function figureInner(look: Look, pose: PoseName, yaw: number, at: Vec, encased = false): { inner: string; cls: string } | undefined {
+  const box = orbitBox(CAM, at, W, H);
+  const weapon = look.weapon ?? "baseline";
+  const element = look.wax
+    ? createElement(Waxed3D, { pose, weapon, encased: encased || look.lit, meldLegs: encased, cam: CAM, at, yaw, w: W, h: H, box })
+    : createElement(Sleepwalker3D, {
+      pose, weapon, hooded: look.hood, cam: CAM, at, yaw, w: W, h: H, box,
+      // (You, on the same body: your class's weapon and what you wear. The sleepwalkers wear nothing.)
+      gear: look.reach ? undefined : { weaponItem: look.weaponItem, armor: look.armor ?? "none", armorItem: look.armorItem, headItem: look.headItem },
+    });
+  const html = renderToStaticMarkup(element);
   const open = /^<svg[^>]*?class="([^"]*)"[^>]*>/.exec(html);
   const end = html.lastIndexOf("</svg>");
   if (!open || end < 0) return undefined;
+  return { cls: open[1], inner: `<g transform="translate(${box.x} ${box.y}) scale(${box.w / 100})">${html.slice(open[0].length, end)}</g>` };
+}
+
+/** The finished picture: `inner` (in the camera's pixels) shown through `box`, around where the figure stands, `px` pixels square, in the look's colours. */
+function pictureSvg(inner: string, cls: string, look: Look, box: Box, px: number): string {
+  const at = orbitBox(CAM, SPOT, W, H), unit = at.w / 100;
+  const x = at.x + 50 * unit + (box.x - 50) * unit, y = at.y + FOOT_Y * unit + (box.y - FOOT_Y) * unit, size = box.size * unit;
   // The map's colours for this look, over the fight's: its ink (a sleepwalker is greyer than you) and its wax.
   const own = `svg{--ink:${look.ink};--ink-far:color-mix(in srgb, ${look.ink} 68%, black);${look.wax ? `--wax:${look.wax};` : ""}}.fig-shadow{display:none}`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="${BOX.x} ${BOX.y} ${BOX.size} ${BOX.size}" class="${open[1]}"><style>${figureCss()}${own}</style>${html.slice(open[0].length, end)}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="${x} ${y} ${size} ${size}" class="${cls}"><style>${figureCss()}${own}</style>${inner}</svg>`;
+}
+
+/** One figure, facing `facing`, in this frame of its walk. */
+function figureSvg(look: Look, facing: Dir, frame: Frame, px: number): string | undefined {
+  const one = figureInner(look, poseFor(look, frame), yawFor(facing, !!(look.wax || look.reach)), SPOT);
+  return one && pictureSvg(one.inner, one.cls, look, BOX, px);
+}
+
+/** How far the dome of the Wax Blob reaches from its middle, meters. */
+const BLOB_RADIUS = 1.6;
+/** Where the three parts stand on it, in meters: `across` the way it goes (which is the line they stand on), and `ahead` of its middle. */
+const BLOB_SPOTS: Record<"left" | "mid" | "right", { across: number; ahead: number }> = {
+  left: { across: -1.0, ahead: 0.45 }, mid: { across: 0, ahead: -0.5 }, right: { across: 1.0, ahead: 0.45 },
+};
+/** Which way each facing goes on the floor (x to the right, z away from the camera). */
+const GOING: Record<Dir, Vec> = { right: { x: 1, z: 0 }, left: { x: -1, z: 0 }, up: { x: 0, z: 1 }, down: { x: 0, z: -1 } };
+
+/** The Wax Blob: its dome of wax, and its three parts sealed in wax, crawling, far ones first. */
+function blobSvg(look: Look, weapons: Record<"left" | "mid" | "right", WeaponTier>, facing: Dir, frame: Frame, px: number): string | undefined {
+  const go = GOING[facing], across = { x: -go.z, z: go.x };
+  const disc = floorDisc(CAM, SPOT, BLOB_RADIUS, W, H), tall = orbitBox(CAM, SPOT, W, H).h;
+  const pool = renderToStaticMarkup(createElement(BlobPool, { box: { cx: disc.cx, cy: disc.cy, rx: disc.rx, ry: disc.ry, tall, slumped: false, links: [] } }));
+  const poolOpen = /^<svg[^>]*>/.exec(pool), poolEnd = pool.lastIndexOf("</svg>");
+  if (!poolOpen || poolEnd < 0) return undefined;
+  let inner = `<g transform="translate(${disc.cx - disc.rx} ${disc.cy - disc.ry})">${pool.slice(poolOpen[0].length, poolEnd)}</g>`;
+  const parts = (Object.keys(BLOB_SPOTS) as (keyof typeof BLOB_SPOTS)[]).map(part => {
+    const s = BLOB_SPOTS[part];
+    return { part, at: { x: SPOT.x + across.x * s.across + go.x * s.ahead, z: SPOT.z + across.z * s.across + go.z * s.ahead } };
+  }).sort((a, b) => b.at.z - a.at.z);
+  for (const { part, at } of parts) {
+    const one = figureInner({ ...look, weapon: weapons[part] }, poseFor(look, frame), yawFor(facing, true), at, true);
+    if (!one) return undefined;
+    inner += one.inner;
+  }
+  return pictureSvg(inner, "", look, BLOB_BOX, px);
 }
 
 /** The pictures made, by look, side, step and size; "pending" while one loads, "failed" if it will not come. */
@@ -224,9 +232,8 @@ const pictures = new Map<string, HTMLCanvasElement | "pending" | "failed">();
 /** Pictures are kept until there are this many (a look is a few dozen of them), then dropped to start again. */
 const MAX_PICTURES = 600;
 
-function request(key: string, spec: Spec, look: Look, px: number) {
+function request(key: string, svg: string | undefined, px: number) {
   pictures.set(key, "pending");
-  const svg = svgOf(spec, look, px);
   if (!svg) { pictures.set(key, "failed"); return; }
   const img = new Image();
   img.onload = () => {
@@ -241,38 +248,80 @@ function request(key: string, spec: Spec, look: Look, px: number) {
 
 const FRAMES: Frame[] = ["stand", "stepL", "stepR"];
 
+/** Copies a figure's picture onto the map, centred on (x, y) with `T` pixels to a tile, making its pictures first if need be. False if it is not ready. */
+function show(
+  g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame, key: string, box: Box,
+  make: (f: Frame, px: number) => string | undefined,
+): boolean {
+  const tile = Math.round(T);
+  const base = `${key}|${facing}|${tile}`;
+  const here = pictures.get(`${base}|${frame}`);
+  if (here === undefined) {
+    // (Make all the steps at once, so walking never shows a frame missing.)
+    if (pictures.size > MAX_PICTURES) pictures.clear();
+    const px = Math.round((box.size * tile * SHARPNESS) / UNITS_PER_TILE);
+    for (const f of FRAMES) {
+      const k = `${base}|${f}`;
+      if (!pictures.has(k)) request(k, make(f, px), px);
+    }
+  }
+  if (!(here instanceof HTMLCanvasElement)) return false;
+  const u = T / UNITS_PER_TILE;
+  g.drawImage(here, x + (box.x - 50) * u, y + FOOT_BELOW_MIDDLE * T + (box.y - FOOT_Y) * u, box.size * u, box.size * u);
+  return true;
+}
+
+/** Where a figure's head is in its picture (the 100 × 120 box's units, feet at x 50, y 114), by look, facing and step: where a lit waxed's flame stands. */
+const heads = new Map<string, { x: number; y: number }>();
+
+function headSpot(look: Look, facing: Dir, frame: Frame): { x: number; y: number } {
+  const key = `${lookKey(look)}|${facing}|${frame}`;
+  let at = heads.get(key);
+  if (!at) {
+    const head = placeRig(liftPose(ALL_POSES[poseFor(look, frame)]), SPOT, yawFor(facing, true), CAM, W, H).seen.head;
+    const box = orbitBox(CAM, SPOT, W, H), unit = box.w / 100;
+    heads.set(key, at = { x: (head.sx - box.x) / unit, y: (head.sy - box.y) / unit });
+  }
+  return at;
+}
+
+/** A little flame standing on (x, y), `h` tall: a soft teardrop that sways and flickers, with a glow round it. */
+function drawFlame(g: CanvasRenderingContext2D, x: number, y: number, h: number, seed: number) {
+  const t = performance.now() / 1000 + seed, sway = Math.sin(t * 5.1) * 0.12 + Math.sin(t * 8.3) * 0.06, tall = h * (1 + Math.sin(t * 7.2) * 0.07), w = h * 0.34;
+  g.save();
+  g.translate(x, y);
+  const glow = g.createRadialGradient(0, -h * 0.45, 0, 0, -h * 0.45, h * 1.3);
+  glow.addColorStop(0, "rgba(255,170,80,0.38)"); glow.addColorStop(1, "rgba(255,170,80,0)");
+  g.fillStyle = glow;
+  g.fillRect(-h * 1.3, -h * 1.8, h * 2.6, h * 2.6);
+  g.beginPath();
+  g.moveTo(sway * tall, -tall);
+  g.bezierCurveTo(w * 1.1, -tall * 0.5, w, 0, 0, 0);
+  g.bezierCurveTo(-w, 0, -w * 1.1, -tall * 0.5, sway * tall, -tall);
+  const body = g.createRadialGradient(0, -tall * 0.25, 0, 0, -tall * 0.3, tall * 0.7);
+  body.addColorStop(0, "rgba(255,241,194,0.95)"); body.addColorStop(0.5, "rgba(242,166,90,0.8)"); body.addColorStop(1, "rgba(224,120,47,0.35)");
+  g.fillStyle = body;
+  g.fill();
+  g.restore();
+}
+
 /**
  * Draws the figure the way the fight draws it, centred on (x, y) with `T` pixels to a tile. Returns false (drawing nothing) if its
  * picture is not ready yet (it is being made: the next frame will have it) or cannot be made.
  */
 export function drawSprite(g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame, look: Look): boolean {
-  const side = sideOf(facing);
-  const tile = Math.round(T);
-  const base = `${lookKey(look)}|${side}|${tile}`;
-  const here = pictures.get(`${base}|${frame}`);
-  if (here === undefined) {
-    // (Make all the steps at once, so walking never shows a frame missing.)
-    if (pictures.size > MAX_PICTURES) pictures.clear();
-    const px = Math.round((BOX.size * tile * SHARPNESS) / UNITS_PER_TILE);
-    for (const f of FRAMES) {
-      const key = `${base}|${f}`;
-      if (!pictures.has(key)) request(key, specFor(look, facing, f), look, px);
-    }
-  }
-  if (!(here instanceof HTMLCanvasElement)) return false;
-  const u = T / UNITS_PER_TILE;
-  const left = x + (BOX.x - 50) * u, top = y + FOOT_BELOW_MIDDLE * T + (BOX.y - FOOT_Y) * u, size = BOX.size * u;
-  // A side view faces its native way; the other way, it is turned round about the figure's middle.
-  const native = look.wax || look.reach ? "left" : "right";
-  const flip = side === "side" && facing !== native;
-  if (flip) {
-    g.save();
-    g.translate(x, 0);
-    g.scale(-1, 1);
-    g.drawImage(here, left - x, top, size, size);
-    g.restore();
-  } else {
-    g.drawImage(here, left, top, size, size);
+  if (!show(g, x, y, T, facing, frame, lookKey(look), BOX, (f, px) => figureSvg(look, facing, f, px))) return false;
+  // A lit waxed's flame burns over its head.
+  if (look.lit) {
+    const u = T / UNITS_PER_TILE, head = headSpot(look, facing, frame);
+    drawFlame(g, x + (head.x - 50) * u, y + FOOT_BELOW_MIDDLE * T + (head.y - HEAD_TOP * 0.7 - FOOT_Y) * u, 17 * u, (x * 7 + y * 3) % 6);
   }
   return true;
+}
+
+/** The Wax Blob, its parts armed as given (left, middle, right), going `facing`: the same, for the heap of three. */
+export function drawBlobSprite(
+  g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame, look: Look, weapons: Record<"left" | "mid" | "right", WeaponTier>,
+): boolean {
+  return show(g, x, y, T, facing, frame, `blob|${lookKey(look)}|${weapons.left}|${weapons.mid}|${weapons.right}`, BLOB_BOX, (f, px) => blobSvg(look, weapons, facing, f, px));
 }

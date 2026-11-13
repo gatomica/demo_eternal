@@ -5,7 +5,7 @@ import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, us
 import { PHASE_TWO, playMusic } from "../audio/music";
 import { eternalSfx, play as playSfx, prepare as prepareSfx, sfxFor } from "../audio/sfx";
 import { ActionWheel, type Anchor } from "./ActionWheel";
-import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_LATERAL, DODGE_PAST, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, PREP_MS, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
+import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_LATERAL, DODGE_PAST, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, PREP_MS, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, USURP_WISP_MS, USURP_AFTER_MS, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
 import { LessonBox } from "./LessonBox";
 import { prepareWalk, speak } from "../audio/walk";
 import { useDev } from "../ui/dev";
@@ -40,7 +40,7 @@ const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 /** The player is drawn in 3D in a fight, on the Sleepwalker's body (`player3dPose`, Sleepwalker3D's `gear`). */
 const PLAYER_3D = true;
 /** Whether the game itself (fights, not the Model viewer) draws the Warden from the 3D rig. Off while it is built. */
-const WARDEN_3D_IN_GAME = false;
+const WARDEN_3D_IN_GAME = true;
 
 export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, restOnPlay, shade = true, playerAction, playerHold, playerDead, light = true, debugLimbs = false, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, orbit, peek, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
   initial: CombatState;
@@ -116,6 +116,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const [highlight, setHighlight] = useState<Dir | null>(null);
 
   const [paused, setPaused] = useState(false);
+  /** The 3D Warden plays Usurp Flame as the attack it is (it launches at its target in its wind-up pose, as any attack does), not as the old scene (`USURP_STAGES`). */
+  const usurpAsAttack = WARDEN_3D_IN_GAME || !!override;
   /** Usurp Flame's scene, while it plays (see USURP_STAGES). */
   const [usurpStage, setUsurpStage] = useState<UsurpStage | null>(null);
   /**
@@ -169,6 +171,16 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   /** Waking in the dark, before the lesson: the guide walks in out of the black (see `WAKE`). */
   const [waking, setWaking] = useState(!!(wakeUp && lesson));
   const [wakeDark, setWakeDark] = useState<{ level: number; ms: number; glow: string } | undefined>(undefined);
+  /** The fight's opening poses (`EnemyKind.openingPoses`), in turn, before the first turn can be planned: the step it is at, or null once it is over (or when there is none). */
+  const [intro, setIntro] = useState<number | null>(() => (!override && !lesson && initial.turn === 1 && initial.enemies.some(e => e.alive && kindOf(e).openingPoses?.length) ? 0 : null));
+  const introKind = fightRaw.enemies.map(kindOf).find(k => k.openingPoses?.length);
+  useEffect(() => {
+    if (intro === null || !introKind?.openingPoses) return;
+    const poses = introKind.openingPoses;
+    const t = window.setTimeout(() => setIntro(intro + 1 < poses.length ? intro + 1 : null), poses[intro].ms);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intro]);
   const current = lesson && playing && !waking ? lesson[beat] : undefined;
   const typing = !!current && written < current.say.length;
   /** The detour's words (see DETOUR), as far as they are written. */
@@ -598,7 +610,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       if (leap && leaper) {
         // An Attack that is a leap past its target.
         const struckIn = leaper.intent.strikePose;
-        launch(attack.attacker, a, t, leap, handOffOf(struckIn) ?? "idle", struckIn);
+        // (no air pose to turn on from: it already stands in its next stance, from the blow)
+        launch(attack.attacker, a, t, leap, handOffOf(struckIn) ?? "idle", undefined);
       } else if (dodgeLeap && dodger) {
         // A Maneuver that dodges by leaping past its attacker as it lunges: the blow lands where it was.
         launch(attack.target, t, at, dodgeLeap, asPose(dodgeLeap.settle, "idle"), dodger.intent.actPose, { id: attack.attacker, to: at });
@@ -706,7 +719,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // A turn where nothing happens (a Block, with nothing to block, and no one else doing anything) still plays one quiet step, so it lasts
     // the minimum a turn lasts (MIN_ATTACK_PHASE_MS, then the step) rather than ending the moment you commit.
     const steps = next.lastTurn.length ? next.lastTurn : [{ events: [], after: snapshotOf(next.player, next.enemies) }];
-    setPlayback({ from: fight, steps, index: 0, phase: prepsIn({ from: fight }, steps[0]) ? "approach" : phaseAt(steps, 0, 0), playerPose: pose, action: forced ? null : action });
+    setPlayback({ from: fight, steps, index: 0, phase: prepsIn({ from: fight }, steps[0]) ? "approach" : phaseAt(steps, 0, 0, !usurpAsAttack), playerPose: pose, action: forced ? null : action });
     closeWheel();
   };
   const commit = (option: WheelOption | null) => {
@@ -850,7 +863,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   finishRef.current = finishOnce;
   const [fading, setFading] = useState(false);
   const leavesAlone = fight.status === "won" && !!onDone;
-  const settled = leavesAlone && !busy && !waking && !paused;
+  const settled = leavesAlone && !busy && !waking && intro === null && !paused;
   useEffect(() => {
     if (!settled || bursts.length > landedLots) return; // (the last String is still on its way)
     const wait = bursts.length ? 250 : 1000;
@@ -919,7 +932,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       setPauseIndex(0);
       return;
     }
-    if (busy || waking) return; // input waits for the turn to finish playing (or for the guide to arrive)
+    if (busy || waking || intro !== null) return; // input waits for the turn to finish playing (or for the guide to arrive, or for the opening poses)
     if (!playing) {
       if (onDone) { if (key === "select" || key === "back" || key === "pause") { menuSound(key); finishOnce(); } }
       else if (key === "select") onRetry();
@@ -978,7 +991,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           return setPlayback({ ...pb, phase: "impact" });
         }
         const index = pb.index + 1;
-        if (index < pb.steps.length) return setPlayback({ ...pb, index, phase: prepsIn(pb, pb.steps[index]) ? "approach" : phaseAt(pb.steps, index, performance.now() - turnStart.current) });
+        if (index < pb.steps.length) return setPlayback({ ...pb, index, phase: prepsIn(pb, pb.steps[index]) ? "approach" : phaseAt(pb.steps, index, performance.now() - turnStart.current, !usurpAsAttack) });
         // Anyone who dodged is still walking to their new spot: they keep their pose until there.
         // (not those that dashed and slid there: they are at their spots already, turned as their next stance faces)
         const walking = Object.fromEntries(Object.entries(lastDodgers.current).filter(([id]) => !repositioned.current.has(id)));
@@ -991,7 +1004,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // MIN_ATTACK_PHASE_MS. The last step stays long enough for a Rest's animation, if one goes through.
       playback.phase === "approach"
         ? risesNow ? 250 : isAttackStep(step) ? (leapPlan.current?.key === stepKey ? leapPlan.current.approach : APPROACH_MS) : Math.max(prepsIn(playback, step) ? PREP_MS : 0, MIN_ATTACK_PHASE_MS - (performance.now() - turnStart.current))
-        : Math.max(STEP_MS, playback.index === playback.steps.length - 1 && resting ? REST_ANIM_MS : 0, slideMs(playback), leapPlan.current?.key === `${playback.from.turn}-${playback.index}-approach` ? leapPlan.current.after + 100 : 0),
+        : Math.max(STEP_MS, usurpAsAttack && usurpOf(step) ? USURP_WISP_MS + USURP_AFTER_MS : 0, playback.index === playback.steps.length - 1 && resting ? REST_ANIM_MS : 0, slideMs(playback), leapPlan.current?.key === `${playback.from.turn}-${playback.index}-approach` ? leapPlan.current.after + 100 : 0),
     );
     return () => window.clearTimeout(timer);
   }, [playback, paused, waitingForString]);
@@ -1026,6 +1039,14 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   /** The step where someone's attack lands, or -1. */
   const strikeStep = (id: string) => stepOf("strike", id);
   // A Rest's own pose only lasts a moment; then it already settles into its next stance.
+  // Usurp Flame played as an attack: its wisps reach the Warden's hand this long after the blow lands; then his flame is lit and he is Unsealed.
+  const [wispsArrived, setWispsArrived] = useState<string | null>(null);
+  useEffect(() => {
+    if (!usurpAsAttack || playback?.phase !== "impact" || !usurpOf(playback.steps[playback.index])) return;
+    const t = window.setTimeout(() => setWispsArrived(stepKey), USURP_WISP_MS);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepKey]);
   const [restOver, setRestOver] = useState<string | null>(null);
   useEffect(() => {
     if (!playback) return;
@@ -1112,6 +1133,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     windup?: PoseName;
     /** The strike pose hands off to the next stance a moment in (REST_POSE_MS), its trails still fading. */
     strikeHandsOff?: boolean;
+    /** The pose a moment after the blow lands (REST_POSE_MS), before its next stance. */
+    after?: PoseName;
     /** The pose it hands off to, if not `idle`. */
     handOff?: PoseName;
     /** A Block or Maneuver: hold this pose, and only take `react` (the block, the dodge) as an attack on them lands. */
@@ -1124,8 +1147,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // trails carrying on) takes that stance a moment in, like a Rest's own pose does.
     // (A leap: its wind-up until it leaves the floor, its strike pose in the air, and the pose it hands off to once it lands and slides.)
     const leaping = dodging[id]?.leap;
-    if (struck === playback.index && leaping) return dodging[id]?.slide ? poses.handOff ?? poses.idle : impact || leapt === `${playback.from.turn}-${playback.index}-approach` ? poses.strike : poses.windUp;
-    if (struck === playback.index) return impact ? (poses.strikeHandsOff && restOver === stepKey ? poses.handOff ?? poses.idle : poses.strike) : poses.windUp;
+    // (it takes its next stance, Flail Spinning Behind for Flail Swing, as the blow lands, not when it comes down)
+    if (struck === playback.index && leaping) return dodging[id]?.slide || impact ? poses.handOff ?? poses.idle : leapt === `${playback.from.turn}-${playback.index}-approach` ? poses.strike : poses.windUp;
+    if (struck === playback.index) return impact ? (poses.strikeHandsOff && restOver === stepKey ? poses.handOff ?? poses.idle : poses.after && restOver === stepKey ? poses.after : poses.strike) : poses.windUp;
     if (staggered) return poses.down;
     if (struck >= 0 && struck < playback.index) return poses.idle;
     if (poses.guard) {
@@ -1271,7 +1295,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   /** It has taken a flame this turn, and the light is coming back (or has). */
   const flameTaken = (e: Enemy) => {
     const u = usurpStep(e.id);
-    return !!playback && u >= 0 && (playback.index > u || (playback.index === u && (impact || usurpStage === "reveal")));
+    return !!playback && u >= 0 && (playback.index > u || (playback.index === u && (usurpAsAttack ? wispsArrived === stepKey : impact || usurpStage === "reveal")));
   };
   /** When each Warden's flame was last put out (lit → out), while its smoke still shows. */
   const [smoke, setSmoke] = useState<Record<string, number>>({});
@@ -1303,6 +1327,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const poseOfEnemy = (e: Enemy): PoseName => {
     // One that has died (not one taken by a flame) falls in its down pose, the same as when it is staggered.
     if (!e.alive && (e.fate ?? "fallen") === "fallen") return downPoseOf(e);
+    // Before the fight's first turn it goes through its opening poses (the Warden's Wax Arm Raised, then Wax Guard's animation), and ends in the stance it has chosen.
+    if (intro !== null && !playback && e.alive && !e.staggered) {
+      const opening = kindOf(e).openingPoses;
+      if (opening?.[intro]) return asPose(opening[intro].pose, idlePoseOf(e));
+    }
     // An action it dies doing (Flame Immolation): once its strike has landed it lies in that pose, its death pose, whatever else the turn
     // does to it (staggered by a blow, say), until it is taken off the field as the turn ends.
     if (e.intent.action && !e.intent.forced && kindOf(e).fatalActions?.includes(e.intent.action) && reached(strikeStep(e.id))) return strikePose(e);
@@ -1315,11 +1344,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     if (!e.staggered && reached(flinchStep(e))) return flinchPoseOf(e);
     // Usurp Flame: crouched to spring, the dash, then standing in Idle as the light returns.
     const u = usurpStep(e.id);
-    if (playback && u >= 0 && playback.index >= u) {
+    // (played as an attack, it closes in in its wind-up pose, the ordinary way, and takes its next stance as the blow lands)
+    if (playback && u >= 0 && playback.index >= u && !(usurpAsAttack && playback.index === u && !impact)) {
       if (playback.index === u && playback.phase === "usurp") {
         // (Before it starts, as an opening scene's arena shows, he just stands in his stance.)
         if (!usurpStage) return poseForIntent(e);
-        if (usurpStage === "reveal") return "wd-idle";
+        // (lands in the stance that follows, Idle or Wax Arm Raised; until then the lunge, her wind-up)
+        if (usurpStage === "reveal") return settledPose(e);
         if (usurpStage === "dash" || usurpStage === "black") return "wd-usurp-dash";
         return "wd-usurp";
       }
@@ -1339,6 +1370,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       down: downPoseOf(e), windUp: e.intent.type === "attack" && e.intent.windupPose ? asPose(e.intent.windupPose, windUpPose(e)) : kindOf(e).attacksFromStance && e.intent.stance ? poseForIntent(e) : windUpPose(e), strike: strikePose(e),
       idle: e.intent.action && kindOf(e).fatalActions?.includes(e.intent.action) ? strikePose(e) : settledPose(e),
       strikeHandsOff: handsOff(e),
+      after: e.intent.afterPose ? asPose(e.intent.afterPose, strikePose(e)) : undefined,
       // Its strike always plays out in full: if it ends up staggered (or down), it still spins on
       // into the pose its strike ends in, and only drops once the step is over.
       handOff: handsOff(e) && !standingAfter(e) ? handOffOf(e.intent.strikePose) : undefined,
@@ -1349,16 +1381,24 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
 
   // Usurp Flame's scene: the darkness (all but the target's flame), and the flame's trail into his hand.
   const usurpNow = playback?.phase === "usurp" ? usurpOf(step) : undefined;
-  const usurpDark = usurpNow && usurpStage
+  // (The black fade hid the 2D figure's jumps from pose to pose; the 3D Warden plays it in the light, with only the flame's own light carried over: `level` 0.)
+  const usurpWarden = usurpNow ? fight.enemies.find(x => x.id === usurpNow.who) : undefined;
+  const usurpIn3D = !!usurpWarden && kindOf(usurpWarden).figure3d === "warden" && (WARDEN_3D_IN_GAME || !!override);
+  // (Played as an attack, a flame of yours he goes for burns on your head until the blow lands; no darkness.)
+  const usurpGoing = usurpAsAttack && playback?.phase === "approach" ? usurpOf(step) : undefined;
+  const usurpDark = usurpGoing && usurpGoing.target === "player" ? { level: 0, ms: 0, flame: "player" } : usurpNow && usurpStage
     ? {
-        level: usurpStage === "reveal" ? 0 : usurpStage === "focus" ? 0.85 : 1,
-        ms: usurpStage === "focus" ? USURP_STAGES.dash : usurpStage === "dash" ? USURP_STAGES.black - USURP_STAGES.dash : usurpStage === "reveal" ? USURP_STAGES.done - USURP_STAGES.reveal : 0,
+        level: usurpIn3D ? 0 : usurpStage === "reveal" ? 0 : usurpStage === "focus" ? 0.85 : 1,
+        ms: usurpIn3D ? 0 : usurpStage === "focus" ? USURP_STAGES.dash : usurpStage === "dash" ? USURP_STAGES.black - USURP_STAGES.dash : usurpStage === "reveal" ? USURP_STAGES.done - USURP_STAGES.reveal : 0,
         // The target's flame burns on in the dark; as the light returns, it's already in his hand.
         flame: usurpStage === "focus" || usurpStage === "dash" ? usurpNow.target : usurpStage === "reveal" ? usurpNow.who : undefined,
       }
     : undefined;
-  const usurpTrails: { from: string; to: string; key: string }[] = [];
+  const usurpTrails: { from: string; to: string; key: string; wisps?: number }[] = [];
   if (usurpNow && usurpStage === "reveal") usurpTrails.push({ from: usurpNow.target, to: usurpNow.who, key: `${stepKey}-usurp` });
+  // Played as an attack: the flame streams into his hand as the blow lands.
+  const usurpHit = usurpAsAttack && playback?.phase === "impact" ? usurpOf(step) : undefined;
+  if (usurpHit) usurpTrails.push({ from: usurpHit.target, to: usurpHit.who, key: `${stepKey}-usurp`, wisps: USURP_WISP_MS });
   // A lit waxed dying as the turn ends: its flame streams into the Warden's hand.
   if (impact && step) {
     for (const ev of step.events) {
@@ -1492,7 +1532,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    */
   const headFlameOf = (e: Enemy): SceneFigure["headFlame"] => {
     const k = kindOf(e);
-    if (!e.alive || looksDead(e) || !k.flame || !shownFlags(e).lit || usurpNow?.target === e.id) return undefined;
+    if (!e.alive || looksDead(e) || !k.flame || !shownFlags(e).lit || usurpNow?.target === e.id || usurpHit?.target === e.id) return undefined;
     const pose = enemyPose(e);
     if (pose === k.deathPose) return undefined;
     return k.blazePoses?.includes(pose) ? "blaze" : "lit";
@@ -1573,6 +1613,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         eternalFlash: auraOf(e.id),
         // Its own blow being played (at you): it faces you as it began, for all of it, whatever you do (dodge past or back off).
         faceToward: playback ? enemyBlow(e.id) : undefined,
+        // Unsealed, in Wax Arm Back (in the stance, and gathering a Flame Blast from it, until the blow lands): red wisps circle her wax arm.
+        armBlaze: e.alive && !e.staggered && !e.intent.forced && !shownFlags(e).sealed && kindOf(e).figure3d === "warden" && enemyPose(e) === "wd-arm-back",
+        // Before its blow it faces whom it has picked, if that is another enemy (Usurp Flame on a waxed's flame); you, as usual, otherwise.
+        faceAt: e.alive && e.intent.target && (!playback || !reached(strikeStep(e.id))) ? e.intent.target : undefined,
         // The fallen lie there, a little faded: they drop (instead of fading out), then stay.
         // (A unit that is about to lie down, but still has its own attack to finish, stays up and unfaded until then.)
         classes: looksDead(e)
@@ -1695,7 +1739,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       <PlayerBars knot={knotOwned} eternalFlash={{ health: barFlashOf("player"), eternity: eternalHere.some(ev => ev.attacker === "player" && ev.spent > 0) ? stepKey : undefined }} player={barsOf(p)} preview={previewCost} recover={previewRecover} string={carried + landed} stringPops={pops} eternalString={eternalString} />
 
       {/* The ring over whoever you have selected: a small mark while you plan, grown into the wheel when you focus. */}
-      {playing && !forced && !busy && !waking && (
+      {playing && !forced && !busy && !waking && intro === null && (
         <ActionWheel
           wheel={wheel}
           open={wheelOpen}

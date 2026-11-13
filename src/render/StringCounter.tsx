@@ -4,6 +4,7 @@
  * now and then spins round an enemy holding some of what you lost.
  */
 import { useEffect, useRef, useState } from "react";
+import { canvasLoop } from "./canvasLoop";
 import { drawLostString } from "./lostString";
 
 /** A small ball of yarn: white, wound round and round (`eternal`: light blue, like eternal gear; `red`: the revive knot). */
@@ -87,23 +88,14 @@ export function StringAura({ layer, spread = 1 }: { layer: "back" | "front"; /**
   // (Each figure is on a clock of its own, so a group of them do not all show it together.)
   const [seed] = useState(() => Math.random());
   useEffect(() => {
-    let raf = 0;
-    const frame = () => {
-      const cv = canvas.current;
-      if (cv) {
-        const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
-        if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
-        const g = cv.getContext("2d")!;
-        g.setTransform(dpr, 0, 0, dpr, 0, 0);
-        g.clearRect(0, 0, w, h);
-        // (The canvas reaches past the figure's box all round: its box is the middle half of the width and the middle 70% of the height.)
-        const fw = w / CANVAS_W, fh = h / CANVAS_H;
-        drawLostString(g, w / 2, h / 2, fw * 0.55 * spread, fh * 0.11, fh * 0.62, Math.max(1.2, fw * 0.014), performance.now(), layer, seed);
-      }
-      raf = requestAnimationFrame(frame);
-    };
-    raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
+    const cv = canvas.current;
+    if (!cv) return;
+    return canvasLoop(cv, (g, w, h, now) => {
+      // (The canvas reaches past the figure's box all round: its box is the middle half of the width and the middle 70% of the height.)
+      const fw = w / CANVAS_W, fh = h / CANVAS_H;
+      drawLostString(g, w / 2, h / 2, fw * 0.55 * spread, fh * 0.11, fh * 0.62, Math.max(1.2, fw * 0.014), now, layer, seed);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layer, seed]);
   return <canvas ref={canvas} className={`string-aura is-${layer}`} style={{ left: `${-((CANVAS_W - 1) / 2) * 100}%`, top: `${-((CANVAS_H - 1) / 2) * 100}%`, width: `${CANVAS_W * 100}%`, height: `${CANVAS_H * 100}%` }} aria-hidden="true" />;
 }

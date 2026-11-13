@@ -82,6 +82,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* The stir at the edge of your light, toward enemies hunting you out of sight. */
 .explore-disturb { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 /* Shown over the dark while the map near you is painted. */
+/* The step before a fight opens: its sounds, music and figures made ready. */
+.fight-loading { position: fixed; inset: 0; z-index: 5000; background: #000; display: flex; align-items: center; justify-content: center; color: var(--text); font-size: 1rem; letter-spacing: 0.08em; }
 .explore-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text); font-size: 1rem; letter-spacing: 0.08em; pointer-events: none; }
 /* Standing by a keeper, and the line after resting. */
 .explore-prompt {
@@ -263,7 +265,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 }
 @keyframes break-fade { to { filter: grayscale(1) brightness(0.8); } }
 @keyframes fall { to { top: 8%; opacity: 0; } }
-@keyframes die { from { top: -6%; opacity: 1; } to { top: 0; opacity: 0.65; } }
+@keyframes die { from { top: -6%; opacity: 1; } to { top: 0; opacity: 1; } }
 @keyframes step-bob { 25%, 75% { top: -2.5%; } 50% { top: 0; } }
 
 
@@ -573,6 +575,8 @@ kbd {
 .fig-arm-embers { fill: none; stroke: #ff7a2f; stroke-width: 1.1; stroke-dasharray: 1.5 4.5; stroke-linecap: round; animation: embers 1.4s ease-in-out infinite alternate; }
 @keyframes embers { from { opacity: 0.45; } to { opacity: 1; } }
 .fig-hand-wax { fill: var(--wax); }
+/* The dead Warden: all of her body under the robe is wax (the limbs, the thighs, the neck). */
+.wd-encased { --ink: var(--wax); --ink-far: color-mix(in srgb, var(--wax) 82%, black); }
 .fig-hand-burnt { fill: #1b1315; }
 .fig-arm-drip { stroke: var(--wax); stroke-width: 2; stroke-linecap: round; }
 .fig-smoke { fill: none; stroke: #a19da7; stroke-width: 1.3; stroke-linecap: round; opacity: 0.55; animation: smoke 2.4s ease-in-out infinite; }
@@ -746,8 +750,6 @@ kbd {
 .head-flame-svg { position: absolute; overflow: visible; }
 .flame-anchor { position: absolute; width: 0; height: 0; pointer-events: none; }
 .head-flame-light { position: absolute; width: 0; height: 0; pointer-events: none; }
-/* The waxed where they fell: left in place, faded. */
-.figure-slot .is-remains { opacity: 0.65; }
 /* The phase-two scene: flames streaming into his hand, and his flare. */
 .ignite-trail { opacity: 0; animation: usurp-trail 0.7s ease-out both; }
 .ignite-trail-outer { fill: none; stroke: #e0782f; stroke-width: 5; stroke-linecap: round; }
@@ -796,6 +798,9 @@ svg.wd-flaming .fig-ball-wax, svg.wd-flaming .fig-ball-lit, svg.wd-flaming .fig-
 .scene-dark { position: absolute; inset: 0; background: #000; z-index: 3000; pointer-events: none; }
 .scene-orb-glow { position: absolute; z-index: 3001; pointer-events: none; border-radius: 50%; background: radial-gradient(circle, rgb(255 252 235 / 0.95) 0, rgb(255 244 205 / 0.45) 16%, rgb(255 236 180 / 0.12) 40%, transparent 68%); }
 .scene-lone-flame { position: absolute; z-index: 3001; overflow: visible; pointer-events: none; }
+/* The red light of a Flame Blast's kind of fire: strong at its middle, going out as the ring spreads. */
+.shock-light { position: absolute; z-index: 1998; pointer-events: none; border-radius: 50%; mix-blend-mode: screen; background: radial-gradient(closest-side, rgb(255 70 45 / 0.95) 0%, rgb(255 50 35 / 0.55) 30%, rgb(255 30 20 / 0.2) 62%, rgb(255 20 10 / 0) 100%); }
+.usurp-wisps { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3002; pointer-events: none; }
 .usurp-trail-layer { z-index: 3002; } /* over the darkness, as the light comes back */
 .usurp-trail { opacity: 0; animation: usurp-trail 1s ease-out 0.15s; }
 @keyframes usurp-trail { 0% { opacity: 0; } 15% { opacity: 0.95; } 100% { opacity: 0; } }
@@ -880,8 +885,6 @@ svg.wd-flaming .fig-ball-wax, svg.wd-flaming .fig-ball-lit, svg.wd-flaming .fig-
 .inv-figure { left: calc(20vw - var(--fig-h) * 0.4167); }
 .guide-figure { right: calc(20vw - var(--fig-h) * 0.4167); }
 .inv-figure .figure, .guide-figure .figure { width: 100%; height: 100%; }
-/* (Seen from the front a figure faces left; you turn toward your slots.) */
-.inv-figure .figure { transform: scaleX(-1); }
 .inv-column { display: grid; gap: 16px; }
 /* A slot: its name, then its places (eternal, ordinary, and on the ground while something lies within reach). */
 .inv-row { display: flex; align-items: center; gap: 12px; }
@@ -947,9 +950,10 @@ svg.wd-flaming .fig-ball-wax, svg.wd-flaming .fig-ball-lit, svg.wd-flaming .fig-
 .gear-sprite.is-weapon { height: 30px; width: 76px; }
 /* In a square place the weapon is slanted to fill it. */
 .gear-sprite.is-weapon.is-tilted { width: 100%; height: 100%; }
-/* The armor: the player's own torso, cropped (the figure is 100 x 120; this shows about half of it, around the chest). */
-.gear-sprite.is-armor { position: relative; overflow: hidden; width: 38px; height: 38px; }
-.gear-sprite.is-armor > svg { position: absolute; left: -2%; top: 10%; width: 100%; height: auto; transform: scale(2); transform-origin: 52% 33%; }
+/* The armor and head gear: the 3D player, cropped to the chest or the head (the figure is 100 x 120; `Crop` in GearIcons.tsx places it). */
+.gear-sprite.is-armor, .gear-sprite.is-head { position: relative; overflow: hidden; width: 38px; height: 38px; aspect-ratio: 1; }
+.gear-sprite .gear-crop { position: absolute; aspect-ratio: 100 / 120; }
+.gear-sprite .gear-crop .figure { width: 100%; height: 100%; }
 
 /* The Warden's remains in his second form: the wax burnt pitch black. */
 .is-charred .fig-wax-head { fill: #1b1915; stroke: #0b0a08; }

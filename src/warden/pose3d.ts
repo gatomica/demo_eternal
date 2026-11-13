@@ -33,8 +33,9 @@ export interface Stance {
    * fist toward the chain's end, and the way the chain runs from there to the head (it hangs that way, straight, unless the floor stops it).
    * `held`: his candle hand holds the chain this far (figure units) from the head: the chain runs from the handle to that hand, and on from it, the way
    * `chain` says, to the head. Or `taut`: his candle hand holds it pulled straight from the handle, and the rest of its length runs on past the hand to the head.
+   * Or `rest`: the head lies on the floor, the chain running along it from the handle's tip the way `chain` points (its way along the floor, as far as its length goes).
    */
-  flail?: { handle: P3; chain: P3; held?: number; taut?: boolean };
+  flail?: { handle: P3; chain: P3; held?: number; taut?: boolean; rest?: boolean };
   /**
    * The 3D figure draws the trail of the flail coming on from where this pose has its head (it carries on that pose's `arch`) down into the whirl it spins
    * in here, meeting the whirl's ring at its back, going the way it turns.
@@ -45,6 +46,8 @@ export interface Stance {
    * before her chest on its way, up to the head. `reaching`: bowing out toward whoever she fights instead, so the blow sweeps out at them.
    */
   blowArc?: { from: P3; bulge: number; thick?: number; reaching?: boolean };
+  /** The way the flail's head is travelling in this pose, in body space (as her hips face), if it is not one a trail says (`blowArc`, `slamFrom`, `arch`): a flaming head's wick trails behind it. */
+  flailMotion?: P3;
   /** How far the chain bows off the straight line from the handle to the head (figure units; down, as a chain hangs; negative: up, as one whipped up does). */
   chainBow?: number;
   /** The flail whirls in the plane square to its handle (it spins round the handle's line), not upright along the way her chest faces. */
@@ -60,6 +63,21 @@ export interface Stance {
   arch?: boolean;
   /** The pelvis egg's axis swung this share of the way toward the spine (the line up to the chest egg's middle): for a pose whose chest is turned well away from its hips. */
   pelvisAlign?: number;
+  /** Her bottom egg turned this far (degrees) about its own axis toward her right (so a leg reaching forward on her left does not pull the robe with it). */
+  pelvisTurn?: number;
+  /** Her right leg is not drawn (the skirt covers it all): a cheat, for a pose whose skirt shows nothing of it. */
+  hideRightLeg?: boolean;
+  /** Her skirt has a smoother outline: the cloth round her right leg is taken out further and more broadly, its bends are rounder, and the knee's ring is faired between the rings round it. */
+  skirtSmooth?: boolean;
+  /** The rim of the skirt's opening in front of her, on her left, drops almost straight down to the floor from the belt, whatever drags the cloth next to it. */
+  skirtRimDrop?: boolean;
+  /** Her left leg never moves the robe: the skirt hangs as if it were not there (it comes out through the opening on her left, and cloth and leg are only sorted by depth). */
+  skirtFreeLeftLeg?: boolean;
+  /** Her skirt is pulled back, against gravity, so that its hem stays this high above the floor (figure units): where it is longer than she is high, the rest of its length runs
+   *  backward, along her motion, instead of reaching the floor and crumpling there. */
+  skirtLift?: number;
+  /** How far her skirt hangs back from her motion forward (figure units at the hem; less higher up): the cloth lags behind her as she moves toward her target. */
+  skirtDrag?: number;
   /** Her robe's bottom egg tipped back about her pelvis this far (degrees), its middle with it; the spine leans forward to meet her chest where it is. */
   pelvisBack?: number;
 }
@@ -97,6 +115,90 @@ const CHAIN_READY: Stance = {
   flail: { handle: [0.815, -0.1, 0.571], chain: [0, 1, 0] },
 };
 
+/** Wax Arm Back (see its entry below): the stance, shared with the landing of Fan Flames and Wax Guard. */
+const ARM_BACK: Stance = {
+  hips: -50, shoulders: -65, pitch: -37, pelvisAlign: 0.5,
+  flail: { handle: [-0.43, -0.5, 0.75], chain: [0.15, -0.1, 1], rest: true },
+  for3d: { hip: [49, 77], waist: [51.9, 63.3], neck: [60.9, 47.7], head: [68.5, 40.1], arms3: { right: { dirs: [[0.75, -0.5, 0.43], [0.125, -0.65, 0.756]] }, left: { aim: { dir: [-0.766, -0.01, 0.643], reach: 0.78, bend: [-0.611, 0.3, -0.808] } } }, legDirs3: { right: [[0.626, -0.691, 0.362], [0.626, -0.691, 0.362]], left: [[-0.746, -0.259, 0.613], [-0.15, -0.985, -0.087]] } },
+};
+
+/**
+ * Wax Punch and Flame Blast, as they land: dropped very low, her left knee nearly on the floor and her right foot out ahead, her torso hunched far forward over her
+ * hips (the bend at her waist and the head bowed under it), her spine pointing straight at her target and her chest turned about it to her left (`roll3`), which brings her wax shoulder down, so that her wax fist is driven into
+ * the floor ahead of her. Her arms are angled a little up and out from her body, the flail arm out to her right with the flail's head resting on the floor.
+ */
+const PUNCH: Stance = {
+  hips: 0, shoulders: 0, pitch: -30,
+  flail: { handle: [0.55, 0.15, -0.2], chain: [0.4, -0.1, -1], rest: true },
+  for3d: {
+    // (the spine bent in three: her lower spine, up from the pelvis, leans 40° forward of upright; her ribcage, from the waist, 82°, nearly level; and her head hangs from the neck,
+    // bowed)
+    hip: [44, 100], waist: [49.8, 91.9], neck: [66.4, 89.5], head: [76, 91], roll3: -45,
+    // (her flail hand where it was, out to her right and up a little, but the elbow bends the other way, back, away from her target; her wax arm no longer straight: the upper arm turned out
+    // to her left from the shoulder, the forearm bent back in to her right, to the fist on the floor)
+    arms3: { right: { aim: { dir: [0.953, 0.295, -0.072], reach: 0.949, bend: [0, 0, -1] } }, left: { aim: { dir: [-0.1, -0.875, 0.474], reach: 0.9, bend: [-1, 0.2, 0] } } },
+    legDirs3: { left: [[-0.45, -0.6, -0.66], [-0.3, -0.05, -0.95]], right: [[0.45, -0.15, 0.88], [0.35, -0.35, -0.87]] },
+  },
+};
+
+/**
+ * Wax Punch and Flame Blast a moment after the blow: the same position (the spine's bends, her chest turned, her arms, her legs splayed out), but her stance not so low: her
+ * legs straighter, her hips raised, so that she comes up toward the stance that follows instead of jumping to it.
+ */
+const PUNCH_AFTER: Stance = {
+  ...PUNCH,
+  for3d: { ...PUNCH.for3d, legDirs3: { left: [[-0.45, -0.35, -0.82], [-0.3, -0.48, -0.82]], right: [[0.45, -0.25, 0.86], [0.3, -0.55, -0.78]] } },
+};
+
+/**
+ * Fan Flames and Wax Guard, as they land (the backhand swat): Wax Arm Back's position, with her wax arm much less bent: stretched out nearly straight from her shoulder, the way it
+ * points there.
+ */
+const FAN: Stance = {
+  ...ARM_BACK,
+  hips: -60, shoulders: -75,
+  for3d: { ...ARM_BACK.for3d, arms3: { right: ARM_BACK.for3d!.arms3!.right, left: { aim: { dir: [-0.766, -0.01, 0.643], reach: 0.97, bend: [-0.611, 0.3, -0.808] } } } },
+};
+
+/**
+ * Fan Flames and Wax Guard, winding up: Wax Arm Raised's stance (Wax Shoulder In: the wax shoulder forward, her flail arm trailing low behind), but with her wax elbow lowered: the
+ * upper arm out and up a little from her shoulder instead of straight up, the forearm still up and folded back, so her fist is still raised behind her head.
+ */
+const WAX_READY: Stance = {
+  hips: 55, shoulders: 70,
+  for3d: { arms3: { right: { dirs: [[-0.085, -0.947, -0.312], [-0.097, -0.923, -0.368]] }, left: { dirs: [[-0.55, 0.35, 0.15], [0.1, 0.95, -0.3]] } } },
+};
+
+/**
+ * Dead: Wax Arm Raised's upper body (the wax shoulder forward, her wax arm raised behind her head, her flail arm trailing low), kneeling as a waxed enemy does: both knees on the floor,
+ * sitting back on her shins. The 3D figure draws her fully encased in wax under her robes (`Warden3DProps.dead`).
+ */
+const DEAD: Stance = {
+  hips: 45, shoulders: 60,
+  flail: { handle: [-0.1, -0.9, -0.4], chain: [0.4, -0.1, -1], rest: true },
+  for3d: {
+    arms3: { right: { dirs: [[-0.085, -0.947, -0.312], [-0.097, -0.923, -0.368]] }, left: { dirs: [[-0.15, 0.95, 0.25], [0.1, 0.95, -0.3]] } },
+    legDirs3: { left: [[-0.2, -0.3, 0.93], [-0.05, -0.05, -1]], right: [[0.2, -0.3, 0.93], [0.05, -0.05, -1]] },
+  },
+};
+
+/**
+ * Staggered: down on her left knee, the knee on the floor, her legs splayed out away from her body and her arms out to her sides, hanging; her body hunched over her hips
+ * (the spine bent in three, as in Wax Punch's landing: her lower spine and bottom egg leaning, her ribcage nearly level) and her neck and head bowed under it, her face looking straight
+ * down at the floor. The flail lies on the floor beside her.
+ */
+const FALLEN: Stance = {
+  hips: 0, shoulders: 0, pitch: -90,
+  flail: { handle: [-0.2, -0.9, 0.2], chain: [0.3, -0.1, -1], rest: true },
+  for3d: {
+    hip: [44, 100], waist: [51, 95], neck: [66.6, 98], head: [68, 108],
+    // (her chest lowered, so that her shoulders are only a forearm's height off the floor; both hands flat on the floor, as if she had caught her fall: the upper arms nearly level, out
+    // to her sides, the forearms nearly upright under the elbows)
+    arms3: { right: { dirs: [[0.95, 0, 0.2], [0.05, -1, 0.05]] }, left: { dirs: [[-0.95, 0, 0.2], [-0.05, -1, 0.05]] } },
+    legDirs3: { left: [[-0.45, -0.6, -0.66], [-0.3, -0.05, -0.95]], right: [[0.45, -0.15, 0.88], [0.35, -0.35, -0.87]] },
+  },
+};
+
 export const WARDEN_STANCE: Record<WardenPoseName, Stance> = {
   // Stances
   "wd-idle": { hips: 22.5, shoulders: 0, head: 0, for3d: { arms3: IDLE_ARMS } }, // chest out, hands a little out from his sides, the flail on the floor; hips turned 22.5° to his right, the chest and head facing you
@@ -106,7 +208,11 @@ export const WARDEN_STANCE: Record<WardenPoseName, Stance> = {
     hips: 45, shoulders: 60,
     for3d: { arms3: { right: { dirs: [[-0.085, -0.947, -0.312], [-0.097, -0.923, -0.368]] }, left: { dirs: [[-0.15, 0.95, 0.25], [0.1, 0.95, -0.3]] } } },
   },
-  "wd-arm-back": S(-60, -75), // flail shoulder first, the wax side away, looking back over it; the rip is on his far side
+  // Wax Arm Back, started from Flail Clutched (below) and tuned on its own from here: all of her turned 20° further round to her left (hips and chest), the flail not
+  // clutched but its head resting on the floor in front of her (the handle pointing ahead and down from her fist, the chain lying along the floor the way her hips face).
+  // Her neck turns her face to her target (no `head`: as near it as the neck lets her), and her wax elbow is raised a little (the bend's way has some up in it; the hand is
+  // where it was). The scene stands her facing her target: the enemy whose flame she goes for with Usurp Flame, else you (`SceneFigure.faceAt`).
+  "wd-arm-back": ARM_BACK,
   "wd-arm-chest": S(0, 15), // the wax arm folded across his chest turns that shoulder in a little
   // Wax Arm Back, the flail hauled up by its chain. Turned to her left (all of her 30° back to her right from where the legs and arms were set, so her right
   // leg reaches 30° off the line to you): her right leg leads, reaching out straight toward you (46° off upright), her
@@ -162,8 +268,9 @@ export const WARDEN_STANCE: Record<WardenPoseName, Stance> = {
   // (her arms as the flat pose has them, each turned a little: the flail arm out to her right and down, away from her body; the wax arm out to her left,
   // away from her body and up, the chain in its fist, the flail's head hanging below it)
   "wd-kneel": {
-    // (her robe's bottom egg tipped back a little, the spine leaning forward from it to her chest)
-    hips: 0, shoulders: 10, pelvisBack: 30,
+    // (her robe's bottom egg tipped back a little, the spine leaning forward from it to her chest; the skirt is still dragged by her right leg, but the rim of its opening in front of
+    // her drops almost straight down to the floor)
+    hips: 0, shoulders: 10, pelvisBack: 30, skirtRimDrop: true, hideRightLeg: true, skirtSmooth: true,
     for3d: {
       arms3: { right: { dirs: [[0.13, 0.351, -0.928], [0.119, 0.261, 0.957]] }, left: { dirs: [[-0.503, -0.508, -0.7], [-0.367, -0.856, 0.358]] } },
       // (each leg turned a little out to its own side: the right one to her right, the left one to her left)
@@ -178,6 +285,8 @@ export const WARDEN_STANCE: Record<WardenPoseName, Stance> = {
   "wd-swing": {
     // (her face pointed up as far as the lean tips it down, nearly: she looks ahead and a little down)
     hips: 0, shoulders: -20, head: -25, leanAhead: 35, pitch: 25,
+    // (the flail flung through as she leaps past: its head travels on ahead and across, toward her left)
+    flailMotion: [-0.5, 0, 0.85],
     for3d: { arms3: { right: { dirs: [[0.9, 0.2, -0.35], [-0.42, 0.1, 0.9]] }, left: { aim: { dir: [-0.55, -0.3, -0.78], reach: 1 } } }, legDirs3: { left: [[-0.1, -0.45, 0.89], [0, -0.85, -0.53]] } },
     // (not in her wax hand: the chain flung out from the handle's tip to her left and a little back)
     flail: { handle: [-0.9, -0.364, 0.45], chain: [-1, -0.25, -0.35] },
@@ -211,9 +320,10 @@ export const WARDEN_STANCE: Record<WardenPoseName, Stance> = {
     // down to its head, slammed onto the floor)
     flail: { handle: [0, -0.5, 0.87], chain: [0, -0.77, 0.638] },
   },
-  "wd-punch": S(10, 35), // kneeling, the wax fist driven into the ground: the left shoulder forward
-  "wd-fan": S(-50, -70), // the backhand: the wax arm flung straight back, away from you
-  "wd-blast": S(10, 35),
+  "wd-punch": PUNCH,
+  "wd-punch-after": PUNCH_AFTER,
+  "wd-fan": FAN, // the backhand: her wax arm out nearly straight, as in Wax Arm Back (Fan Flames and Wax Guard share their landing)
+  "wd-blast": PUNCH, // (Wax Punch and Flame Blast share their landing)
   // Spin Guard, as the blow lands: its windup (Flail Spinning Behind's body, `pose3d`, the flail whirling before her) turned a good way round to her left, all
   // of her, until the handle points at you: the whirl, square to it, faces you, standing between you and her. Her face turned to you.
   // (the handle turned on round to her left, 25° off the line to you; the whirl still facing you, `spinFacing`, whatever way the handle points; the
@@ -247,7 +357,8 @@ export const WARDEN_STANCE: Record<WardenPoseName, Stance> = {
     hips: 0, shoulders: 15,
     for3d: { arms3: { right: { dirs: [[0.416, 0.801, 0.437], [0.399, 0.494, 0.773]] }, left: { dirs: [[-0.174, -0.858, 0.478], [-0.014, 0.641, 0.765]] } } },
   },
-  "wd-fallen": S(0, 10), // on a knee, propped on the flail's handle, head hanging
+  "wd-dead": DEAD,
+  "wd-fallen": FALLEN, // staggered (and dead): on a knee, hunched, the head hanging, looking down
   // Wind Up Flail, as the Rest goes through (the sprite's look: its first spin swung round from behind her right, up over her head): hunched low and turned as
   // Flail Spinning Behind is (its hips, chest sideways, legs splayed), the flail arm raised behind her, back and up, the fist a little over her shoulder;
   // the handle up and back from it, and the flail flung on up from its tip over her head and a little ahead. The wax arm bent, its elbow pointing at you,
@@ -258,15 +369,27 @@ export const WARDEN_STANCE: Record<WardenPoseName, Stance> = {
     for3d: { arms3: { right: { dirs: [[-0.279, 0.25, -0.876], [-0.233, 0.75, -0.589]] }, left: { dirs: [[-0.613, -0.4, 0.514], [0.46, 0.7, -0.386]] } }, splay3: 18 },
     flail: { handle: [-0.245, 0.85, -0.447], chain: [0.469, 0.8, 0.325] },
   },
-  "wd-wax-swat": S(-50, -70),
-  "wd-usurp-dash": S(0, 25), // a low lunge, the wax hand reaching ahead
+  "wd-wax-swat": FAN,
+  // Usurp Flame's dash: a low lunge at her target, her body leaned far forward over a bent front knee, her wax arm stretched out straight and level from her shoulder at the
+  // height of a head kneeling in wax (a staggered waxed's, or yours: about 0.85 m, where the hand is), a little turned in so that it points at the target from her left shoulder,
+  // the flail trailing behind her with its head on the floor. (Her hips are 0.6 m up, her feet both on the floor.) Her torso leans 50° forward, not more, her ribcage turned about
+  // her spine (`roll3`) so that her wax shoulder is lowered back to the height of the hand's target, her flail shoulder up.
+  "wd-usurp-dash": {
+    hips: 0, shoulders: 0, pitch: -8, pelvisTurn: 40, skirtDrag: 12, skirtFreeLeftLeg: true, skirtLift: 16,
+    flail: { handle: [0.2, -0.3, -0.93], chain: [0, -0.1, -1], rest: true },
+    for3d: {
+      hip: [47, 80], waist: [57.5, 71.2], neck: [70.4, 60.4], head: [80.4, 50.4], roll3: -44,
+      arms3: { right: { dirs: [[0.6, -0.35, -0.7], [0.2, -0.3, -0.93]] }, left: { aim: { dir: [0.1, 0, 1], reach: 1, bend: [0, 1, 0] } } },
+      legDirs3: { left: [[-0.05, -0.35, 0.94], [0, -0.8, -0.6]], right: [[0.05, -0.61, -0.79], [0.05, -0.61, -0.79]] },
+    },
+  },
   "wd-flinch": S(0, 0), // thrown off balance, leaning, not twisting
   // Spin Guard's windup: Flail Spinning Behind (its body, `pose3d`; the flail whirling), but the flail arm brought round to her front, the left of the screen
   // from where you are, reaching out ahead of her chest and a little down, so the whirl spins in front of her; the handle turned well round to her left from
   // out at her right, and the whirl square to it (`spinSquare`), so it stands nearly edge on to you. Her right foot starting to come forward and her left
   // starting to go back (each knee bent forward, as knees do).
   "wd-chain-ready": CHAIN_READY,
-  "wd-wax-ready": S(0, 10),
+  "wd-wax-ready": WAX_READY,
   // Wind Up Flail's windup: Idle (its body, `pose3d`: standing tall, chin up, the flail's head on the floor behind her), beginning to turn: her hips a little
   // further to her right and her chest following a third of the way to Flail Spinning Behind's sideways; the flail arm just drawn back behind her hip, the
   // flail dragging after it; the wax arm bent up before her chest, the elbow low, the fist raised toward her mask.
@@ -299,6 +422,14 @@ export interface WardenRig {
   flailDirs?: Stance["flail"];
   /** How far his pelvis egg's axis is swung toward his spine (`Stance.pelvisAlign`). */
   pelvisAlign?: number;
+  /** How far her bottom egg is turned to her right (`Stance.pelvisTurn`), and how far her skirt hangs back (`Stance.skirtDrag`). */
+  pelvisTurn?: number;
+  skirtDrag?: number;
+  skirtFreeLeftLeg?: boolean;
+  hideRightLeg?: boolean;
+  skirtSmooth?: boolean;
+  skirtRimDrop?: boolean;
+  skirtLift?: number;
   /** How far her bottom egg is tipped back (`Stance.pelvisBack`). */
   pelvisBack?: number;
   /** With it tipped back: the line her bottom egg stands along, from her pelvis, as it was before her upper body was pulled back with it. */
@@ -405,7 +536,7 @@ export function wardenRig(pose: string): WardenRig {
   // His head looks at whoever he fights, as far as his neck allows from his shoulders, chin raised or lowered by the pose's `tilt`.
   const headAbs = st.head ?? Math.max(st.shoulders - NECK_TURN, Math.min(st.shoulders + NECK_TURN, 0)), yaw = rad(headAbs - st.hips), pitch = rad(st.pitch ?? -(flat.tilt ?? 0));
   const gaze: P3 = [Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)];
-  const made: WardenRig = { rig: { ...rig, gaze }, flat, yaw: rad(st.hips), turn: rad(st.shoulders - st.hips), gaze, flailDirs: st.flail, pelvisAlign: st.pelvisAlign, pelvisBack: st.pelvisBack, pelvisLift, pelvisRun };
+  const made: WardenRig = { rig: { ...rig, gaze }, flat, yaw: rad(st.hips), turn: rad(st.shoulders - st.hips), gaze, flailDirs: st.flail, pelvisAlign: st.pelvisAlign, pelvisTurn: st.pelvisTurn, skirtDrag: st.skirtDrag, skirtFreeLeftLeg: st.skirtFreeLeftLeg, skirtRimDrop: st.skirtRimDrop, hideRightLeg: st.hideRightLeg, skirtSmooth: st.skirtSmooth, skirtLift: st.skirtLift, pelvisBack: st.pelvisBack, pelvisLift, pelvisRun };
   cache.set(name, made);
   return made;
 }
@@ -471,6 +602,11 @@ export function flail3(wr: WardenRig): Flail3 {
     const tip3 = plus(hand, hd, (HANDLE_HALF - g) * U), butt3 = plus(hand, hd, -(HANDLE_HALF + g) * U);
     const held = wr.flailDirs.taut ? Math.max(0, CHAIN - Math.hypot(...[0, 1, 2].map(i => j.handL[i] - tip3[i])) / U) : wr.flailDirs.held;
     if (held !== undefined) return { butt: butt3, tip: tip3, grip: j.handL, ball: plus(j.handL, cd, held * U), resting: false };
+    if (wr.flailDirs.rest) {
+      // (the head on the floor, the chain along it from under the handle's tip, the way `chain` runs over the floor)
+      const floor = HEAD_REST * U, drop = Math.max(0, tip3[1] - floor), run = Math.sqrt(Math.max(0, (CHAIN * U) ** 2 - drop * drop)), flatLen = Math.hypot(cd[0], cd[2]) || 1;
+      return { butt: butt3, tip: tip3, ball: [tip3[0] + (cd[0] / flatLen) * run, floor, tip3[2] + (cd[2] / flatLen) * run], resting: true };
+    }
     const ball3 = plus(tip3, cd, CHAIN * U);
     if (ball3[1] >= HEAD_REST * U) return { butt: butt3, tip: tip3, ball: ball3, resting: false };
   }

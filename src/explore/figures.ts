@@ -3,9 +3,9 @@
  */
 import { drawLostString } from "../render/lostString";
 import { ENEMY_KINDS, type KindId } from "../core/bestiary";
-import type { ArmorItem, ArmorTier, HeadItem, WeaponItem, WeaponTier } from "../core/types";
+import type { ArmorItem, ArmorTier, EnemySetup, HeadItem, WeaponItem, WeaponTier } from "../core/types";
 import { paintSealed } from "./props";
-import { drawSprite, UNITS_PER_TILE } from "./sprites";
+import { drawBlobSprite, drawSprite, UNITS_PER_TILE } from "./sprites";
 import { COLORS } from "./tuning";
 import type { Dir } from "./world";
 
@@ -31,6 +31,10 @@ export interface Look {
   hood?: boolean;
   /** Howling, how far into it (0 to 1): standing tall, head back, arms and weapon thrown up, rings of sound. */
   howl?: number;
+  /** A lit waxed: sealed whole in wax, with a flame burning over its head. */
+  lit?: boolean;
+  /** A sleepwalker that has seen you: it runs at you (the Chase), instead of drifting about. */
+  chasing?: boolean;
 }
 
 const PLAYER_LOOK: Look = { ink: COLORS.ink, eye: COLORS.eye };
@@ -52,6 +56,9 @@ export const SLEEPWALKER_LOOK: Look = { ink: "#aaa5b8", eye: null, reach: true }
 export const PATROL_LOOK: Look = { ...SLEEPWALKER_LOOK, hood: true };
 
 export const WAXED_LOOK: Look = { ink: "#9d98aa", eye: null, wax: "#b9a14e" };
+
+/** A lit waxed: sealed whole in wax, its flame burning over its head. */
+export const LIT_LOOK: Look = { ...WAXED_LOOK, lit: true };
 
 /** A little stick figure seen from above and in front, centered on (x, y), `T` pixels per tile. */
 export function drawWalker(
@@ -524,6 +531,24 @@ export function drawBlobTop(g: CanvasRenderingContext2D, x: number, y: number, T
   });
 }
 
+/** What each part of a Wax Blob carries (its kind's weapon: the super blob's side parts wield hammers), from the fight's setups. */
+export function blobWeapons(fight: EnemySetup[]): Record<"left" | "mid" | "right", WeaponTier> {
+  const out: Record<"left" | "mid" | "right", WeaponTier> = { left: "baseline", mid: "baseline", right: "baseline" };
+  for (const m of fight) if (m.part) out[m.part] = ENEMY_KINDS[m.kind].weapon;
+  return out;
+}
+
+/**
+ * The Wax Blob on the map as the fight draws it: its three parts (the waxed, sealed in wax) crawling out of the low dome they share, going the way
+ * it faces (`weapons`: what each part carries). Until its picture is made, the heap seen from above (`drawBlobTop`).
+ */
+export function drawBlob(
+  g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame, weapons: Record<"left" | "mid" | "right", WeaponTier>,
+  aimX: number, aimY: number, reach: number, t: number,
+) {
+  if (!drawBlobSprite(g, x, y, T, facing, frame, WAXED_LOOK, weapons)) drawBlobTop(g, x, y, T, aimX, aimY, reach, t);
+}
+
 /** A beaten Wax Blob, seen from above: the heap slumped flat, a ring of dark wax (the middle part stands for the whole). */
 export function drawDeadBlob(g: CanvasRenderingContext2D, x: number, y: number, T: number) {
   const wax = WAXED_LOOK.wax!;
@@ -574,6 +599,9 @@ export const MAP_REMAINS: Record<KindId, (g: CanvasRenderingContext2D, x: number
   waxed: drawDeadWaxed,
   waxedChisel: drawDeadWaxed,
   waxedHammer: drawDeadWaxed,
+  waxedLit: drawDeadWaxed,
+  waxedChiselLit: drawDeadWaxed,
+  waxedHammerLit: drawDeadWaxed,
   blobLeft: () => {},
   blobMid: drawDeadBlob,
   blobRight: () => {},
@@ -726,14 +754,17 @@ function drawGuideMap(g: CanvasRenderingContext2D, x: number, y: number, T: numb
 const armed = (kind: KindId, look: Look): Look => ({ ...look, weapon: ENEMY_KINDS[kind].weapon });
 
 /** How each kind of enemy is drawn on the map. */
-export const MAP_FIGURES: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame, howl?: number) => void> = {
-  sleepwalker: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("sleepwalker", SLEEPWALKER_LOOK)),
-  patrolWarden: (g, x, y, T, facing, frame, howl) => drawWalker(g, x, y, T, facing, frame, true, 0, { ...armed("patrolWarden", PATROL_LOOK), howl }),
-  sleepwalkerBare: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("sleepwalkerBare", SLEEPWALKER_LOOK)),
-  sleepwalkerHammer: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("sleepwalkerHammer", SLEEPWALKER_LOOK)),
+export const MAP_FIGURES: Record<KindId, (g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame, howl?: number, chasing?: boolean) => void> = {
+  sleepwalker: (g, x, y, T, facing, frame, _howl, chasing) => drawWalker(g, x, y, T, facing, frame, true, 0, { ...armed("sleepwalker", SLEEPWALKER_LOOK), chasing }),
+  patrolWarden: (g, x, y, T, facing, frame, howl, chasing) => drawWalker(g, x, y, T, facing, frame, true, 0, { ...armed("patrolWarden", PATROL_LOOK), howl, chasing }),
+  sleepwalkerBare: (g, x, y, T, facing, frame, _howl, chasing) => drawWalker(g, x, y, T, facing, frame, true, 0, { ...armed("sleepwalkerBare", SLEEPWALKER_LOOK), chasing }),
+  sleepwalkerHammer: (g, x, y, T, facing, frame, _howl, chasing) => drawWalker(g, x, y, T, facing, frame, true, 0, { ...armed("sleepwalkerHammer", SLEEPWALKER_LOOK), chasing }),
   waxed: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("waxed", WAXED_LOOK)),
   waxedChisel: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("waxedChisel", WAXED_LOOK)),
   waxedHammer: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("waxedHammer", WAXED_LOOK)),
+  waxedLit: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("waxedLit", LIT_LOOK)),
+  waxedChiselLit: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("waxedChiselLit", LIT_LOOK)),
+  waxedHammerLit: (g, x, y, T, facing, frame) => drawWalker(g, x, y, T, facing, frame, true, 0, armed("waxedHammerLit", LIT_LOOK)),
   blobLeft: () => {},
   blobMid: (g, x, y, T) => drawBlobTop(g, x, y, T, 0, 1, 0.2, performance.now()),
   blobRight: () => {},

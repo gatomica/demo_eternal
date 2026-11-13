@@ -8,11 +8,11 @@
  *
  * The robe was removed from this drawing (it is to be modelled again, in parts, from scratch); only the fallen heap (`dead`) still draws a cloak.
  */
-import { memo, type ReactNode, useContext, useEffect, useId, useState } from "react";
+import { Fragment, memo, type ReactNode, useContext, useEffect, useId, useState } from "react";
 import { type Cam, METERS_PER_UNIT as U, type Vec } from "./camera";
 import { DebugLimbsContext } from "./debugLimbs";
 import { visibleCap } from "./hoodCap";
-import { canvas3d, ellipsoidPart, Figure3DSvg, sameDrawing, trailPart } from "./figure3d";
+import { canvas3d, Figure3DSvg, sameDrawing, trailPart } from "./figure3d";
 import type { PoseName } from "./poses";
 import { type P3, ribcageOf, swingArc } from "./rig3d";
 import { FlailFire, type CandleArm, WARDEN_POSES, type WardenPoseName } from "../warden/skeleton";
@@ -74,6 +74,9 @@ const SKIRT_HEM = 4, SKIRT_FLARE = 0.18;
 const SKIRT_THICK = 0.6, CRUMPLE = 0.6;
 /** How far up and down from each joint of the skirt's parts the cloth bends round (a share of the part on either side). */
 const SKIRT_JOIN = 0.3;
+/** How far (figure units) the simplified skirt may stray from the full one: a ring that lies this close to the straight run of the cloth between its neighbours is left out, and so are
+ *  every other column round when the straight edges between the rest stay this close to the cloth's round. */
+const SKIRT_TOL = 0.15;
 /** The flail: its wax ball's radius, and its chain's links: how long and wide each oval is, how thick its iron, and how far apart the links sit (figure units). */
 const FLAIL_BALL = 6.2, LINK_LONG = 3.4, LINK_WIDE = 2.2, LINK_WIRE = 0.8, LINK_PITCH = 2.5;
 /** The black iron dome capping the flail's handle, where the chain hangs from: its radius, its height, and how far the short iron sleeve under it, as wide as the
@@ -158,17 +161,38 @@ function hull(ps: [number, number][]): [number, number][] {
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
+/**
+ * What of his body depends only on his pose, not on the camera: his eggs' surface points, the cuts and openings in the robe, the skirt's rings and their
+ * simplified grid, the belt. Worked out the first time a pose is drawn and kept with it (`wardenRig` gives the same rig for a pose every time), so a frame
+ * only projects these through the camera and decides what faces the viewer.
+ */
+class PoseGeometry {
+  private kept = new Map<string, unknown>();
+  get<T>(key: string, make: () => T): T {
+    if (!this.kept.has(key)) this.kept.set(key, make());
+    return this.kept.get(key) as T;
+  }
+}
+const poseGeometry = new WeakMap<object, PoseGeometry>();
+const geometryOf = (wr: object): PoseGeometry => {
+  let g = poseGeometry.get(wr);
+  if (!g) poseGeometry.set(wr, g = new PoseGeometry());
+  return g;
+};
+
 function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred, title, cam, at, yaw, scale = 1, rise = 0, lingerFrom, w, h, box }: Warden3DProps) {
   const clip = `wd3${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const debug = useContext(DebugLimbsContext);
-  const { wr, placed } = placeWarden(pose, at, yaw, cam, w, h, scale, rise);
+  // (Dead, she kneels in `wd-dead`, fully encased in wax under her robes.)
+  const { wr, placed } = placeWarden(dead ? "wd-dead" : pose, at, yaw, cam, w, h, scale, rise);
   // (his right arm and her left leg are always the one white: the robe's opening shows them, and with the robe on nothing white is beside them for the far-limb shade
   // to tell them from. What stays under the robe, her right leg, is always in the shade.)
   const c = canvas3d(placed, box, { unshaded: key => key === "R-arm" || key === "legL" || key === "neck" });
   const { seen, see, X, Y, scaleAt, depthOf, parts, bones, ball, behind } = c;
   const j = wr.rig.joints;
+  const geo = geometryOf(wr);
   // (his second form's look, for the scene that ignites it and for the rest of the fight, his candle arm scorched)
-  const className = `wd-figure${phase2Look || arm === "scorched" ? " wd-phase2" : ""}${flailFire ? " wd-flaming" : ""}${dead && charred ? " is-charred" : ""}`;
+  const className = `wd-figure${phase2Look || arm === "scorched" ? " wd-phase2" : ""}${flailFire ? " wd-flaming" : ""}${dead ? " wd-encased" : ""}${dead && charred ? " is-charred" : ""}`;
   const pts = (ps: P3[]) => ps.map(p => { const q = see(p); return `${X(q)},${Y(q)}`; }).join(" ");
   /** The way the viewer looks at a point, in body space: where depth grows fastest. */
   const look3At = (p: P3): P3 => {
@@ -186,7 +210,7 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     return [...half(a), ...half(b).reverse()];
   };
   /** The flail's head: a ball of wax, lit from above (its top half lighter, wherever it is seen from), with no outline. Set alight, a big red little flame wraps it. */
-  const waxBall = (key: string, c: P3, fire: boolean) => {
+  const waxBall = (key: string, c: P3, fire: boolean, motion?: P3) => {
     const q = see(c), k = scaleAt(q), x = X(q), y = Y(q), r = FLAIL_BALL * k;
     // (where its top is on the screen, from its middle: seen from the side a whole radius up, seen from above at its middle)
     const top = see(plus(c, UP, FLAIL_BALL * U)), tx = X(top) - x, ty = Y(top) - y, id = `${clip}-${key}`;
@@ -201,7 +225,17 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
       ),
     });
     // On fire: a big red little flame round it, with no knot (the middle of its round part on the ball's), over the ball and the chain's end, which show through it.
-    if (fire) parts.push({ key: `${key}-fire`, depth: q.depth - FLAIL_BALL * U * 1.5, node: <LittleFlame key={`${key}-fire`} x={x} y={y + 0.34 * FIRE_FLAME * k} height={FIRE_FLAME * k} red knot={false} /> });
+    if (fire) {
+      // Where the head is going (`motion`, a way in space): the flame's wick trails behind it, streaming back the other way and stretched, as a flame does on something swung through the air.
+      const base = y + 0.34 * FIRE_FLAME * k;
+      let lean = "";
+      if (motion) {
+        const ahead = see(plus(c, motion, 5 * U)), vx = X(ahead) - x, vy = Y(ahead) - y, vl = Math.hypot(vx, vy);
+        if (vl > 1e-6) lean = `translate(${x} ${base}) rotate(${(Math.atan2(-1.1 * vx / vl, 0.8 + 1.1 * vy / vl) * 180) / Math.PI}) scale(1 1.3) translate(${-x} ${-base})`;
+      }
+      const flame = <LittleFlame x={x} y={base} height={FIRE_FLAME * k} red knot={false} />;
+      parts.push({ key: `${key}-fire`, depth: q.depth - FLAIL_BALL * U * 1.5, node: lean ? <g key={`${key}-fire`} transform={lean}>{flame}</g> : <Fragment key={`${key}-fire`}>{flame}</Fragment> });
+    }
   };
 
   /** The black iron dome on the end of the handle from `butt` to `tip`, on a short sleeve of iron as wide as it running back down the handle (like a band, so the
@@ -246,24 +280,6 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     return plus(tip, axis, DOME_H * U);
   };
 
-  if (dead) {
-    // Fallen: the cloak lies in a heap on the floor, the hood on it, the flail dropped beside it.
-    const lump = (r: number, k: number, y: number): P3[] => Array.from({ length: 28 }, (_, i) => {
-      const a = (i / 28) * Math.PI * 2, rr = (r + 2.2 * Math.sin(3 * a + 1) + 1.2 * Math.sin(5 * a)) * U;
-      return [Math.cos(a) * rr * 1.15 * k, y, Math.sin(a) * rr * 0.9 * k];
-    });
-    const centre = see([0, 0, 0]);
-    parts.push({ key: "heap", depth: centre.depth + 1, node: <polygon key="heap" points={pts(lump(15, 1, 0.01 * U))} className="fig-cloak" /> });
-    parts.push({ key: "heap-fold", depth: centre.depth, node: <polygon key="heap-fold" points={pts(lump(9, 1, 0))} className="fig-cloak fig-cloak-shade" /> });
-    parts.push(ellipsoidPart(c, "hump", [0, 3.5 * U, 0], [1, 0, 0], [0, 0, 1], UP, 10 * U, 8 * U, 4.5 * U, "fig-cloak"));
-    parts.push({ key: "pool", depth: centre.depth + 0.5, node: <polygon key="pool" points={pts(lump(6, 1, 0.02 * U).map(p => [p[0] + 14 * U, p[1], p[2] + 9 * U] as P3))} className="fig-wax-puddle" /> });
-    ball("dead-hood", [7 * U, 5 * U, 4 * U], HOOD_R * 0.9, "fig-hood");
-    const deadButt: P3 = [-16 * U, 1.5 * U, -10 * U], deadTip: P3 = [-30 * U, 1.5 * U, -16 * U];
-    bones("dead-handle", [see(deadButt), see(deadTip)], "fig-flail-haft", 2.6);
-    dome("dead-dome", deadButt, deadTip);
-    waxBall("dead-head", [-33 * U, HEAD_REST_Y * U, -17 * U], false);
-    return <FlailFire.Provider value={false}><Figure3DSvg parts={parts} title={title} className={className} /></FlailFire.Provider>;
-  }
 
   /* ---------- The body under the robe ---------- */
   // (the robe is gone, to be modelled again in parts; this is the body it will go over: a woman's, two smooth eggs, no ribs drawn. The ribcage is an egg on the spine,
@@ -291,16 +307,18 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     const ring = eggRing(u, E.taper), ringW = ringAcross(E, u), A = axisAt(E, u);
     return [0, 1, 2].map(i => E.middle[i] + A.up[i] * A.halfH * u + E.side[i] * E.halfW * ringW * Math.cos(a) + A.fwd[i] * E.halfD * ring * Math.sin(a)) as unknown as P3;
   };
-  /** How much a point of an egg's surface faces the viewer (positive: toward them, 1 square on): from the surface's true slope, the cross of the two ways along it. The slope
-   *  matters: an egg that widens toward its bottom has a lower half that tilts up to a viewer above it, which a plain "outward from the axis" would count as turned away. */
-  const eggFacing = (E: Egg, u: number, a: number, look: P3): number => {
+  /** The way a point of an egg's surface faces (a unit vector out of it), from the surface's true slope, the cross of the two ways along it. The slope matters: an egg that widens
+   *  toward its bottom has a lower half that tilts up to a viewer above it, which a plain "outward from the axis" would count as turned away. */
+  const eggNormal = (E: Egg, u: number, a: number): P3 => {
     const e = 0.01, uu = Math.max(-1 + e, Math.min(1 - e, u));
     const du = minus(eggPoint(E, uu + e, a), eggPoint(E, uu - e, a)), da = minus(eggPoint(E, uu, a + e), eggPoint(E, uu, a - e));
     let nrm = unit(cross(du, da));
     const out = minus(eggPoint(E, uu, a), eggPoint({ ...E, halfW: 0, halfD: 0 }, uu, a));
     if (dot(nrm, out) < 0) nrm = [-nrm[0], -nrm[1], -nrm[2]];
-    return -dot(nrm, look);
+    return nrm;
   };
+  /** How much a point of an egg's surface faces the viewer (positive: toward them, 1 square on). */
+  const eggFacing = (E: Egg, u: number, a: number, look: P3): number => -dot(eggNormal(E, u, a), look);
   /** How far a point is outside an egg (above 0: outside, below: inside), roughly, in shares of its size. (Above its middle, a bent egg's upper half's axis.) */
   const outsideOf = (E0: Egg, p: P3): number => {
     const d = minus(p, E0.middle), E = E0.upper && dot(d, E0.upper.up) > 0 ? { ...E0, ...E0.upper } : E0, u = dot(d, E.up) / E.halfH;
@@ -309,28 +327,36 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     return Math.max(s * s + f * f - 1, u * u - 1);
   };
   /** Whether a point is in sight past an egg (above 0) or behind it (below): how far outside the egg the line from it toward the viewer stays, at its closest. */
-  const clearOf = (E: Egg, p: P3): number => {
-    const toViewer = look3At(p), reach = 2.5 * Math.max(E.halfH, E.halfW, E.halfD), STEPS = 24;
+  const clearOf = (E: Egg, p: P3, viewer?: P3): number => {
+    const toViewer = viewer ?? look3At(p), reach = 2.5 * Math.max(E.halfH, E.halfW, E.halfD), STEPS = 24;
     let least = Infinity;
     for (let s = 0; s <= STEPS; s++) least = Math.min(least, outsideOf(E, plus(p, toViewer, (-reach * s) / STEPS)));
     return least;
   };
-  /** An egg's outline on the screen (the hull of its surface's points, as a smooth curve). */
-  const eggOutline = (E: Egg) => {
-    const skin = Array.from({ length: 49 }, (_, n) => -1 + n / 24).flatMap(u => Array.from({ length: 64 }, (_, m) => {
-      const q = see(eggPoint(E, u, (m / 64) * Math.PI * 2));
-      return [X(q), Y(q)] as [number, number];
-    }));
-    return smooth(hull(skin));
+  /** An egg's outline on the screen (the hull of its surface's points, as a smooth curve). Its points are the same in every frame of a pose (kept); an egg is asked for
+   *  more than once a frame (the thigh's mask), so each is outlined once. */
+  const outlines = new Map<string, string>();
+  const eggOutline = (E: Egg, key: string) => {
+    let d = outlines.get(key);
+    if (d === undefined) {
+      const surface = geo.get(`skin:${key}`, () => Array.from({ length: 21 }, (_, n) => -Math.cos((Math.PI * n) / 20)).flatMap(u => Array.from({ length: 36 }, (_, m) => eggPoint(E, u, (m / 36) * Math.PI * 2))));
+      d = smooth(hull(surface.map(p => { const q = see(p); return [X(q), Y(q)] as [number, number]; })));
+      outlines.set(key, d);
+    }
+    return d;
   };
   const egg = (key: string, E: Egg, cls = "fig-ribcage", over = 0) => {
-    parts.push({ key, depth: see(E.middle).depth - over, node: <path key={key} d={eggOutline(E)} className={cls} /> });
+    parts.push({ key, depth: see(E.middle).depth - over, node: <path key={key} d={eggOutline(E, key)} className={cls} /> });
   };
   /** A plane cutting an egg (`cutOpening`): positive where a point of its surface is beyond it. */
-  const cutPlane = (E: Egg, at: { n: [number, number, number]; at: number }) => {
-    const n = unit([0, 1, 2].map(i => E.side[i] * at.n[0] + E.up[i] * at.n[1] + E.fwd[i] * at.n[2]) as unknown as P3);
-    let reach = 0;
-    for (let u = -1; u <= 1; u += 0.1) for (let k = 0; k < 24; k++) reach = Math.max(reach, dot(minus(eggPoint(E, u, (k / 24) * Math.PI * 2), E.middle), n));
+  const cutPlane = (E: Egg, at: { n: [number, number, number]; at: number }, key: string) => {
+    // (the plane and how far the egg reaches along it: the same every frame of a pose)
+    const { n, reach } = geo.get(`cut:${key}`, () => {
+      const n = unit([0, 1, 2].map(i => E.side[i] * at.n[0] + E.up[i] * at.n[1] + E.fwd[i] * at.n[2]) as unknown as P3);
+      let reach = 0;
+      for (let u = -1; u <= 1; u += 0.1) for (let k = 0; k < 24; k++) reach = Math.max(reach, dot(minus(eggPoint(E, u, (k / 24) * Math.PI * 2), E.middle), n));
+      return { n, reach };
+    });
     return (u: number, a: number) => (dot(minus(eggPoint(E, u, a), E.middle), n) - reach * at.at) / (reach || 1);
   };
   /** An opening cut in a robe egg by a plane, drawn as skin over it: everything of the egg's surface beyond the plane, which is square to `at.n` (given along the egg's side, up and
@@ -338,17 +364,33 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
    *  Its edge is traced as a contour through a fine grid of the egg's surface (marching squares, each crossing placed by interpolation, so it is a smooth line and not
    *  steps), the part beyond the plane and the part facing the viewer being two fields whose smaller is the opening. */
   const cutOpening = (E: Egg, key: string, at: { n: [number, number, number]; at: number }, depth: number, hiddenBy?: Egg) => {
-    const beyond = cutPlane(E, at), NU = 48, NA = 72, TAU = Math.PI * 2;
+    const beyond = cutPlane(E, at, key), NU = 48, NA = 72, TAU = Math.PI * 2;
     const look = look3At(E.middle);
     /** Positive where the surface is in the opening: beyond the plane, facing the viewer and (with `hiddenBy`) not behind that egg. */
     const field = (u: number, a: number) => {
       const f = Math.min(beyond(u, a), eggFacing(E, u, a, look));
-      return f <= 0 || !hiddenBy ? f : Math.min(f, clearOf(hiddenBy, eggPoint(E, u, a)));
+      return f <= 0 || !hiddenBy ? f : Math.min(f, clearOf(hiddenBy, eggPoint(E, u, a), look));
     };
     // (the rows stop just short of the egg's two ends: at an end every point round is the same point, and the field there would be noise)
     const U_END = 0.995, uOf = (i: number) => -U_END + (2 * U_END * i) / NU, aOf = (j: number) => (j / NA) * TAU;
+    // (each node of the grid: its point, which way it faces, how far beyond the plane it is. The same every frame of a pose, so kept: a frame only asks which face the viewer)
+    const nodes = geo.get(`open:${key}`, () => {
+      const out = new Float64Array((NU + 1) * NA * 7);
+      for (let i = 0; i <= NU; i++) for (let j = 0; j < NA; j++) {
+        const u = uOf(i), a = aOf(j), p = eggPoint(E, u, a), n = eggNormal(E, u, a);
+        out.set([p[0], p[1], p[2], n[0], n[1], n[2], beyond(u, a)], (i * NA + j) * 7);
+      }
+      return out;
+    });
     const f: number[] = [];
-    for (let i = 0; i <= NU; i++) for (let j = 0; j < NA; j++) f.push(field(uOf(i), aOf(j)));
+    for (let i = 0; i <= NU; i++) {
+      for (let j = 0; j < NA; j++) {
+        const o = (i * NA + j) * 7;
+        let v = Math.min(nodes[o + 6], -(nodes[o + 3] * look[0] + nodes[o + 4] * look[1] + nodes[o + 5] * look[2]));
+        if (v > 0 && hiddenBy) v = Math.min(v, clearOf(hiddenBy, [nodes[o], nodes[o + 1], nodes[o + 2]], look));
+        f.push(v);
+      }
+    }
     const fv = (i: number, j: number) => f[i * NA + (j % NA)];
     // Where the contour crosses each edge of the grid (an edge is named by its first corner and which way it runs), and which crossings a cell joins.
     const cross2 = new Map<string, P3>(), links = new Map<string, string[]>();
@@ -446,6 +488,15 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
       upTop = unit(mix(upTop, spineWay, align));
       fwdTop = unit(cross(unit(minus(sideL, upTop.map(v => v * dot(sideL, upTop)) as unknown as P3)), upTop));
     }
+    // (a pose may turn it about its own axis toward her right, `pelvisTurn`: the robe's bottom then does not follow a left leg reaching forward)
+    const turnTo = ((wr.pelvisTurn ?? 0) * Math.PI) / 180;
+    if (turnTo) {
+      const c = Math.cos(turnTo), s = Math.sin(turnTo), turned = (a: P3, b: P3): P3 => [a[0] * c + b[0] * s, a[1] * c + b[1] * s, a[2] * c + b[2] * s];
+      const side0 = sideL, fwd0b = fwdL;
+      fwdL = turned(fwd0b, side0);
+      sideL = turned(side0, [-fwd0b[0], -fwd0b[1], -fwd0b[2]]);
+      fwdTop = turned(fwdTop, side0);
+    }
     pelvisMiddle = middle;
     // (its section at the pelvis, a little under the middle, must reach out to the outer edge of each hip: the hips' half width and a leg's radius)
     const u0 = -PELVIS_MIDDLE / PELVIS_HEIGHT, at0 = Math.sqrt(1 - u0 * u0) * (1 - PELVIS_EGG_W * u0 * (1 - 0.3 * u0 * u0));
@@ -498,7 +549,7 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     });
     const circles = (rs: typeof rounds) => rs.flatMap(({ at, r: rr }) => {
       const q = see(at), r = rr * scaleAt(q);
-      return Array.from({ length: 36 }, (_, m) => [X(q) + r * Math.cos((m / 36) * Math.PI * 2), Y(q) + r * Math.sin((m / 36) * Math.PI * 2)] as [number, number]);
+      return Array.from({ length: 24 }, (_, m) => [X(q) + r * Math.cos((m / 24) * Math.PI * 2), Y(q) + r * Math.sin((m / 24) * Math.PI * 2)] as [number, number]);
     });
     const far = side === "R", depth = depthOf(seen[`hip${side}` as const], seen[`knee${side}` as const]);
     let thigh = <path d={smooth(hull(circles(rounds)))} />;
@@ -511,7 +562,7 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
         <g>
           <mask id={m} maskUnits="userSpaceOnUse" x={-1e4} y={-1e4} width={2e4} height={2e4}>
             <rect x={-1e4} y={-1e4} width={2e4} height={2e4} style={{ fill: "white", stroke: "none" }} />
-            <path d={eggOutline(pelvisEgg)} style={{ fill: "black", stroke: "none" }} />
+            <path d={eggOutline(pelvisEgg, "pelvis")} style={{ fill: "black", stroke: "none" }} />
             {shown.length > 0 && <path d={smooth(hull(circles(shown)))} style={{ fill: "white", stroke: "none" }} />}
           </mask>
           <g mask={`url(#${m})`}>{thigh}</g>
@@ -548,11 +599,14 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
   if (pelvisEgg) {
     const B: Egg = { ...pelvisEgg, halfW: pelvisEgg.halfW * BELT_OUT, halfD: pelvisEgg.halfD * BELT_OUT }, look = look3At(B.middle), SECT = 72;
     const quads: string[] = [];
-    for (let n = 0; n < SECT; n++) {
+    // (each strip's corners and which way it faces: the same every frame of a pose)
+    const strips = geo.get("belt", () => Array.from({ length: SECT }, (_, n) => {
       const a0 = (n / SECT) * Math.PI * 2, a1 = ((n + 1) / SECT) * Math.PI * 2;
-      if (eggFacing(B, BELT_AT, (a0 + a1) / 2, look) <= 0) continue;
-      const q = [eggPoint(B, BELT_AT - BELT_HALF, a0), eggPoint(B, BELT_AT - BELT_HALF, a1), eggPoint(B, BELT_AT + BELT_HALF, a1), eggPoint(B, BELT_AT + BELT_HALF, a0)];
-      quads.push(`M${pts(q).replace(/ /g, "L")}z`);
+      return { facing: eggNormal(B, BELT_AT, (a0 + a1) / 2), corners: [eggPoint(B, BELT_AT - BELT_HALF, a0), eggPoint(B, BELT_AT - BELT_HALF, a1), eggPoint(B, BELT_AT + BELT_HALF, a1), eggPoint(B, BELT_AT + BELT_HALF, a0)] };
+    }));
+    for (const { facing, corners } of strips) {
+      if (-dot(facing, look) <= 0) continue;
+      quads.push(`M${pts(corners).replace(/ /g, "L")}z`);
     }
     skirtOf = B;
     if (quads.length) parts.push({ key: "belt", depth: Math.min(Number.isFinite(robeDepth) ? robeDepth : Infinity, see(pelvisEgg.middle).depth, openDepth - 0.0002) - 0.0006, node: <path key="belt" d={quads.join("")} className="fig-belt" /> });
@@ -563,7 +617,7 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
   // and a far wall, with her legs sorted between them. It is open on her left, where the bottom egg's opening meets the belt's lower edge: the angles round the belt there at
   // which that opening's plane has cut the egg are left out, all the way down, so her left leg shows through.
   if (pelvisEgg && skirtOf) {
-    const B = skirtOf, beyond = cutPlane(pelvisEgg, PELVIS_CUT), uLow = BELT_AT - BELT_HALF;
+    const B = skirtOf, beyond = cutPlane(pelvisEgg, PELVIS_CUT, "pelvis-open"), uLow = BELT_AT - BELT_HALF;
     const TAU = Math.PI * 2, LOOK = 360, axisC = eggPoint({ ...B, halfW: 0, halfD: 0 }, uLow, 0), floorY = Math.min(j.footL[1], j.footR[1]), floorTop = floorY + 0.2 * U;
     // The skirt is a stack of cylinders, like the Hunter's coat: rings round her, each a level ellipse, and between each two the cloth runs straight. The belt's lower
     // edge is the first ring. The top part, stiff, runs from it down to a ring just below the bottom of the bottom egg, wide enough to take in all of the egg there is
@@ -572,6 +626,8 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     // shins. Each ring widens a little more than the last (the flare). At each joint the cloth bends round in a short curved strip (a few rings in between), not at a
     // sharp corner. The skirt is as long as it hangs standing straight, the hem a little above her feet; where that would go through the floor (a low stance) it
     // reaches the floor and the rest spreads out over it, in a ruffled ring.
+    // (all of what follows, down to the grid, is the skirt's shape in the body's own space: it depends on the pose alone, so it is worked out once for it, and simplified)
+    const skirt = geo.get("skirt", () => {
     const lift = unit(minus(j.waist, j.pelvis)), hipMid = mix(j.hipL, j.hipR, 0.5);
     const legLen = Math.hypot(...minus(j.kneeR, j.hipR)) + Math.hypot(...minus(j.footR, j.kneeR));
     const level = (v: P3): P3 => unit([v[0], 0, v[2]]);
@@ -607,13 +663,15 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     };
     const grown = (r: Ring, y: number, k: number): Ring => ({ ...r, y, m: r.m.map(v => v * k) as Ring["m"] });
     // (how long it hangs, and the heights of its rings: the seat's just below the egg, the knee's at her right knee, never below the hem)
-    const L = legLen + dot(minus(axisC, hipMid), lift) - SKIRT_HEM * U, natural = axisC[1] - L, yHem = Math.max(natural, floorTop), extra = Math.max(0, floorTop - natural);
+    const L = legLen + dot(minus(axisC, hipMid), lift) - SKIRT_HEM * U, natural = axisC[1] - L, floorHem = floorTop + (wr.skirtLift ?? 0) * U, yHem = Math.max(natural, floorHem), extra = Math.max(0, floorHem - natural);
     const eggUnder: P3[] = [];
     for (let i = 0; i <= 8; i++) for (let k = 0; k < 24; k++) eggUnder.push(eggPoint(B, -1 + ((uLow + 1) * i) / 8, (k / 24) * TAU));
     const ySeat = Math.max(yHem, Math.min(...eggUnder.map(p => p[1])) - 1 * U), yKnee = Math.max(yHem, Math.min(ySeat - 0.5 * U, j.kneeR[1]));
     const flare = (from: number, to: number) => 1 + (SKIRT_FLARE * (from - to)) / (L || 1);
     const rx = Math.abs(dot(minus(eggPoint(B, uLow, 0), axisC), hs)), rz = Math.abs(dot(minus(eggPoint(B, uLow, Math.PI / 2), axisC), hf));
-    const seat: Ring = { x: 0, z: 0, y: ySeat, m: [rx * flare(axisC[1], ySeat), 0, 0, rz * flare(axisC[1], ySeat)], wave: 0 };
+    // (her skirt hangs back from her motion forward, `skirtDrag`: the seat's ring a little, the knee's more, the hem's all the way; the cloth still goes round her legs, which push it out)
+    const SEAT_DRAG = 0.4, KNEE_DRAG = 0.75, back = (wr.skirtDrag ?? 0) * U, dragX = -back * hs[2], dragZ = -back * hf[2];
+    const seat: Ring = { x: SEAT_DRAG * dragX, z: SEAT_DRAG * dragZ, y: ySeat, m: [rx * flare(axisC[1], ySeat), 0, 0, rz * flare(axisC[1], ySeat)], wave: 0 };
     for (const p of eggUnder) takeIn(seat, p);
     // (and each thigh where it is as high as the seat's ring or higher, a knee raised to the front, so it does not come out through the top part. Her right leg
     // is under the skirt, and carries it wherever it goes; her left leg comes out through the opening, and only pushes the cloth where some of it is against
@@ -629,11 +687,13 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     /** Takes a leg's point (and its round, `pad`) into a ring: any of her right leg's, her left leg's only where some of its round is against the cloth (its middle,
      *  or either side of it, round the ring). */
     const push = (r: Ring, p: P3, pad: number, left: boolean) => {
+      if (left && wr.skirtFreeLeftLeg) return;
       if (left) {
         const dx = p[0] - axisC[0], dz = p[2] - axisC[2], l = Math.hypot(dx, dz) || 1, across: P3 = [-dz / l, 0, dx / l];
         if (![0, 1, -1].some(k => clothAt(r, plus(p, across, k * pad)))) return;
       }
-      takeIn(r, p, pad);
+      // (a smoother skirt takes the cloth out round her right leg a little further, so the bulge it makes is broad, not a point)
+      takeIn(r, p, pad + (wr.skirtSmooth && !left ? 1.5 * U : 0));
     };
     // (each thigh's fuller back too: its second run of rounds, `THIGH_BACK`)
     const thighAt = (hip: P3, kn: P3, t: number) => {
@@ -646,7 +706,7 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     // out from the belt over the lap and only then falls (the seat's ring hangs from the lap's edge). Lower down, the seat's ring takes the thighs in.
     // (only for a leg whose knee is raised that high: every thigh starts up there, at the hip, inside the egg)
     const high = (p: P3) => (axisC[1] - p[1]) / ((axisC[1] - ySeat) || 1e-6) < 0.5;
-    const thighs = LEGS.flatMap(([hip, kn, , left]) => Array.from({ length: 7 }, (_, i) => thighAt(hip, kn, i / 6).map(x => ({ ...x, left, raised: high(kn) }))).flat()).filter(x => x.p[1] >= ySeat);
+    const thighs = LEGS.filter(([, , , left]) => !(left && wr.skirtFreeLeftLeg)).flatMap(([hip, kn, , left]) => Array.from({ length: 7 }, (_, i) => thighAt(hip, kn, i / 6).map(x => ({ ...x, left, raised: high(kn) }))).flat()).filter(x => x.p[1] >= ySeat);
     const lapping = thighs.filter(x => x.raised && high(x.p));
     let lap: Ring | null = null;
     if (lapping.length) {
@@ -665,11 +725,24 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     }
     for (const { p, r, left, raised } of thighs) if (!lap || !raised || !high(p)) push(seat, p, (r + SKIRT_THICK) * U, left);
     const knee = grown(seat, yKnee, flare(ySeat, yKnee));
+    knee.x += (KNEE_DRAG - SEAT_DRAG) * dragX; knee.z += (KNEE_DRAG - SEAT_DRAG) * dragZ;
+    // (pulled back against gravity, `skirtLift`: what is longer than she is high, down to a hem that stays off the floor, runs backward instead, the knee's ring part of the way)
+    if (wr.skirtLift) { knee.x -= 0.4 * extra * hs[2]; knee.z -= 0.4 * extra * hf[2]; }
     for (const [hip, kn, , left] of LEGS) for (const t of [0.4, 0.7, 1]) for (const { p, r } of thighAt(hip, kn, t)) push(knee, p, (r + SKIRT_THICK) * U, left);
     const hemRing = grown(knee, yHem, flare(yKnee, yHem));
+    hemRing.x += (1 - KNEE_DRAG) * dragX; hemRing.z += (1 - KNEE_DRAG) * dragZ;
+    if (wr.skirtLift) { hemRing.x -= extra * hs[2]; hemRing.z -= extra * hf[2]; }
     for (const [, kn, ft, left] of LEGS) for (const t of [0, 1 / 3, 2 / 3, 1]) push(hemRing, mix(kn, ft, t), (LIMB / 2 + SKIRT_THICK) * U, left);
+    // (a smoother skirt: the knee's ring faired between the seat's and the hem's, and its bends rounder)
+    const join = wr.skirtSmooth ? 0.5 : SKIRT_JOIN;
+    if (wr.skirtSmooth) {
+      const above = { ...seat }, below = { ...hemRing };
+      knee.x = 0.5 * knee.x + 0.25 * (above.x + below.x);
+      knee.z = 0.5 * knee.z + 0.25 * (above.z + below.z);
+      knee.m = knee.m.map((v, i) => 0.5 * v + 0.25 * (above.m[i] + below.m[i])) as typeof knee.m;
+    }
     const rings: ((a: number) => P3)[] = [a => eggPoint(B, uLow, a), ...(lap ? [(a: number) => onRing(lap!, a)] : []), a => onRing(seat, a), a => onRing(knee, a)];
-    if (extra > 0) {
+    if (extra > 0 && !wr.skirtLift) {
       // (it meets the floor as wide as it hangs, then the rest of it spreads out over the floor)
       const size = Math.sqrt(Math.abs(hemRing.m[0] * hemRing.m[3] - hemRing.m[1] * hemRing.m[2])), spread = extra * CRUMPLE;
       const touch = grown(hemRing, floorTop + Math.min(0.5 * U, Math.max(0, yKnee - floorTop)), 1), wide = grown(hemRing, floorTop, (size + spread) / (size || 1));
@@ -681,7 +754,7 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     for (let k = 1; k < rings.length - 1; k++) {
       const [up, at, down] = [rings[k - 1], rings[k], rings[k + 1]];
       for (const t of [0, 0.5, 1]) levels.push(a => {
-        const c = at(a), p = mix(c, up(a), SKIRT_JOIN), q = mix(c, down(a), SKIRT_JOIN);
+        const c = at(a), p = mix(c, up(a), join), q = mix(c, down(a), join);
         return [0, 1, 2].map(i => (1 - t) * (1 - t) * p[i] + 2 * t * (1 - t) * c[i] + t * t * q[i]) as unknown as P3;
       });
     }
@@ -699,19 +772,68 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
       }
       if (open !== null && close !== null) { aFrom = close; aSpan = (((open - close) % TAU) + TAU) % TAU; }
     }
-    const whole = aSpan >= TAU - 1e-6, N = Math.max(8, Math.round((48 * aSpan) / TAU)), K = levels.length;
-    const uOf = (n: number) => (aSpan * n) / N, on = (k: number, u: number) => levels[k](aFrom + u);
-    const grid = levels.map((_, k) => Array.from({ length: N + 1 }, (_, n) => on(k, uOf(n))));
-    // Which side of the cloth the viewer sees, along each ring: its outside or its inside, from the cloth's own slant there (round the ring, and down the cloth)
-    const slant = (k: number, n: number): P3 => cross(minus(grid[Math.min(K - 1, k + 1)][n], grid[Math.max(0, k - 1)][n]), minus(grid[k][Math.min(N, n + 1)], grid[k][Math.max(0, n - 1)]));
+    // The rim of the opening in front of her drops almost straight down from the belt (`skirtRimDrop`), however the cloth beside it is dragged: each ring is brought back, toward
+    // the point straight under the belt's, as it nears that edge, and wholly there at the edge itself.
+    if (wr.skirtRimDrop && aSpan < TAU - 1e-6) {
+      const last = levels[levels.length - 1], front = last(aFrom)[2] >= last(aFrom + aSpan)[2] ? aFrom : aFrom + aSpan, top = levels[0](front), SPREAD = 0.45;
+      for (let k = 1; k < levels.length; k++) {
+        const level = levels[k];
+        levels[k] = (a: number): P3 => {
+          const p = level(a), near = Math.abs(((a - front + 3 * Math.PI) % TAU) - Math.PI), share = Math.max(0, 1 - near / SPREAD) ** 2;
+          return [p[0] + (top[0] - p[0]) * share, p[1], p[2] + (top[2] - p[2]) * share];
+        };
+      }
+    }
+    const whole = aSpan >= TAU - 1e-6;
+    // The grid at its finest first (rings by columns, a multiple of four columns so that they can be thinned), and how the cloth slants at each of its points.
+    const K0 = levels.length, N0 = Math.ceil(Math.max(8, Math.round((48 * aSpan) / TAU)) / 4) * 4;
+    const grid0 = levels.map(lv => Array.from({ length: N0 + 1 }, (_, n) => lv(aFrom + (aSpan * n) / N0)));
+    const slant0 = (k: number, n: number): P3 => cross(minus(grid0[Math.min(K0 - 1, k + 1)][n], grid0[Math.max(0, k - 1)][n]), minus(grid0[k][Math.min(N0, n + 1)], grid0[k][Math.max(0, n - 1)]));
     // (which way round that slant points out of the cloth, found once where the cloth is surely upright: the seat's ring, halfway round)
-    const mid = Math.round(N / 2), kUp = Math.min(K - 1, 2), sideways = minus(grid[kUp][mid], axisC), outward = dot(slant(kUp, mid), [sideways[0], 0, sideways[2]]) >= 0 ? 1 : -1;
-    const facing = grid.map((row, k) => {
+    const mid0 = Math.round(N0 / 2), kUp = Math.min(K0 - 1, 2), sideways = minus(grid0[kUp][mid0], axisC), outward = dot(slant0(kUp, mid0), [sideways[0], 0, sideways[2]]) >= 0 ? 1 : -1;
+    // Then simplified, where the cloth runs straight. A ring that lies on the straight run between the rings either side of it (every point of it, to within `SKIRT_TOL`) is
+    // not needed: that cloth is a plain cone there, and the rounding at a joint that is hardly a bend goes with it. The ring that departs least goes first, until each left bends.
+    const tol = SKIRT_TOL * U;
+    const strays = (above: number, k: number, below: number) => {
+      let worst = 0;
+      for (let n = 0; n <= N0; n++) {
+        const p = grid0[k][n], a = grid0[above][n], b = grid0[below][n], la = Math.hypot(...minus(p, a)), lb = Math.hypot(...minus(b, p));
+        worst = Math.max(worst, Math.hypot(...minus(p, mix(a, b, la / (la + lb || 1)))));
+      }
+      return worst;
+    };
+    const rows = Array.from({ length: K0 }, (_, k) => k);
+    for (;;) {
+      let drop = -1, least = tol;
+      for (let m = 1; m < rows.length - 1; m++) { const d = strays(rows[m - 1], rows[m], rows[m + 1]); if (d < least) { drop = m; least = d; } }
+      if (drop < 0) break;
+      rows.splice(drop, 1);
+    }
+    // And every other column (or three in four), when the straight edges between those left stay as close to the round of every ring that is left.
+    const thinBy = (f: number) => N0 % f === 0 && N0 / f >= 8 && rows.every(k => {
+      for (let n = 0; n < N0; n++) {
+        const c0 = Math.floor(n / f) * f;
+        if (Math.hypot(...minus(grid0[k][n], mix(grid0[k][c0], grid0[k][c0 + f], (n - c0) / f))) > tol) return false;
+      }
+      return true;
+    });
+    const thin = [4, 2].find(thinBy) ?? 1, N = N0 / thin;
+    const grid = rows.map(k => Array.from({ length: N + 1 }, (_, n) => grid0[k][n * thin]));
+    const slants = rows.map(k => Array.from({ length: N + 1 }, (_, n) => slant0(k, n * thin)));
+    // (a ring's middle, what the viewer's way is taken at)
+    const centres = grid.map(row => mix(row[0], row[Math.round(N / 2)], 0.5));
+    return { levels: rows.map(k => levels[k]), aFrom, aSpan, whole, N, K: rows.length, grid, slants, centres, outward };
+    });
+    const { levels, aFrom, aSpan, whole, N, K, grid, slants, centres, outward } = skirt;
+    const uOf = (n: number) => (aSpan * n) / N, on = (k: number, u: number) => levels[k](aFrom + u);
+    // Which side of the cloth the viewer sees, along each ring: its outside or its inside, from the cloth's own slant there (round the ring, and down the cloth), the viewer's way
+    // taken once for each ring.
+    const looks = centres.map(c => look3At(c));
+    const facing = slants.map((row, k) => {
       let last = 1;
-      return row.map((p, n) => {
-        const s = slant(k, n);
+      return row.map(s => {
         if (Math.hypot(...s) < 1e-12) return last;
-        return (last = -dot(s, look3At(p)) * outward);
+        return (last = -dot(s, looks[k]) * outward);
       });
     });
     /** The stretches of a ring the viewer sees the outside of (`near`) and the inside of, as stretches of the way round from where the cloth starts. */
@@ -773,6 +895,8 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     const inside = parts.filter(x => ["pelvis", "pelvis-open", "thighR", "legR"].includes(x.key)).map(x => x.depth);
     // (the far wall, the inside of the skirt, is under everything already drawn: the legs, the eggs, the belt, the robe's top, the opening's skin)
     const nearDepth = Math.min(...inside) - 0.001, farDepth = Math.max(...parts.map(x => x.depth)) + 0.001;
+    // (a left leg the cloth ignores, `skirtFreeLeftLeg`, is out in front of the skirt's outer face, which lies behind it: it is drawn over it)
+    if (wr.skirtFreeLeftLeg) for (const x of parts) if (x.key === "thighL" || x.key === "legL") x.depth = Math.min(x.depth, nearDepth - 0.0005);
     // Her right thigh is always under the robe: what of it the straight run of the cloth would leave outside (a knee raised to the front, the thigh level at the
     // height of the belt) is cut away, so only what is within the skirt's outline shows (through the opening, from within); above that the bottom egg covers it.
     const thighR = parts.find(x => x.key === "thighR");
@@ -791,24 +915,28 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     // The opening's edge on the bottom egg, from the top of the belt up, bordered with wax too: where the plane meets the egg, traced row by row up the egg (one crossing
     // where the opening begins round the row, one where it ends), the two lines joined over its top, and only the stretches that face the viewer drawn, over the opening's skin.
     {
-      const uTop = BELT_AT + BELT_HALF, ROWS = 60, lookP = look3At(pelvisEgg.middle), sideA: [number, number][] = [], sideB: [number, number][] = [];
-      for (let r = 0; r <= ROWS; r++) {
-        const u = uTop + ((0.999 - uTop) * r) / ROWS;
-        let ia: number | null = null, ib: number | null = null;
-        for (let k = 0; k < LOOK; k++) {
-          const x0 = (k / LOOK) * TAU, x1 = ((k + 1) / LOOK) * TAU, f0 = beyond(u, x0), f1 = beyond(u, x1);
-          if ((f0 > 0) === (f1 > 0)) continue;
-          const ac = x0 + (x1 - x0) * (f0 / (f0 - f1));
-          if (f1 > 0) ia ??= ac; else ib ??= ac;
+      const lookP = look3At(pelvisEgg.middle);
+      // (the line itself, with each point's place and which way it faces, is the same every frame of a pose: kept)
+      const edge = geo.get("pelvis-open-edge", () => {
+        const uTop = BELT_AT + BELT_HALF, ROWS = 60, sideA: [number, number][] = [], sideB: [number, number][] = [];
+        for (let r = 0; r <= ROWS; r++) {
+          const u = uTop + ((0.999 - uTop) * r) / ROWS;
+          let ia: number | null = null, ib: number | null = null;
+          for (let k = 0; k < LOOK; k++) {
+            const x0 = (k / LOOK) * TAU, x1 = ((k + 1) / LOOK) * TAU, f0 = beyond(u, x0), f1 = beyond(u, x1);
+            if ((f0 > 0) === (f1 > 0)) continue;
+            const ac = x0 + (x1 - x0) * (f0 / (f0 - f1));
+            if (f1 > 0) ia ??= ac; else ib ??= ac;
+          }
+          if (ia === null || ib === null) { if (sideA.length) break; continue; }
+          sideA.push([u, ia]); sideB.push([u, ib]);
         }
-        if (ia === null || ib === null) { if (sideA.length) break; continue; }
-        sideA.push([u, ia]); sideB.push([u, ib]);
-      }
-      const line = [...sideA, ...sideB.reverse()], runs: string[] = [];
+        return [...sideA, ...sideB.reverse()].map(([u, a]) => ({ p: eggPoint(pelvisEgg, u, a), n: eggNormal(pelvisEgg, u, a) }));
+      });
+      const runs: string[] = [];
       let run: string[] = [];
-      for (const [u, a] of line) {
-        const p = eggPoint(pelvisEgg, u, a);
-        if (eggFacing(pelvisEgg, u, a, lookP) > 0 && (!robeEgg || clearOf(robeEgg, p) > 0)) { const q = see(p); run.push(`${X(q)},${Y(q)}`); }
+      for (const { p, n } of edge) {
+        if (-dot(n, lookP) > 0 && (!robeEgg || clearOf(robeEgg, p, lookP) > 0)) { const q = see(p); run.push(`${X(q)},${Y(q)}`); }
         else { if (run.length > 1) runs.push(`M${run.join("L")}`); run = []; }
       }
       if (run.length > 1) runs.push(`M${run.join("L")}`);
@@ -912,7 +1040,9 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
       bones(`${key}-sealed`, [see(p0), see(into)], "fig-flail-wax", LINK_WIDE + 0.8);
     }
   };
-  const head = (key: string, p: P3) => waxBall(key, p, !!flailFire);
+  const head = (key: string, p: P3, motion?: P3) => waxBall(key, p, !!flailFire, motion);
+  /** The way the flail's head is travelling in this pose, if it is swung in it (a blow, a slam, a swing): its flame trails behind. */
+  let ballMotion: P3 | undefined;
   const F: P3 = [Math.sin(wr.turn), 0, Math.cos(wr.turn)], R: P3 = [Math.cos(wr.turn), 0, -Math.sin(wr.turn)];
   // The trail of a swing just made (`Stance.arch`), as every trail is drawn (`trailPart`): round her flail shoulder in a plane like the one the flail whirls
   // in (upright, along the way her chest faces), through the flail's head, centred level with her flail shoulder; from low in front of her, up, and curving
@@ -924,6 +1054,8 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
   };
   if (isWardenPose(pose) && WARDEN_STANCE[pose].arch) {
     const { centre, radius, end } = archOf(wr);
+    // (it goes round the circle the way the trail does: up and back over)
+    ballMotion = unit(plus([F[0] * -Math.sin(end), F[1] * -Math.sin(end), F[2] * -Math.sin(end)], UP, Math.cos(end)));
     parts.push(trailPart(c, "R-arch", { centre, e1: F, e2: UP, radius, a0: end - (160 * Math.PI) / 180, a1: end, thick: 2 * FLAIL_BALL * U }));
   }
   // The second (`Stance.arch2`): that pose's arch carried on, round the same circle the same way, from where it had the flail's head (over her head) until
@@ -953,6 +1085,7 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     const out: P3 = blow.reaching ? [-Math.sin(wr.yaw), 0, Math.cos(wr.yaw)] : F, mid = plus(mix(blow.from, fl.ball, 0.5), out, blow.bulge);
     // (its thick end centred on the head: the circle widened by half its thickness, so the head is in the middle of the band, not on its outer edge)
     const round = swingArc(blow.from, fl.ball, 2 * FLAIL_BALL * U * (blow.thick ?? 1), mid).circle;
+    ballMotion = unit(minus(fl.ball, mid));
     parts.push(trailPart(c, "R-blow", { ...round, radius: round.radius + round.thick / 2 }));
   }
   // The trail of the flail brought down from a whirl overhead (`Stance.slamFrom`): from that pose's ring (its tip, on the level, out as far as the chain goes)
@@ -961,8 +1094,12 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
   if (slamFrom) {
     const over = flail3(wardenRig(slamFrom)).tip, flatWay = unit([fl.ball[0] - over[0], 0, fl.ball[2] - over[2]]);
     const start = plus(over, flatWay, -CHAIN_R * U), round = swingArc(start, fl.ball, 2 * FLAIL_BALL * U).circle;
+    ballMotion = unit(plus(flatWay, UP, -1.2));
     parts.push(trailPart(c, "R-slam", { ...round, radius: round.radius + round.thick / 2 }));
   }
+  // (a pose that swings the flail without a trail to say how: `Stance.flailMotion`)
+  const stanceMotion = isWardenPose(pose) ? WARDEN_STANCE[pose].flailMotion : undefined;
+  if (stanceMotion && !ballMotion) ballMotion = unit(stanceMotion);
   // Clutch Arm's rewaxing, drawn on the pose he moves on to while it fades (`rewaxTrail` on the pose moved on from, as the sprite has it): a wide sweep of wax
   // from where the flail's head was, held just under his wax fist there, through his wax hand now, to where the head hangs now; as every trail is drawn.
   if (lingerFrom && WARDEN_POSES[lingerFrom]?.rewaxTrail && isWardenPose(lingerFrom)) {
@@ -985,12 +1122,17 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     parts.push({ key: "R-spin", depth: see(fl.tip).depth - 0.002, node: <polygon key="R-spin" points={pts(ring)} className="fig-whirl-disc" /> });
     parts.push({ key: "R-spin-path", depth: see(fl.tip).depth - 0.0021, node: <polygon key="R-spin-path" points={pts(ring)} className="fig-whirl-path" style={{ strokeWidth: 2 * FLAIL_BALL * scaleAt(see(fl.tip)) }} /> });
     // And three whole flails, chain and head, going round it (`SpinningFlails`): each drawn once here at every step round the ring, far parts under near ones.
+    // (each drawn only when it is shown, and once: only three of the twenty-four are on the screen at a time)
     const frames = Array.from({ length: SPIN_STEPS }, (_, n) => {
-      const end = round((n / SPIN_STEPS) * Math.PI * 2), from = parts.length;
-      chain(`R-whirl${n}`, knob, end, 0, true);
-      head(`R-whirl${n}-head`, end);
-      const mine = parts.splice(from).sort((a, b) => b.depth - a.depth);
-      return <g key={n}>{mine.map(p => p.node)}</g>;
+      let drawn: ReactNode;
+      return () => drawn ??= (() => {
+        const end = round((n / SPIN_STEPS) * Math.PI * 2), from = parts.length;
+        chain(`R-whirl${n}`, knob, end, 0, true);
+        // (going round the ring the way the whirl turns: its flame trails behind along it)
+        head(`R-whirl${n}-head`, end, unit(minus(round(((n + 0.5) / SPIN_STEPS) * Math.PI * 2), round(((n - 0.5) / SPIN_STEPS) * Math.PI * 2))));
+        const mine = parts.splice(from).sort((a, b) => b.depth - a.depth);
+        return <g key={n}>{mine.map(p => p.node)}</g>;
+      })();
     });
     parts.push({ key: "R-whirl", depth: see(fl.tip).depth - 0.0025, node: <SpinningFlails key="R-whirl" frames={frames} /> });
   } else if (fl.grip) {
@@ -999,20 +1141,20 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     const gap = Math.hypot(...minus(fl.grip, knob)) / U, slack = Math.max(0, FLAIL_CHAIN - Math.hypot(...minus(fl.ball, fl.grip)) / U), sag = !wr.flailDirs?.taut && gap < slack ? Math.sqrt((3 * gap * (slack - gap)) / 8) : 0;
     chain("R-chain", knob, fl.grip, sag);
     chain("R-chain-low", fl.grip, fl.ball, 0, true);
-    head("R-head", fl.ball);
+    head("R-head", fl.ball, ballMotion);
   } else if (flat.chainInHand) {
     chain("R-chain", knob, j.handL, flat.chainTaut ? 0 : 4);
     // (and from his other hand, the rest of the chain down to the head hanging from it)
     chain("R-chain-low", j.handL, fl.ball, 0, true);
-    head("R-head", fl.ball);
+    head("R-head", fl.ball, ballMotion);
   } else if (flat.headInHand) {
     chain("R-chain", knob, fl.ball, 0, true);
-    head("R-head", fl.ball);
+    head("R-head", fl.ball, ballMotion);
   } else if (!flat.spinTrail || wr.flailDirs) {
     // (just done spinning, no head hangs yet: it is still whirling; unless the 3D pose holds it its own way, `Stance.flail`, and shows it where it is)
     // (bowed as the pose says, `Stance.chainBow`: up, for a flail whipped up)
     chain("R-chain", knob, fl.ball, (isWardenPose(pose) ? WARDEN_STANCE[pose].chainBow : undefined) ?? (fl.resting ? -1 : 3), true);
-    head("R-head", fl.ball);
+    head("R-head", fl.ball, ballMotion);
   }
 
   /* ---------- The head: his hood, the dark of its opening, and his beak ---------- */
@@ -1271,11 +1413,13 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     }
   }
 
-  return <FlailFire.Provider value={!!flailFire}><Figure3DSvg parts={parts} title={title} className={className} /></FlailFire.Provider>;
+  // (her right leg is not drawn in a pose whose skirt covers it all: `hideRightLeg`)
+  const shown = wr.hideRightLeg ? parts.filter(x => x.key !== "thighR" && x.key !== "legR") : parts;
+  return <FlailFire.Provider value={!!flailFire}><Figure3DSvg parts={shown} title={title} className={className} /></FlailFire.Provider>;
 }
 
-/** How high the dropped flail's head lies (figure units), and the radius of the flail's whirl: the chain's length. */
-const HEAD_REST_Y = 6, CHAIN_R = 34;
+/** The radius of the flail's whirl: the chain's length (figure units). */
+const CHAIN_R = 34;
 
 /** The Warden, worked out again only when something it is drawn from has changed (`sameDrawing`). */
 /** How many steps round its ring a whirling flail is drawn at, and how long it takes to go round once (ms). */
@@ -1291,7 +1435,7 @@ const SPIN_SHOW_MS = 300, SPIN_FADED_MS = 450, SPIN_PHASES = [0, 0.37, 0.71];
  * each fading up to solid and back down to half seen, and staying half seen a while, out of step with the others. It moves on its own, every frame, without the rest of the figure being drawn
  * again: `frames` is the flail drawn once at each step round the ring.
  */
-function SpinningFlails({ frames }: { frames: ReactNode[] }) {
+function SpinningFlails({ frames }: { frames: (() => ReactNode)[] }) {
   const [now, setNow] = useState(() => performance.now());
   useEffect(() => {
     let raf = 0;
@@ -1305,7 +1449,7 @@ function SpinningFlails({ frames }: { frames: ReactNode[] }) {
         const round = (now / SPIN_TURN_MS + i / 3) % 1, step = Math.floor(round * frames.length) % frames.length;
         const cycle = SPIN_SHOW_MS + SPIN_FADED_MS, at = ((now / cycle + phase) % 1) * cycle;
         const fade = at >= SPIN_SHOW_MS ? 0.5 : 0.5 + 0.5 * Math.sin((Math.PI * at) / SPIN_SHOW_MS) ** 2;
-        return <g key={i} opacity={fade}>{frames[step]}</g>;
+        return <g key={i} opacity={fade}>{frames[step]()}</g>;
       })}
     </g>
   );

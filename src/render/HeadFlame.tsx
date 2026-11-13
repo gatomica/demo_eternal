@@ -19,6 +19,24 @@ const LEAN = 7, MAX_LEAN = 50;
 /** The spring that swings it back upright: its stiffness and its damping (a little under critical, so it sways once past upright). */
 const STIFF = 170, DAMP = 15;
 
+/** Every flame's frame: one that measures the page and gives back what it then changes. */
+type FlameFrame = (now: number) => (() => void) | undefined;
+const flames = new Set<FlameFrame>();
+let flameRaf = 0;
+/** One loop for all the flames: every flame measures the page first, and only then does any of them change it (a change between two measurements makes the browser lay the page out again). */
+function flameTick(now: number) {
+  const writes: (() => void)[] = [];
+  for (const f of flames) { const w = f(now); if (w) writes.push(w); }
+  for (const w of writes) w();
+  flameRaf = flames.size ? requestAnimationFrame(flameTick) : 0;
+}
+/** Runs `frame` every animation frame, with the other flames. Returns what stops it. */
+function flameLoop(frame: FlameFrame): () => void {
+  flames.add(frame);
+  if (!flameRaf) flameRaf = requestAnimationFrame(flameTick);
+  return () => { flames.delete(frame); };
+}
+
 /**
  * The flame, its base on `at` (screen pixels in the scene: where it is this render, until its marker is found), `sz` across. `blaze`: bigger
  * and brighter, red strings looping out of it and back in.
@@ -32,25 +50,28 @@ export function HeadFlame({ anchor, at, sz, blaze, light, zIndex }: { anchor: st
   });
   useEffect(() => {
     const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    let raf = 0, last = performance.now(), prev: Pt | undefined;
+    let last = performance.now(), prev: Pt | undefined, mark: Element | null = null;
     let vx = 0, vy = 0, lean = 0, swing = 0, stretch = 1;
-    const frame = (now: number) => {
+    // Each frame is two halves (`flameLoop`): what it measures on the page, then what it changes, so that all the flames measure before any changes the page.
+    return flameLoop((now) => {
       const el = wrap.current, scene = el?.offsetParent as HTMLElement | null;
-      const mark = scene?.querySelector(`[data-flame-anchor="${CSS.escape(anchor)}"]`);
+      // (Its marker is found again only when the figure has been drawn afresh, and the old one is gone.)
+      if (scene && (!mark || !mark.isConnected)) mark = scene.querySelector(`[data-flame-anchor="${CSS.escape(anchor)}"]`);
       const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
       last = now;
-      if (el && scene) {
-        let x = given.current.at[0], y = given.current.at[1];
-        // Its motion is measured against its own figure's place (the slot), so the camera moving round the fight does not sway it.
-        let rel: Pt | undefined;
-        if (mark) {
-          const sr = scene.getBoundingClientRect(), mr = mark.getBoundingClientRect();
-          const kx = scene.offsetWidth ? sr.width / scene.offsetWidth : 1, ky = scene.offsetHeight ? sr.height / scene.offsetHeight : 1;
-          x = (mr.left - sr.left) / kx;
-          y = (mr.top - sr.top) / ky;
-          const slot = mark.closest(".figure-slot")?.getBoundingClientRect();
-          rel = slot ? [(mr.left - slot.left) / kx, (mr.top - slot.top) / ky] : [x, y];
-        }
+      if (!el || !scene) return undefined;
+      let x = given.current.at[0], y = given.current.at[1];
+      // Its motion is measured against its own figure's place (the slot), so the camera moving round the fight does not sway it.
+      let rel: Pt | undefined;
+      if (mark) {
+        const sr = scene.getBoundingClientRect(), mr = mark.getBoundingClientRect();
+        const kx = scene.offsetWidth ? sr.width / scene.offsetWidth : 1, ky = scene.offsetHeight ? sr.height / scene.offsetHeight : 1;
+        x = (mr.left - sr.left) / kx;
+        y = (mr.top - sr.top) / ky;
+        const slot = mark.closest(".figure-slot")?.getBoundingClientRect();
+        rel = slot ? [(mr.left - slot.left) / kx, (mr.top - slot.top) / ky] : [x, y];
+      }
+      return () => {
         el.style.transform = `translate(${x}px, ${y}px)`;
         // (Its light is placed by its corner, not moved by a transform: its own pulse is a transform, and it has to blend with the scene behind it.)
         if (glow.current) { glow.current.style.left = `${x}px`; glow.current.style.top = `${y}px`; }
@@ -71,11 +92,8 @@ export function HeadFlame({ anchor, at, sz, blaze, light, zIndex }: { anchor: st
           stretch += (tall - stretch) * Math.min(1, dt * 10);
           flame.current?.setAttribute("transform", `rotate(${lean.toFixed(2)}) scale(${(1 / Math.sqrt(stretch)).toFixed(3)} ${stretch.toFixed(3)})`);
         }
-      }
-      raf = requestAnimationFrame(frame);
-    };
-    raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
+      };
+    });
   }, [anchor]);
   return (
     <>

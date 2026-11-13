@@ -15,7 +15,7 @@ export function describeAction(kindName: KindId, line: Line, stance: string | un
   return {
     type: a.type, dir, forced: false, stance, action: a.name,
     pose: stance ? kind.stancePoses[stance] ?? poses?.act : poses?.act,
-    actPose: poses?.act, strikePose: poses?.strike, projectile: poses?.projectile, restPose: poses?.rest, windupPose: (stance && poses?.windupFrom?.[stance]) || poses?.windup, guardPose: poses?.guard, prepPose: poses?.prep, landPose: poses?.land, dodgeDash: poses?.dash, leap: poses?.leap, landSlide: poses?.slide,
+    actPose: poses?.act, strikePose: poses?.strike, projectile: poses?.projectile, restPose: poses?.rest, windupPose: (stance && poses?.windupFrom?.[stance]) || poses?.windup, guardPose: poses?.guard, afterPose: poses?.after, prepPose: poses?.prep, landPose: poses?.land, dodgeDash: poses?.dash, leap: poses?.leap, landSlide: poses?.slide,
     weight: a.weight, damage: a.damage, cost: a.cost, ranged: a.ranged || undefined, tags: a.tags.length ? a.tags : undefined,
   };
 }
@@ -27,6 +27,8 @@ export function describeAction(kindName: KindId, line: Line, stance: string | un
 function chooseIntent(e: Enemy, state: CombatState, rng: Rng): Intent {
   const kind = ENEMY_KINDS[e.kind];
   const lineDir = e.line === "back" ? "advance" : "retreat";
+  // (Staggered, or reviving, it forgets the stances it took.)
+  if (e.reviving || e.staggered) e.stanceHistory = [];
   if (e.reviving) return { type: "rest", dir: lineDir, forced: true };
   if (e.staggered) return { type: "rest", dir: lineDir, forced: true };
 
@@ -44,8 +46,9 @@ function chooseIntent(e: Enemy, state: CombatState, rng: Rng): Intent {
   // Something it must pick on from (a boss's second phase) overrides what it just did.
   const memory = e.nextFrom ? { action: e.nextFrom, outcome: "done" as const } : e.last ? { action: e.last.name, outcome: e.last.outcome, blocked: e.last.blocked, avoid: e.last.flinchedFrom } : null;
   e.nextFrom = undefined;
-  const picked = choose(kind.pattern, memory, available, rng, needs => needsHold(kind, e, state, needs));
+  const picked = choose(kind.pattern, memory, available, rng, needs => needsHold(kind, e, state, needs), e.stanceHistory ?? []);
   if (!picked) return { type: "rest", dir: lineDir, forced: false };
+  e.stanceHistory = [...(e.stanceHistory ?? []), picked.stance.name].slice(-16);
   const intent = describe(picked.stance.name, picked.action);
   // Some actions are aimed at an ally: a Maneuver moves toward them, which pushes you away; an attack strikes them instead of you.
   const target = kind.aim?.(e, state, picked.action.name, rng);
