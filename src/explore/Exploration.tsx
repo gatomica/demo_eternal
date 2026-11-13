@@ -122,6 +122,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   const [entering, setEntering] = useState(false);
   /** The demo is over: the "Thanks for playing" card is up. */
   const [thanks, setThanks] = useState(false);
+  const thanksRef = useRef(false);
   // The map being got ready before the first frame (how far along it is, 0 to 1), or null once it is.
   const [preparing, setPreparing] = useState<number | null>(0);
   const leaving = useRef(false);
@@ -408,6 +409,11 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // The "Thanks for playing" card: E (or Enter, or Space) goes back to the menu.
+    if (thanksRef.current) {
+      if (!e.repeat && ["e", "enter", " "].includes(e.key.toLowerCase())) { e.preventDefault(); menuSound("select"); latest.current.onExit({ ...snapshot.current(), at: DEMO_BEFORE }); }
+      return;
+    }
     if (doomedRef.current) {
       if (!e.repeat && ["e", "enter", " "].includes(e.key.toLowerCase())) { e.preventDefault(); menuSound("select"); reawakenRef.current(); }
       return;
@@ -647,6 +653,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       if (!leaving.current && Math.abs(me.alt - 13) < 0.4 && doorAt(13, Math.floor(me.x), Math.floor(me.y))) {
         leaving.current = true;
         held.current = [];
+        thanksRef.current = true;
         setThanks(true);
       }
 
@@ -1220,7 +1227,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         <div className="result" role="dialog" aria-label="Thanks for playing">
           <div className="result-card">
             <h2>Thanks for playing</h2>
-            <div className="setup-buttons"><button className="commit" autoFocus onClick={() => latest.current.onExit({ ...snapshot.current(), at: DEMO_BEFORE })}>Main menu</button></div>
+            <div className="setup-buttons"><button className="commit" onClick={() => latest.current.onExit({ ...snapshot.current(), at: DEMO_BEFORE })}>Main menu <kbd>E</kbd></button></div>
           </div>
         </div>
       )}
