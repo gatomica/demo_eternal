@@ -10,11 +10,26 @@
  * the one selected. Pressing its direction again opens it up: its three parts take three quarters of the ring
  * (270°), and the other actions squeeze into the one quarter opposite, names hidden, only their lines left.
  * Every line slides along the ring into place (`useOpening`), and the two short ones grow to full length.
+ *
+ * In the first fights (`hints`, see `explore/hints.ts`) the keys fade in and out where they act: on the mark, a direction's
+ * key on each quarter where it moves the mark, and Yes in the middle; on the wheel, each action's key on the inner side
+ * of its piece, No (Cancel) in the middle, and Yes beside the action you are on. A key for something never tried flashes faster.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { pointedLine, polar, R_IN, R_OUT, RingFade, RingLines } from "../render/ring";
 import type { SubSlot, Wheel, WheelOption } from "./selection";
 import type { Dir } from "../ui/input";
+import { Kbd } from "../ui/Kbd";
+
+/** A key hint: shown, and whether it flashes faster (it leads to something never tried). */
+export interface KeyHint { fast: boolean }
+
+/** The key hints on the ring in the first fights: by direction (the mark's moves, or the wheel's actions), by part of an opened-up action, and Yes. */
+export interface WheelHints {
+  dirs: Partial<Record<Dir, KeyHint>>;
+  parts?: Partial<Record<SubSlot, KeyHint>>;
+  select?: KeyHint;
+}
 
 /** A figure's box on screen, relative to the HUD, plus the HUD's size for keeping the wheel on-screen. */
 export interface Anchor {
@@ -40,6 +55,19 @@ const OPEN_MS = 220;
 const CENTER: Record<Dir, number> = { up: -90, right: 0, down: 90, left: 180 };
 
 const DIRS: Dir[] = ["up", "right", "down", "left"];
+
+/** How far out from the small mark its keys sit, and how far in from the wheel's inner edge (px). */
+const HINT_OUT = 14;
+const HINT_IN = 18;
+
+/** One key hint, centred on a point of the ring's box (px from its middle). */
+function HintKey({ k, at, hint, children }: { k: "up" | "left" | "down" | "right" | "yes" | "no"; at: [number, number]; hint: KeyHint; children?: ReactNode }) {
+  return (
+    <span className={`key-hint ${hint.fast ? "is-fast" : ""}`} style={{ left: `calc(50% + ${at[0]}px)`, top: `calc(50% + ${at[1]}px)` }}>
+      <Kbd k={k} />{children}
+    </span>
+  );
+}
 
 /** The slots of an opened-up action, in the order they lie round the ring (clockwise). */
 const SLOTS: SubSlot[] = ["left", "middle", "right"];
@@ -98,7 +126,7 @@ function useOpening(opened: Dir | null): { dir: Dir | null; k: number } {
  * The options as the pieces of a ring around whoever you selected. WASD highlights, E commits, Q
  * closes. With a mouse, clicking a piece commits it straight away.
  */
-export function ActionWheel({ wheel, open, highlight, opened, sub, center, anchor, onHighlight, onCommit }: {
+export function ActionWheel({ wheel, open, highlight, opened, sub, center, anchor, hints, onHighlight, onCommit }: {
   wheel: Wheel;
   /** Focused: the ring has grown into the wheel. Otherwise it is the small mark over the target. */
   open: boolean;
@@ -111,6 +139,8 @@ export function ActionWheel({ wheel, open, highlight, opened, sub, center, ancho
   anchor: Anchor | null;
   /** (Kept for callers: the ring looks the same around you as around an enemy.) */
   aroundPlayer?: boolean;
+  /** The keys to show on it, in the first fights. */
+  hints?: WheelHints;
   onHighlight: (d: Dir) => void;
   onCommit: (o: WheelOption) => void;
 }) {
@@ -165,6 +195,61 @@ export function ActionWheel({ wheel, open, highlight, opened, sub, center, ancho
   if (subOwner) {
     const kk = subOwner === od ? k : 0, c = CENTER[subOwner], inset = (R_OUT - R_IN) * 0.22 * (1 - kk);
     for (const s of [-1, 1]) subLines.push({ deg: c + s * lerp(15, 45, kk), from: R_IN + inset, to: R_OUT - inset });
+  }
+
+  // The key hints (px from the box's middle). The ring's units to px: its view box is 2 * (R_OUT + 2) across.
+  const unit = size / (2 * R_OUT + 4);
+  const keyHints: ReactNode[] = [];
+  if (hints) {
+    if (!open) {
+      // The mark: each direction that moves it, on its quarter, just outside; Yes in the middle.
+      for (const dir of DIRS) {
+        const h = hints.dirs[dir];
+        if (h) keyHints.push(<HintKey key={dir} k={dir} at={polar(size / 2 + HINT_OUT, CENTER[dir])} hint={h} />);
+      }
+      if (hints.select) keyHints.push(<HintKey key="yes" k="yes" at={[0, 0]} hint={hints.select} />);
+    } else {
+      // The wheel: No (Cancel) in the middle.
+      keyHints.push(<HintKey key="no" k="no" at={[0, 0]} hint={{ fast: false }}><span className="key-hint-note">(Cancel)</span></HintKey>);
+      const rIn = R_IN * unit - HINT_IN;
+      for (const dir of DIRS) {
+        const h = hints.dirs[dir];
+        if (!h || !wheel[dir]) continue;
+        // (An opened-up action shows its parts' keys instead; the others are squeezed out of reach of a key of their own.)
+        if (od && k > 0) continue;
+        keyHints.push(<HintKey key={dir} k={dir} at={polar(rIn, CENTER[dir])} hint={h} />);
+      }
+      if (od && k > 0 && wheel[od]?.alternatives && hints.parts) {
+        // An opened-up action: its own direction is its middle part, the directions beside it its right and left parts (see `subKey`).
+        const c = CENTER[od], cut = lerp(15, 45, k), i = DIRS.indexOf(od);
+        const partDir: Record<SubSlot, Dir> = { middle: od, right: DIRS[(i + 1) % 4], left: DIRS[(i + 3) % 4] };
+        const mid: Record<SubSlot, number> = { left: (spans[od][0] + c - cut) / 2, middle: c, right: (c + cut + spans[od][1]) / 2 };
+        for (const slot of SLOTS) {
+          const h = hints.parts[slot];
+          if (h && wheel[od]!.alternatives![slot]) keyHints.push(<HintKey key={`part-${slot}`} k={partDir[slot]} at={polar(rIn, mid[slot])} hint={h} />);
+        }
+      }
+      // Yes beside the name of the action you are on.
+      if (hints.select && highlight && wheel[highlight]) {
+        const o = wheel[highlight]!;
+        const [a0, a1] = spans[highlight];
+        let label = o.label, deg = (a0 + a1) / 2;
+        if (highlight === od && k > 0 && o.alternatives) {
+          const c = CENTER[highlight], cut = lerp(15, 45, k);
+          const edges = [a0, c - cut, c + cut, a1], j = SLOTS.indexOf(sub ?? "right");
+          label = o.alternatives[sub ?? "right"]?.label ?? label;
+          deg = (edges[j] + edges[j + 1]) / 2;
+        }
+        // Away from the wheel's middle: past the name's outer edge, along the line from the middle through it
+        // (left of Dodge, above Attack, right of Block, below Rest).
+        const [lx, ly] = polar((R_IN + R_OUT) / 2, deg);
+        // (The name's half width and half height, roughly, from its letters: the label is 9.5 units tall.)
+        const halfW = label.length * 9.5 * 0.3 * unit, halfH = 9.5 * 0.5 * unit;
+        const cos = Math.cos((deg * Math.PI) / 180), sin = Math.sin((deg * Math.PI) / 180);
+        const out = Math.min(Math.abs(cos) > 1e-3 ? halfW / Math.abs(cos) : Infinity, Math.abs(sin) > 1e-3 ? halfH / Math.abs(sin) : Infinity) + 16;
+        keyHints.push(<HintKey key="select" k="yes" at={[lx * unit + cos * out, ly * unit + sin * out]} hint={hints.select} />);
+      }
+    }
   }
 
   return (
@@ -228,6 +313,7 @@ export function ActionWheel({ wheel, open, highlight, opened, sub, center, ancho
           <path key={i} d={pointedLine(l.deg, 1.1, l.from, l.to)} className="wheel-line wheel-line-sub" style={{ opacity: showShort ? 1 : 0 }} />
         ))}
       </svg>
+      {keyHints}
     </div>
   );
 }

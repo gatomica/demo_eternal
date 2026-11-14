@@ -6,11 +6,19 @@
 import { useEffect, useRef, useState } from "react";
 import { canvasLoop } from "./canvasLoop";
 import { drawLostString } from "./lostString";
+import { KNOT, KNOT_REACH } from "./LittleFlame";
 
-/** A small ball of yarn: white, wound round and round (`eternal`: light blue, like eternal gear; `red`: the revive knot). */
+/** How far past the ball's edge the tips of the knot on it reach (in the ball's 24-unit box). */
+const KNOT_OVER = 0.7;
+
+/**
+ * A small ball of yarn: white, wound round and round, with the little flame's three-looped knot over it, its tips just past the ball's
+ * edge (`eternal`: light blue, like eternal gear; `red`: the revive knot).
+ */
 export function YarnBall({ className, eternal, red }: { className?: string; eternal?: boolean; red?: boolean }) {
   const id = red ? "yarn-clip-red" : eternal ? "yarn-clip-eternal" : "yarn-clip";
-  const [fill, wound] = red ? ["#f7c3bb", "#c2392f"] : eternal ? ["#c9e4ff", "#6a9fcf"] : ["#ffffff", "#d2d2d8"];
+  const [fill, wound, knot] = red ? ["#f7c3bb", "#c2392f", "#8f1d16"] : eternal ? ["#c9e4ff", "#6a9fcf", "#3f78ad"] : ["#ffffff", "#d2d2d8", "#9a9aa6"];
+  const k = (8.6 + KNOT_OVER) / KNOT_REACH;
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
       <defs><clipPath id={id}><circle cx="11" cy="12" r="8.6" /></clipPath></defs>
@@ -19,33 +27,35 @@ export function YarnBall({ className, eternal, red }: { className?: string; eter
         {[-5, -1.5, 2, 5.5].map(k => <ellipse key={`h${k}`} cx="11" cy={12 + k} rx="8.6" ry="4.6" />)}
         {[-4, 4].map(k => <ellipse key={`v${k}`} cx={11 + k} cy="12" rx="4.4" ry="8.6" />)}
       </g>
+      <path d={KNOT} transform={`translate(11 12) scale(${k})`} fill="none" stroke={knot} strokeWidth={1.3 / k} strokeLinejoin="round" />
     </svg>
   );
 }
 
 /**
- * The knot's symbol: a red ball of yarn wound every which way, like the String counter's, white towards the middle so that the red numeral set
- * over it stands out. `empty` (no revive left): the middle is black instead.
+ * The knot's symbol: the revive knot as the guide gives it (the red `YarnBall`, its three-looped knot over it), white towards the middle so that
+ * the red numeral set over it stands out; the knot's three loops show round it. `empty` (no revive left): the middle is black instead.
  */
 export function KnotMark({ empty, className }: { empty?: boolean; className?: string }) {
-  const centre = empty ? "#000" : "#fff";
+  const centre = empty ? "#000" : "#fff", core = empty ? "knot-mark-core-empty" : "knot-mark-core", R = 10.6, k = (R + KNOT_OVER) / KNOT_REACH;
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
       <defs>
-        <clipPath id="knot-mark-clip"><circle cx="12" cy="12" r="10.6" /></clipPath>
-        <radialGradient id={empty ? "knot-mark-core-empty" : "knot-mark-core"}>
+        <clipPath id="knot-mark-clip"><circle cx="12" cy="12" r={R} /></clipPath>
+        <radialGradient id={core}>
           <stop offset="0" stopColor={centre} stopOpacity="1" />
-          <stop offset="0.6" stopColor={centre} stopOpacity="0.96" />
-          <stop offset="1" stopColor={centre} stopOpacity="0" />
+          <stop offset="0.42" stopColor={centre} stopOpacity="0.95" />
+          <stop offset="0.7" stopColor={centre} stopOpacity="0" />
         </radialGradient>
       </defs>
-      <circle cx="12" cy="12" r="10.6" fill="#f2a79e" />
-      <g clipPath="url(#knot-mark-clip)" fill="none" stroke="#b3281f" strokeWidth="1.15" strokeLinecap="round">
-        {[-6.5, -2.2, 2.2, 6.5].map(k => <ellipse key={`h${k}`} cx="12" cy={12 + k} rx="10.6" ry="5.6" />)}
-        {[-5, 5].map(k => <ellipse key={`v${k}`} cx={12 + k} cy="12" rx="5.4" ry="10.6" />)}
-        <ellipse cx="12" cy="12" rx="10.6" ry="10.6" strokeWidth="1.4" />
+      {/* (the red yarn ball's colours and winding, as YarnBall draws it, at this size) */}
+      <circle cx="12" cy="12" r={R} fill="#f7c3bb" />
+      <g clipPath="url(#knot-mark-clip)" fill="none" stroke="#c2392f" strokeWidth="1.1" strokeLinecap="round">
+        {[-6.2, -1.8, 2.5, 6.8].map(d => <ellipse key={`h${d}`} cx="12" cy={12 + d} rx={R} ry="5.7" />)}
+        {[-4.9, 4.9].map(d => <ellipse key={`v${d}`} cx={12 + d} cy="12" rx="5.4" ry={R} />)}
       </g>
-      <circle cx="12" cy="12" r="10.6" fill={`url(#${empty ? "knot-mark-core-empty" : "knot-mark-core"})`} />
+      <path d={KNOT} transform={`translate(12 12) scale(${k})`} fill="none" stroke="#8f1d16" strokeWidth={1.5 / k} strokeLinejoin="round" />
+      <circle cx="12" cy="12" r={R} fill={`url(#${core})`} />
     </svg>
   );
 }

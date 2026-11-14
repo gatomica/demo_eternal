@@ -4,6 +4,7 @@
  * two) they burn for the rest of the fight. Drawn like figures: in a 100 × 120 box, feet (the
  * base) on y = 114.
  */
+import { memo, useId } from "react";
 import type { Vec } from "../render/camera";
 import type { Pt } from "../render/geom";
 import { LittleFlame } from "../render/LittleFlame";
@@ -40,11 +41,27 @@ export const PROP_SCALE: Record<ArenaProp["kind"], number> = { floor: 1, wall: 1
 /** Where each kind's candle burns, in its 100 × 120 box. */
 export const PROP_FLAME: Record<ArenaProp["kind"], Pt> = { floor: [52, 70], wall: [50, 34] };
 
-/** A sealed sleepwalker, sunk into the floor or set into a wax wall; its head alight or not. */
-export function SealedSleeper({ kind, lit, flip }: { kind: ArenaProp["kind"]; lit: boolean; flip?: boolean }) {
+/**
+ * The glow round a lit candle: what a disc of the flame's light (radius 7, `rgba(255, 150, 60, 0.32)`) blurred by 4 units looks like, drawn as a
+ * radial gradient instead of a blur filter. Twenty of them burn round the arena once it is lit, each beside a flame that sways every frame; a blur
+ * filter would be worked out again over each of them every frame. (Each stop: how far out, a share of the gradient's 16, and how much of the light.)
+ */
+const GLOW_R = 16;
+const GLOW: [number, number][] = [[0, 0.784], [3, 0.694], [5, 0.551], [7, 0.38], [9, 0.222], [11, 0.108], [13, 0.043], [15, 0.014], [16, 0]];
+
+/** A sealed sleepwalker, sunk into the floor or set into a wax wall; its head alight or not. (The same picture whenever its props are: the scene redraws on every frame of a shot.) */
+export const SealedSleeper = memo(function SealedSleeper({ kind, lit, flip }: { kind: ArenaProp["kind"]; lit: boolean; flip?: boolean }) {
   const [fx, fy] = PROP_FLAME[kind];
+  const glow = `arena-glow${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   return (
     <svg viewBox="0 0 100 120" className="figure arena-prop" aria-hidden="true">
+      {lit && (
+        <defs>
+          <radialGradient id={glow}>
+            {GLOW.map(([d, v]) => <stop key={d} offset={d / GLOW_R} stopColor="rgb(255, 150, 60)" stopOpacity={+(0.32 * v).toFixed(4)} />)}
+          </radialGradient>
+        </defs>
+      )}
       <g transform={flip ? "translate(100 0) scale(-1 1)" : undefined}>
         {kind === "wall" ? (
           <>
@@ -66,11 +83,11 @@ export function SealedSleeper({ kind, lit, flip }: { kind: ArenaProp["kind"]; li
         {/* Its head burns once the arena is lit: just a flame. */}
         {lit && (
           <>
-            <circle cx={fx} cy={fy - 4} r={7} className="fig-glow" />
+            <circle cx={fx} cy={fy - 4} r={GLOW_R} fill={`url(#${glow})`} />
             <LittleFlame x={fx} y={fy} height={10} />
           </>
         )}
       </g>
     </svg>
   );
-}
+});

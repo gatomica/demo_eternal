@@ -261,22 +261,57 @@ const VOWEL_BAND: Record<string, number> = { a: 1000, e: 1700, i: 2200, o: 800, 
 const VOICE = [220, 261.63, 293.66, 329.63, 392];
 let voiceAt = 2;
 
+const isLetter = (ch: string | undefined) => !!ch && /[\p{L}\p{N}']/u.test(ch);
+
+/** The word that starts at `index` in `text` (letters, digits and apostrophes), or "" if no word starts there. */
+function wordAt(text: string, index: number) {
+  if (!isLetter(text[index]) || text[index] === "'" || isLetter(text[index - 1])) return "";
+  let end = index;
+  while (isLetter(text[end])) end++;
+  return text.slice(index, end);
+}
+
+/** About how many syllables a word has: its groups of vowels (y counted as one), a silent closing e not counted. */
+function syllables(word: string) {
+  const w = word.toLowerCase().replace(/'/g, "");
+  const groups = w.match(/[aeiouy]+/g)?.length ?? 0;
+  const silentE = /[^aeiouy]e$/.test(w) && groups > 1 ? 1 : 0;
+  return Math.max(1, groups - silentE);
+}
+
 /**
- * One letter of the guide's speech, as it is written: a soft puff of breath, higher for a thin vowel and lower for an open one, a hush for a
- * consonant, with the faintest pitch wandering under it. Spaces and most punctuation are silent; every second letter sounds, so it is a
- * murmur and not a rattle.
+ * The guide's speech, as it is written: one breath for each word, sounded as its first letter appears. A short word is a soft puff
+ * (higher for a thin vowel, lower for an open one); a longer one is a longer, breathier murmur, its band gliding from its first vowel's
+ * place toward its last's, the faintest pitch held under it. Spaces, punctuation and the rest of each word are silent.
  */
-export function speak(ch: string, index: number) {
-  if (index % 2 !== 0 || !/[\p{L}\p{N}]/u.test(ch)) return;
+export function speak(text: string, index: number) {
+  const word = wordAt(text, index);
+  if (!word) return;
   const r = ready_();
   if (!r) return;
   const { b, t } = r;
-  const vowel = VOWEL_BAND[ch.toLowerCase()];
+  const n = syllables(word);
+  const vowels = word.toLowerCase().match(/[aeiou]/g) ?? [];
+  const first = VOWEL_BAND[vowels[0] ?? ""] ?? rand(1200, 2000);
+  const last = VOWEL_BAND[vowels[vowels.length - 1] ?? ""] ?? first;
   const s = when(b.huff, t);
-  b.huffBand.frequency.setValueAtTime((vowel ?? rand(1200, 2600)) * rand(0.92, 1.08), s);
-  b.huffBand.Q.setValueAtTime(vowel ? 2.6 : 0.9, s);
-  b.huff.envelope.decay = vowel ? 0.14 : 0.08;
-  b.huff.triggerAttackRelease(vowel ? 0.14 : 0.08, s, vowel ? 0.8 : 0.5);
+  b.huffBand.frequency.cancelScheduledValues(s);
+  b.huffBand.frequency.setValueAtTime(first * rand(0.92, 1.08), s);
+  if (n === 1) {
+    // One syllable: the short puff.
+    b.huffBand.Q.setValueAtTime(2.6, s);
+    b.huff.envelope.attack = 0.03;
+    b.huff.envelope.decay = 0.14;
+    b.huff.triggerAttackRelease(0.12, s, 0.8);
+  } else {
+    // Longer: a slower, softer breath, the band sliding over the word.
+    const len = Math.min(0.45, 0.18 + 0.07 * (n - 1));
+    b.huffBand.Q.setValueAtTime(1.6, s);
+    b.huffBand.frequency.linearRampToValueAtTime(last * rand(0.92, 1.08), s + len);
+    b.huff.envelope.attack = 0.07;
+    b.huff.envelope.decay = len;
+    b.huff.triggerAttackRelease(len, s, 0.7);
+  }
   voiceAt = Math.max(0, Math.min(VOICE.length - 1, voiceAt + Math.round(rand(-1.4, 1.4))));
-  if (vowel) b.speak.triggerAttackRelease(VOICE[voiceAt], 0.12, when(b.speak, t), 0.5);
+  b.speak.triggerAttackRelease(VOICE[voiceAt], n === 1 ? 0.12 : Math.min(0.45, 0.18 + 0.07 * (n - 1)), when(b.speak, t), 0.4);
 }

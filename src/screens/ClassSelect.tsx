@@ -7,6 +7,7 @@ import { useState } from "react";
 import { CLASSES, type ClassId, lookOfClass } from "../explore/items";
 import { PlayerFigure3D } from "../render/PlayerFigure3D";
 import { useKeys, wrapIndex, menuSound } from "../ui/input";
+import { Kbd } from "../ui/Kbd";
 import { ClassPreview } from "./ClassPreview";
 
 export function ClassSelect({ onPick, onBack }: { onPick: (id: ClassId) => void; onBack: () => void }) {
@@ -32,7 +33,7 @@ export function ClassSelect({ onPick, onBack }: { onPick: (id: ClassId) => void;
           </button>
         ))}
       </div>
-      <div className="inv-keys"><kbd>A</kbd><kbd>D</kbd> choose · <kbd>E</kbd> look · <kbd>Q</kbd> back</div>
+      <div className="inv-keys"><Kbd k="left" /><Kbd k="right" /> choose · <Kbd k="yes" /> look · <Kbd k="no" /> back</div>
     </main>
   );
 }

@@ -10,6 +10,7 @@ import { cardOfItem, ItemCard } from "../explore/ItemCard";
 import { CLASSES, type ClassId, ITEMS, lookOfClass } from "../explore/items";
 import { PlayerFigure3D } from "../render/PlayerFigure3D";
 import { useKeys, wrapIndex, menuSound } from "../ui/input";
+import { Kbd } from "../ui/Kbd";
 
 const LABEL: Record<Slot, string> = { weapon: "Weapon", armor: "Armor", head: "Head" };
 
@@ -67,7 +68,7 @@ export function ClassPreview({ classId, onClose, onConfirm }: { classId: ClassId
           </div>
         </div>
       )}
-      <div className="inv-keys"><kbd>W</kbd><kbd>S</kbd> slot · <kbd>E</kbd> choose this one · <kbd>Q</kbd> back</div>
+      <div className="inv-keys"><Kbd k="up" /><Kbd k="down" /> slot · <Kbd k="yes" /> choose this one · <Kbd k="no" /> back</div>
     </div>
   );
 }

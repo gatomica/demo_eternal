@@ -1,61 +1,42 @@
 /**
- * tutorial.ts — the guide's teaching, in the order it happens. A new game opens inside the lesson:
- * you wake in the dark and the guide's light comes toward you, then a fight against the guide itself,
- * bare-handed (the scripted turns are in combat/lesson.ts). Passed, you are in the labyrinth's
- * first room, with a safe spot to rest by, and the way on is yours. At the second safe spot, on the
- * first floor, the guide gives you the knot. (The guide's words here are placeholders, to be remade.)
+ * tutorial.ts — how far along the guide's teaching you are. A new game opens in the labyrinth's first room, already
+ * speaking with the guide (`WAKE` in dialogues.ts); the first time you try to leave that room, it stops you (`DOORWAY`), and the second time, it lets you go (`LET_GO`).
+ * The first time you speak with it at the second safe spot, on the first floor past the ladder, it asks whether you will go on, and gives you the knot either way (`PERSIST`). At the end of the last corridor, at the foot of the wall of
+ * wax, it makes its last offer (`FINAL`): to sleep one more time, and descend; accepting ends the demo. (The old lesson fight against the guide,
+ * combat/lesson.ts, is only in Test combat now.)
  */
 
 /** How the tutorial stands. */
 export interface TutorialState {
   /** The lesson is passed. */
   beaten: boolean;
-  /** You have reached the first floor's safe spot and been given the knot. */
+  /** The guide has given you the knot (at the first floor's safe spot). */
   done: boolean;
   /** The guide has shown you how to unwind memories (its menu opened on them, the first time you brought one). */
   unwound?: boolean;
   /** The guide has opened Empower Self for you, the first time you had String enough for it (from then on it is just one of its options). */
   empowered?: boolean;
+  /** The guide has woken you (a new game opens in that talk). Missing on old saves: counted as done. */
+  greeted?: boolean;
+  /** The guide has stopped you at the start room's doorway, the first time you tried to leave it. Missing on old saves: counted as done. */
+  warned?: boolean;
+  /** The second time you tried to leave it, the guide let you go. Missing on old saves: counted as done. */
+  letGo?: boolean;
+  /** The guide has made its last offer, at the end of the last corridor (from then on, Talk makes it again). */
+  offered?: boolean;
 }
 
-export const NEW_TUTORIAL: TutorialState = { beaten: false, done: false };
+export const NEW_TUTORIAL: TutorialState = { beaten: false, done: false, greeted: false, warned: false, letGo: false };
 
 /** The safe spot (a keeper's id) where the guide gives you the knot: the first one after the labyrinth. */
 export const FIRST_FLOOR_KEEPER = "floor1";
 
 /**
  * The knot: your one revive for this demo. Absent until the guide gives it. "wound": it will
- * keep you from fading once; "unwound": it has been spent, and resting with the guide winds it again.
+ * keep you from fading once; "unwound": it has been spent, and sleeping by the guide winds it again.
  */
 export type Knot = "wound" | "unwound";
 
 /** Revives you carry into a fight. */
 export const knotCharges = (k: Knot | undefined) => (k === "wound" ? 1 : 0);
 
-/** What follows the guide's last words: nothing, the knot, or back to the guide's menu (you talked from it). */
-export type After = "none" | "knot" | "guide";
-
-export interface Talk {
-  lines: string[];
-  after: After;
-}
-
-/** The first time you rest at the first floor's safe spot: the knot. (Placeholder words.) */
-export const GIFT: Talk = {
-  after: "knot",
-  lines: [
-    "There. Wherever I fade in beside you, rest, and should you fall you will wake there.",
-    "Take this. A knot, tangled past all undoing. Look for its ends and you won't find them: no beginning, no end.",
-    "Should you fade, it will unwind in your place, and you will not slip away. But only once. Then it hangs slack.",
-    "Rest with me again, and I will wind it back for you.",
-  ],
-};
-
-/** Talk, from the guide's menu at a safe spot. (Placeholder words, to be remade.) */
-export const CHAT: Talk = {
-  after: "guide",
-  lines: [
-    "Still you walk. Good. The sleepers do not like it, but the sleepers do not like anything.",
-    "If you find a memory, bring it to me. I will read what it dreams of.",
-  ],
-};

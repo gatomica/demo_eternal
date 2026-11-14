@@ -2,7 +2,7 @@
  * movement.ts — walking: bumping into walls, sliding along them, stepping up and dropping down.
  */
 import { ACCEL, CORNER_ASSIST, HALF_D, HALF_W, STEP_TOLERANCE } from "./tuning";
-import { barsAt, boxDiagDepth, boxOnDiagFloor, boxTouchesDiagFloor, type Dir, DIAG, diagSide, FLOOR, isHoleDiag, isRamp, LADDER, onDiagFloor, LEVELS, rampAt, rampHeight, slopeAt, slopeRise, tileAt, WALL } from "./world";
+import { barsAt, boxDiagDepth, boxOnDiagFloor, boxTouchesDiagFloor, type Dir, DIAG, diagSide, FLOOR, isHoleDiag, isRamp, LADDER, onDiagFloor, LEVELS, raisedLadderAt, rampAt, rampHeight, slopeAt, slopeRise, tileAt, VOID, WALL } from "./world";
 
 /* ============================================================
  * Standing and moving: surfaces near your height
@@ -40,8 +40,11 @@ const halves = (me: { half?: number }): [number, number, boolean] => (me.half ? 
 export function surfaceNear(tx: number, ty: number, px: number, py: number, alt: number, box = false, hw = HALF_W, hd = HALF_D) {
   let best: { h: number; t: number } | null = null;
   let wall = -1;
+  // A ladder still pulled up: its foot is plain floor, nothing stands over it, and the hole at its top is shut to walking.
+  const raised = raisedLadderAt(tx, ty);
+  if (raised && Math.abs(alt - raised.top) < 0.5) return null;
   for (let z = 0; z < LEVELS; z++) {
-    const t = tileAt(z, tx, ty);
+    const t = raised && tileAt(z, tx, ty) === LADDER ? (z === raised.bottom ? FLOOR : VOID) : tileAt(z, tx, ty);
     let hgt: number | null = null;
     // Bars across a tile: it is shut to anyone at its height (they are seen through, never walked through).
     if (barsAt(z, tx, ty) && z <= alt + 1e-3 && alt < z + 1) return null;

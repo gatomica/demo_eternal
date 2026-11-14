@@ -5,6 +5,8 @@
  * and armor, any pose held still, and your actions played against a dummy Sleepwalker.
  */
 import { useCallback, useMemo, useState } from "react";
+import { FightLoading } from "../combat/FightLoading";
+import { useFightGate } from "../combat/preload";
 import { CombatScreen } from "../combat/CombatScreen";
 import { ENEMY_KINDS, type StatusToggle } from "../core/bestiary";
 import { needText } from "../core/conditions";
@@ -120,7 +122,15 @@ export function ModelViewer({ onExit }: { onExit: () => void }) {
   const [row, setRow] = useState<Row>("model");
   const [viewing, setViewing] = useState<false | Row>(false);
   const [run, setRun] = useState(0);
-  if (!viewing) return <ViewerSetup kind={kind} gear={gear} wear={wear} row={row} onChange={setKind} onGear={setGear} onWear={setWear} onRow={setRow} onStart={() => { setRun(r => r + 1); setViewing(row); }} onExit={onExit} />;
+  // (a fight shown here is made ready first, as in Test combat and on the map: the sounds, the music, and the Warden's poses, each worked out ahead
+  // instead of in the frame he first takes it up)
+  const { progress, gate } = useFightGate();
+  const start = () => {
+    const open = () => { setRun(r => r + 1); setViewing(row); };
+    if (row === "model") gate({ warden: kind === "warden" }, open);
+    else open();
+  };
+  if (!viewing) return <><ViewerSetup kind={kind} gear={gear} wear={wear} row={row} onChange={setKind} onGear={setGear} onWear={setWear} onRow={setRow} onStart={start} onExit={onExit} />{progress !== null && <FightLoading progress={progress} />}</>;
   if (viewing === "gear") return <GearViewer id={gear} onChange={setGear} onBack={() => setViewing(false)} />;
   // (what you wear is looked at on you alone, turned round by dragging: no fight)
   if (viewing === "wear") return <WearViewer key={`wear-${wear}-${run}`} wearing={wearOf(wear)} onBack={() => setViewing(false)} />;

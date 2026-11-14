@@ -53,15 +53,6 @@ export const WAXED: EnemyKind = {
   // Lit: its flame burns on its head (the Warden's phase two lights it, and raises it staggered if it has fallen).
   flags: { lit: false },
   statuses: [{ key: "lit", off: "Unlit", on: "Lit" }],
-  // A lit waxed that bursts is spent: it dies as its blast finishes, sealed in wax (no candle left to burn).
-  afterTurn: r => {
-    if (r.action !== "Flame Immolation" || r.outcome !== "done") return;
-    r.self.alive = false;
-    r.self.fate = "encased";
-    r.self.hp = 0;
-    r.self.fatigue = 0;
-    r.event({ kind: "fall", who: r.self.id });
-  },
   // Its blows hurt and tire as much as a light one, barehanded.
   pattern: waxedPattern("Waxed", false),
   modelPoses: { front: "w-t", back: "w-t-b" },

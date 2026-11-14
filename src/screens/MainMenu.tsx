@@ -1,12 +1,15 @@
 /**
  * MainMenu.tsx — the main menu.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useScrollFocus } from "../ui/scrollFocus";
 import { prepare } from "../audio/sfx";
 import { useKeys, wrapIndex, menuSound } from "../ui/input";
 import { hasSave } from "../explore/save";
 import { useDev } from "../ui/dev";
 import { MenuButtons, VolumeBars } from "../ui/Menu";
+import { openSettings } from "../ui/settings";
+import { Kbd } from "../ui/Kbd";
 
 export type Screen = "menu" | "test" | "explore" | "class" | "explore-new" | "viewer" | "map" | "music";
 
@@ -20,6 +23,7 @@ function clearCache() {
 const menuOptions = (saved: boolean, dev: boolean): { label: string; screen?: Screen; quiet?: boolean; run?: () => void; /** A developer tool: shown at the side. */ dev?: boolean }[] => [
   ...(saved ? [{ label: "Continue", screen: "explore" as const }] : []),
   { label: "New Game", screen: "class" },
+  { label: "Settings", run: openSettings },
   ...(dev ? [
     { label: "Test combat", screen: "test" as const, dev: true },
     { label: "Model viewer", screen: "viewer" as const, dev: true },
@@ -43,6 +47,9 @@ export function MainMenu({ onStart }: { onStart: (screen: Screen) => void }) {
   const leaveTitle = () => { titleSeen = true; setTitle(false); };
   // Load the sounds while you're choosing, so the first blow of a fight doesn't wait for them.
   useEffect(() => { prepare(); }, []);
+  // (Longer than the room it has, the list scrolls with the focus.)
+  const optionsRef = useRef<HTMLElement>(null);
+  useScrollFocus(optionsRef, focus);
   const choose = (o: (typeof MENU_OPTIONS)[number]) => { if (o.run) o.run(); else onStart(o.screen!); };
   useKeys(key => {
     menuSound(key);
@@ -56,10 +63,10 @@ export function MainMenu({ onStart }: { onStart: (screen: Screen) => void }) {
       <h1 className="menu-title">DEMO</h1>
       <div className="menu-below">
         {title ? (
-          <p className="menu-prompt">Click or press E to start</p>
+          <p className="menu-prompt">Click or press <Kbd k="yes" /> to start</p>
         ) : (
           <>
-            <nav className="menu-options" aria-label="Main menu">
+            <nav className="menu-options" aria-label="Main menu" ref={optionsRef}>
               <MenuButtons options={MENU_OPTIONS.slice(0, gameCount).map(o => ({ label: o.label, run: () => choose(o) }))} focus={Math.min(focus, MENU_OPTIONS.length - 1)} onFocus={setFocus} />
             </nav>
             <div className="menu-volume"><VolumeBars /></div>

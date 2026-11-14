@@ -1,16 +1,15 @@
 /**
  * Journeying.tsx — exploration, with fights: walk the map, and touching an enemy opens its fight.
  * Win and you're back where you stood with it gone, and what it carried is yours; fall and you
- * wake by the keeper you last rested by, having lost all your gear but the eternal. You set out
- * with nothing: a new game opens inside the guide's lesson, a fight in the dark.
+ * wake by the keeper you last rested by, having lost all your gear but the eternal. There is no
+ * tutorial fight: a new game opens on the map, and the control hints (`explore/hints.ts`) show how to
+ * do things through the first fights.
  */
 import { useEffect, useState } from "react";
 import { CombatScreen } from "../combat/CombatScreen";
 import { newFight } from "../combat/fight";
 import { FightLoading } from "../combat/FightLoading";
-import { LESSON } from "../combat/lesson";
 import { hasWarden, useFightGate, warmFights } from "../combat/preload";
-import { ENCOUNTERS } from "../core/encounters";
 import type { CombatState, EnemySetup, Opening } from "../core/types";
 import { Exploration, type Journey } from "../explore/Exploration";
 import { START_STATS } from "../explore/empower";
@@ -21,9 +20,9 @@ import { dropsOf, loadoutOf, lose } from "../explore/gear";
 import type { GroundItem } from "../explore/pickups";
 import { clearSave, loadJourney, saveJourney } from "../explore/save";
 import { knotCharges, NEW_TUTORIAL } from "../explore/tutorial";
+import { resetHints, useHints } from "../explore/hints";
 
-/** `lesson`: the guide's tutorial fight (no map enemies; see combat/lesson.ts). */
-type Fight = { id: number; foes: MapFoe[]; state: CombatState; opening?: Opening; backTo: Journey; lesson?: boolean; wake?: boolean };
+type Fight = { id: number; foes: MapFoe[]; state: CombatState; opening?: Opening; backTo: Journey };
 
 /**
  * The enemies of these map enemies, together. The one that touched you (the first map enemy's first) starts
@@ -48,10 +47,6 @@ function groupOf(f: MapFoe): { setup: EnemySetup; key: string }[] {
   return f.fight.map((setup, j) => ({ setup, key: memberKey(f.id, f.members?.[j] ?? j) }));
 }
 
-/** The guide's lesson: its fight is the Test combat "tutorial" encounter, with what you wear (nothing, at first), and it can't be lost. */
-const lessonFight = (backTo: Journey) =>
-  newFight(ENCOUNTERS.find(e => e.id === "tutorial")!.enemies, loadoutOf(backTo.inventory), knotCharges(backTo.knot), { sparring: true }, backTo.eternity);
-
 /** A fight against these map enemies as you are now: what you wear and the knot's revive. */
 const fightFor = (foes: MapFoe[], backTo: Journey) =>
   newFight(enemiesOf(foes, backTo.held), loadoutOf(backTo.inventory), knotCharges(backTo.knot), {}, backTo.eternity, { maxHP: backTo.maxHP ?? START_STATS.maxHP, maxEternity: backTo.maxEternity ?? START_STATS.maxEternity });
@@ -67,9 +62,13 @@ function skippedTutorial(): Journey {
 export function Journeying({ fresh = false, skip = false, classId = "soldier", onExit }: { fresh?: boolean; skip?: boolean; /** A new game: the class you chose, and so what you carry from the start. */ classId?: ClassId; onExit: () => void }) {
   // Where you left off, unless this is a new game.
   const [journey, setJourneyState] = useState<Journey>(() => {
-    if (fresh || skip) clearSave();
+    if (fresh || skip) { clearSave(); resetHints(); }
     if (skip) return skippedTutorial();
-    return (!fresh && loadJourney()) || { defeated: [], taken: [], tutorial: NEW_TUTORIAL, inventory: startingInventory(classId) };
+    // (The tutorial fight is gone: a game is never inside it. A save from when it was still there, left before passing it, starts on the map too.)
+    const saved = !fresh && loadJourney();
+    // (Floor B's west room no longer has a keeper, "floor2": a save that woke there wakes at the first floor's.)
+    if (saved) return { ...saved, tutorial: { ...saved.tutorial, beaten: true }, rested: saved.rested === "floor2" ? "floor1" : saved.rested };
+    return { defeated: [], taken: [], tutorial: { ...NEW_TUTORIAL, beaten: true }, inventory: startingInventory(classId) };
   });
   // Every change of where you stand is written down.
   const setJourney = (j: Journey) => { saveJourney(j); setJourneyState(j); };
@@ -99,6 +98,7 @@ export function Journeying({ fresh = false, skip = false, classId = "soldier", o
       held,
       taken: backTo.taken,
       rested: backTo.rested,
+      lowered: backTo.lowered,
       tutorial: backTo.tutorial,
       knot: backTo.knot && "wound",
       inventory: lose(backTo.inventory),
@@ -110,8 +110,9 @@ export function Journeying({ fresh = false, skip = false, classId = "soldier", o
   const leave = (j: Journey) => { saveJourney(j); onExit(); };
   // `id` gives every fight (and every return to the map) a fresh screen.
   // `foes`: the enemy that reached you plus everyone chasing you who piled in.
-  // A game whose lesson is not passed opens inside it: you wake in the dark as the guide comes.
-  const [fight, setFight] = useState<Fight | null>(() => (journey.tutorial.beaten ? null : { id: 1, foes: [], ...lessonFight(journey), backTo: journey, lesson: true, wake: true }));
+  const [fight, setFight] = useState<Fight | null>(null);
+  // The keys fade in and out in fights until you reach the dungeon proper.
+  const hints = useHints();
   const [visit, setVisit] = useState(0);
   // The slow parts of a fight (its sounds, music and figures) are made ready quietly from the start, while you walk.
   const { progress, gate } = useFightGate();
@@ -124,23 +125,14 @@ export function Journeying({ fresh = false, skip = false, classId = "soldier", o
         key={fight.id}
         initial={fight.state}
         opening={fight.opening}
-        lesson={fight.lesson ? LESSON : undefined}
-        wakeUp={fight.wake}
         music
-        wonText={fight.lesson ? "The lesson is over" : undefined}
-        onRetry={() => setFight(f => f && { ...f, id: f.id + 1, wake: false, ...(f.lesson ? lessonFight(f.backTo) : fightFor(f.foes, f.backTo)) })}
+        hints={!hints.off}
+        onRetry={() => setFight(f => f && { ...f, id: f.id + 1, ...fightFor(f.foes, f.backTo) })}
         onExit={() => leave(backTo)}
         string={backTo.string ?? 0}
         knotOwned={backTo.knot !== undefined}
         eternalString={backTo.eternalString ?? 0}
         onDone={(won, charges, eternity, result) => {
-          if (fight.lesson) {
-            // The lesson can't be lost. Passed, you are on the map, in the labyrinth's first room.
-            setJourney(won ? { ...backTo, tutorial: { ...backTo.tutorial, beaten: true } } : backTo);
-            setFight(null);
-            setVisit(v => v + 1);
-            return;
-          }
           // A knot that kept you from fading is spent, whether you then won or not.
           const knot = backTo.knot && (charges > 0 ? "wound" : "unwound");
           if (won) {

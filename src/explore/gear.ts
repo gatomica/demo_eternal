@@ -176,11 +176,11 @@ export const unequip = (inv: Inventory, slot: Slot, side: Side): Inventory => ({
 /** Your memories whose dreams the guide has not read yet. */
 export const unreadMemories = (inv: Inventory): Gear[] => inv.bag.filter(g => g.eternal && !g.read);
 
-/** All your eternal gear for a slot, read or not: what the guide's Unwind Memories shows. */
+/** All your eternal gear for a slot, read or not: what the guide's Dreams shows. */
 export const memoriesFor = (inv: Inventory, slot: Slot): Gear[] => inv.bag.filter(g => g.slot === slot && g.eternal);
 
-/** Whether you have found any memory at all (Unwind Memories is there from then on). */
-export const hasMemories = (inv: Inventory): boolean => inv.bag.some(g => g.eternal);
+/** Whether you carry a memory whose dreams are still unread (the first time you bring one to the guide, it opens Dreams for you). */
+export const hasUnread = (inv: Inventory): boolean => inv.bag.some(g => g.eternal && !g.read);
 
 /** The guide reads a memory's dreams: its lore and effect are known, and it can be set. */
 export const readDreams = (inv: Inventory, id: string): Inventory => ({ ...inv, bag: inv.bag.map(g => (g.id === id ? { ...g, read: true } : g)) });

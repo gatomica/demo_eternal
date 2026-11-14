@@ -20,6 +20,7 @@ import type { Player } from "../core/types";
 import { PlayerBars } from "../render/HealthBar";
 import { PlayerFigure3D } from "../render/PlayerFigure3D";
 import { useKeys, menuSound } from "../ui/input";
+import { Kbd } from "../ui/Kbd";
 import { equippedSide, type GearSpec, gearName, type Inventory as Bag, loadoutOf, pieceAt, type Slot, SLOTS } from "./gear";
 import { GearIcon, GearSprite } from "./GearIcons";
 import { cardOfGear, ItemCard } from "./ItemCard";
@@ -204,8 +205,8 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, grou
       <div className="inv-stage">{column("right")}</div>
       <div className="inv-keys">
         {at === null
-          ? <><kbd>W</kbd><kbd>S</kbd> slot · <kbd>A</kbd><kbd>D</kbd> side · <kbd>E</kbd> open · <kbd>Q</kbd> close</>
-          : <><kbd>A</kbd><kbd>D</kbd> choose · <kbd>E</kbd> {!at ? "keep" : options[at - 1] === "ground" ? "take" : options[at - 1] === "unequip" ? "unequip" : "wield"} · <kbd>Q</kbd> back</>}
+          ? <><Kbd k="up" /><Kbd k="down" /> slot · <Kbd k="left" /><Kbd k="right" /> side · <Kbd k="yes" /> open · <Kbd k="no" /> close</>
+          : <><Kbd k="left" /><Kbd k="right" /> choose · <Kbd k="yes" /> {!at ? "keep" : options[at - 1] === "ground" ? "take" : options[at - 1] === "unequip" ? "unequip" : "wield"} · <Kbd k="no" /> back</>}
       </div>
     </div>
   );

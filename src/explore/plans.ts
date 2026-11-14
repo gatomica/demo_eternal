@@ -295,7 +295,7 @@ export const LEVEL_PLANS: string[][] = [
     "             ::  ◥↘◣             www  ..            ",
     "             ::   ◥              ww   ..            ",
     "             ::         #####         ..            ",
-    "      .....  ::        ##▛H▜##        ..  .....     ",
+    "      ....H  ::        ##▛H▜##        ..  .....     ",
     "      .....  ::        #▛:::▜#        ..  .....     ",
     "      .......>>        #:::::#        .........     ",
     "      .....  ::        #▙:::▟#        ..  .....     ",
@@ -334,7 +334,7 @@ export const LEVEL_PLANS: string[][] = [
     "                    ◢...........◣www                ",
     "                   ..............◣w                 ",
     "                  ◢...............◣                 ",
-    "                  .......◸ ◹.......#                ",
+    "          H       .......◸ ◹.......#                ",
     "                  ......◸   ◹......                 ",
     "               .........     ......                 ",
     "                  ......◺   ◿......                 ",
@@ -373,7 +373,7 @@ export const LEVEL_PLANS: string[][] = [
     "                   #▛:::::::::::▜◢.◤                ",
     "                  #::::::::::::::◹◤                 ",
     "                 #▛:::::::::::::::▜#                ",
-    "                 #:::::::::::::::::#                ",
+    "          H      #:::::::::::::::::#                ",
     "                 #:::::::::::::::::#                ",
     "                 #:::::::::::::::::#                ",
     "                 #:::::::::::::::::#                ",
@@ -412,7 +412,7 @@ export const LEVEL_PLANS: string[][] = [
     "                   #▛:::::::::::▜#                  ",
     "                  #▛::::::::::::::#                 ",
     "                 #▛:::::::::::::::▜#                ",
-    "                 #:::::::::::::::::#                ",
+    "          H      #:::::::::::::::::#                ",
     "                 #:::::::::::::::::#                ",
     "                 #:::::::::::::::::#                ",
     "                 #:::::::::::::::::#                ",
@@ -451,7 +451,7 @@ export const LEVEL_PLANS: string[][] = [
     "                   #▛:::::.:::::▜#          .       ",
     "                  #▛::::::.::::::▜#         .       ",
     "          .......#▛:::::::.:::::::▜#..........      ",
-    "          .......#::::::::.::::::::#..........      ",
+    "          :......#::::::::.::::::::#..........      ",
     "          .......#::::::::.::::::::#..........      ",
     "          ....................................      ",
     "          .......#::::::::.::::::::#..........      ",
@@ -553,19 +553,19 @@ export const LEVEL_PLANS: string[][] = [
   // Level 13: Floor C, the Sanctum: the Nave's walls go on up round the open air, and a small waxed-over platform stands in the middle of it, reached by four bridges; the stairs from the W room arrive in the west wall.
   [
     "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
+    "                                          ◢◣        ",
+    "                                         ◢.◤        ",
+    "                                        ◢.◤         ",
+    "                                       ◢.◤          ",
+    "                                      ◢.◤           ",
+    "                                     ◢.◤            ",
+    "                                    ◢.◤             ",
+    "                                   ◢.◤              ",
+    "                                  ◢.◤               ",
+    "                                 ◢.◤                ",
     "                     ###########◢.◤                 ",
     "                    #◢:::::::::◢.◤                  ",
-    "                   #◢.◺:::::::◿.◣#                  ",
+    "                   #◢.◺:::::::◿..#                  ",
     "                  #▛:◹.◺:::::◿.◸:▜#                 ",
     "                 #▛:::◹.......◸:::▜#                ",
     "                 #:::::.......:::::#                ",
@@ -592,16 +592,16 @@ export const LEVEL_PLANS: string[][] = [
   // Level 14: more of the Nave's walls round the open air above Floor C
   [
     "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
-    "                                                    ",
+    "                                          #▜#       ",
+    "                                         # #        ",
+    "                                        # #         ",
+    "                                       # #          ",
+    "                                      # #           ",
+    "                                     # #            ",
+    "                                    # #             ",
+    "                                   # #              ",
+    "                                  # #               ",
+    "                                 # #                ",
     "                     ############ #                 ",
     "                    #▛:::::::::# #                  ",
     "                   #▛:::::::::::▜#                  ",
@@ -631,7 +631,7 @@ export const LEVEL_PLANS: string[][] = [
   // Level 15: more of the Nave's walls round the open air above Floor C
   [
     "                                                    ",
-    "                                                    ",
+    "                                           ▜        ",
     "                                                    ",
     "                                                    ",
     "                                                    ",
@@ -1030,6 +1030,7 @@ export const WAX_TILES: [number, number, number][] = [
   [8, 35, 11], [8, 34, 12], [8, 36, 12], [8, 33, 13], [8, 35, 13], [8, 34, 14], // the NE corridor, two levels up: its flanks are wax
   [6, 32, 9], [6, 33, 9], [6, 32, 10], [6, 33, 10], [7, 34, 9], [7, 35, 9], [7, 34, 10], [7, 35, 10], // the wax ramp up to the NE hall, from the north corridor: two runs, two blocks high
   [7, 33, 14], // in the Nave's NE door, on the Nave's wall line
+  [13, 43, 1], [14, 43, 1], [15, 43, 1], // the end of Floor C's NE corridor: a diagonal wall of wax, three levels tall, the guide at its foot
 ];
 
 /**
@@ -1116,6 +1117,7 @@ export const WAX_WALLS: [number, number, number, number, number, number][] = [
   [4, 4, 23, 27, 26, 29], // the hole where it opens in the south chapel's floor
   [6, 9, 35, 6, 43, 12], [6, 9, 37, 11, 40, 24], [6, 9, 39, 15, 47, 21], // the walls round the wax-filled NE hall, east corridor and east room
   [10, 13, 41, 5, 48, 14], // Floor B's side room north of the east room, and its passage
+  [13, 15, 42, 0, 45, 2], // what stands round the wax wall at the end of Floor C's NE corridor
 ];
 
 /**
@@ -1178,6 +1180,15 @@ export const FENCED_ZONES: [number, number, number, number, number][] = [
   [13, 12, 22, 21, 31],
 ];
 
+/**
+ * Ladders that start pulled up at their top: [id, x, y] in plan coordinates (the ladder's column; its `H`s and the hole above them are
+ * written in the plans as usual). Until it is let down (E beside the hole at its top), the ladder lies folded on the floor along that hole's north edge: there
+ * is no climbing it, its foot is plain floor, and the hole is shut to walking. Once down it stays down (`Journey.lowered`): a shortcut.
+ */
+export const DROP_LADDERS: { id: string; x: number; y: number }[] = [
+  { id: "west", x: 10, y: 16 }, // from the west chapel (level 6) up to Floor B's west room (level 10)
+];
+
 export const ISOLATED_TILES: [number, number, number][] = [
   [6, 41, 25], // the foot of the stairs up from the SE hall
 ];
@@ -1190,9 +1201,9 @@ export const GRATE_ZONES: [number, number, number, number, number][] = [
 ];
 
 /**
- * The end of the demo: Floor C's NE bridge goes on past the Nave's wall as a diagonal corridor, three tiles wide (a floor tile between two diagonal wall halves, as the other
- * diagonal corridors) and two levels tall (13 and 14), ending in a pitch-black wall (`BLACK_WALLS`). Its threshold is the second row of the corridor, `tiles`: crossing it ends
- * the demo with a "Thanks for playing" card (`doorAt` in world.ts, `Exploration.tsx`). Plan coordinates.
+ * The end of the demo: Floor C's NE bridge goes on past the Nave's wall as a long diagonal corridor, three tiles wide (a floor tile between two diagonal wall halves, as the other
+ * diagonal corridors) and two levels tall (13 and 14), running up near the top of the map and ending in a diagonal wall of wax three levels tall (`WAX_TILES`), the guide at its foot (the keeper `end`). `tiles` is a threshold (its first row
+ * past the wall): crossing it ended the demo with a "Thanks for playing" card (`doorAt` in world.ts, `DEMO_END` in `Exploration.tsx`), which is off for now. Plan coordinates.
  */
 export const DEMO_DOOR = { levels: [13, 14] as const, tiles: [[32, 11], [33, 11], [34, 11]] as const };
 
@@ -1202,6 +1213,6 @@ export const DEMO_DOOR = { levels: [13, 14] as const, tiles: [[32, 11], [33, 11]
  * curtain to cover what should not be seen.
  */
 export const BLACK_WALLS: [number, number, number, number, number, number][] = [
-  [DEMO_DOOR.levels[0], DEMO_DOOR.levels[1], 32, 10, 34, 10], // the dark at the end of the demo's corridor, one row past its threshold
-  [7, 9, 9, 0, 17, 16], // beyond the main room's west edge (its west wall is at x=17), starting on the row above the plank corridor's north wall (row 17) and going up to the top of the map, as far left as the NW hall and as far right as the corridor's mouth: nothing of the room lies under it
+  // Beyond the main room's west edge (two boxes, leaving out the ladder from the west chapel up to Floor B's west room, at x=10, and its walls): (its west wall is at x=17), starting on the row above the plank corridor's north wall (row 17) and going up to the top of the map, as far left as the NW hall and as far right as the corridor's mouth: nothing of the room lies under it
+  [7, 9, 12, 0, 17, 16], [7, 9, 9, 0, 11, 14],
 ];

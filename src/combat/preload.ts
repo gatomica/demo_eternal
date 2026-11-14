@@ -7,6 +7,7 @@ import { useCallback, useRef, useState } from "react";
 import { preloadMusic, type Track } from "../audio/music";
 import { sfxReady } from "../audio/sfx";
 import { walkReady } from "../audio/walk";
+import { warmWardenPose } from "../render/Warden3D";
 import { WARDEN_STANCE, wardenRig } from "../warden/pose3d";
 
 /** What a fight is: the tutorial (its music is the menu's, already loaded), the Penitent Warden's (two halves of one track), or an ordinary one. */
@@ -19,14 +20,17 @@ export const musicFor = ({ warden, lesson }: FightKind): Track => (lesson ? "chu
 export const hasWarden = (kinds: readonly string[]) => kinds.includes("warden");
 
 let wardenWarm: Promise<void> | null = null;
-/** Works out every pose of the Warden's rig, a few at a time so the page stays alive. */
+/**
+ * Works out every pose of the Warden's rig, and all of each pose's drawing that the camera does not change (`warmWardenPose`: some 70 ms a pose, which would
+ * otherwise stall the fight the first time he takes it up), a pose at a time so the page stays alive.
+ */
 function warmWarden(): Promise<void> {
   wardenWarm ??= new Promise<void>(done => {
     const names = Object.keys(WARDEN_STANCE);
     let i = 0;
     const next = () => {
       const stop = performance.now() + 8;
-      while (i < names.length && performance.now() < stop) wardenRig(names[i++]);
+      while (i < names.length && performance.now() < stop) { wardenRig(names[i]); warmWardenPose(names[i++]); }
       if (i < names.length) setTimeout(next, 0);
       else done();
     };

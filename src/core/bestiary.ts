@@ -156,8 +156,8 @@ export interface EnemyKind {
    */
   blazePoses?: string[];
   /**
-   * The actions it dies doing (Flame Immolation; its `afterTurn` ends it): from its strike on it lies in its strike pose until it is taken off
-   * the field, and the Model viewer shows it Dead once the action has played.
+   * The actions it dies doing (Flame Immolation): it dies the moment the attack goes out, sealed in wax (`resolveAttacks`), and lies in its strike
+   * pose from then on (its death pose); the Model viewer shows it Dead once the action has played.
    */
   fatalActions?: string[];
   /** Conditions named in the pattern (`*Name`, written in lowercase here), checked when picking. */

@@ -211,7 +211,7 @@ export const WARDEN_STANCE: Record<WardenPoseName, Stance> = {
   // Wax Arm Back, started from Flail Clutched (below) and tuned on its own from here: all of her turned 20° further round to her left (hips and chest), the flail not
   // clutched but its head resting on the floor in front of her (the handle pointing ahead and down from her fist, the chain lying along the floor the way her hips face).
   // Her neck turns her face to her target (no `head`: as near it as the neck lets her), and her wax elbow is raised a little (the bend's way has some up in it; the hand is
-  // where it was). The scene stands her facing her target: the enemy whose flame she goes for with Usurp Flame, else you (`SceneFigure.faceAt`).
+  // where it was). In the stance she faces you, as in any other; only the blow itself turns to its target (`SceneFigure.faceToward`).
   "wd-arm-back": ARM_BACK,
   "wd-arm-chest": S(0, 15), // the wax arm folded across his chest turns that shoulder in a little
   // Wax Arm Back, the flail hauled up by its chain. Turned to her left (all of her 30° back to her right from where the legs and arms were set, so her right

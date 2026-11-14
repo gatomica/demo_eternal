@@ -2,7 +2,7 @@
  * world.ts — the map as tiles: levels, stairs and ladders, and the questions asked of it.
  */
 import type { Dir } from "../ui/input";
-import { BLACK_WALLS, DEMO_DOOR, FENCED_ZONES, GRATE_ZONES, LEVEL_PLANS, OPEN_ABOVE, RAISED_WAX, ROCK_ZONES, RUBBLE_SPOTS, THIN_FLOORS, WAX_SPLODGES, WAX_TILES, WAX_WALLS, WOOD_TILES } from "./plans";
+import { BLACK_WALLS, DEMO_DOOR, DROP_LADDERS, FENCED_ZONES, GRATE_ZONES, LEVEL_PLANS, OPEN_ABOVE, RAISED_WAX, ROCK_ZONES, RUBBLE_SPOTS, THIN_FLOORS, WAX_SPLODGES, WAX_TILES, WAX_WALLS, WOOD_TILES } from "./plans";
 
 export const VOID = 0, FLOOR = 1, WALL = 2, STAIRS = 3, LADDER = 4, DIAG = 5;
 
@@ -662,3 +662,29 @@ export const CLIFFS: Map<number, CliffBlock>[] = (() => {
   }
   return out;
 })();
+
+/**
+ * The ladders that start pulled up (`DROP_LADDERS` in plans.ts), in world coordinates, with the levels they run between (`bottom`, the
+ * foot's floor; `top`, the floor with the hole they come out of), and whether each has been let down yet (set by the map, from the journey).
+ */
+export const DROP_LADDER_LIST = DROP_LADDERS.map(d => {
+  const x = d.x + 1, y = d.y + 1;
+  let bottom = 0;
+  while (bottom < LEVELS && WORLD.levels[bottom].tiles[y * WORLD.w + x] !== LADDER) bottom++;
+  let top = bottom;
+  while (top < LEVELS && WORLD.levels[top].tiles[y * WORLD.w + x] === LADDER) top++;
+  return { id: d.id, x, y, bottom, top };
+});
+const lowered = new Set<string>();
+/** Counts every change, so whatever keeps pictures of the ladders knows to paint them again. */
+export let ladderVersion = 0;
+/** Lets the drop ladders in `ids` down, and pulls the others up (as the journey says). */
+export function setLoweredLadders(ids: readonly string[]) {
+  const next = new Set(ids);
+  if (next.size === lowered.size && [...next].every(id => lowered.has(id))) return;
+  lowered.clear();
+  for (const id of next) lowered.add(id);
+  ladderVersion++;
+}
+/** The drop ladder whose column is (x, y), if it is still pulled up. */
+export const raisedLadderAt = (x: number, y: number) => DROP_LADDER_LIST.find(d => d.x === x && d.y === y && !lowered.has(d.id));

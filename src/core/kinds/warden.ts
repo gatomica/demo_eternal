@@ -146,7 +146,8 @@ export const WARDEN: EnemyKind = {
   // (Usurp Flame, Spin Guard and Dash borrow older poses until they get their own; Turn Away is Idle turned, for now.)
   actionPoses: {
     // (the lunge is her wind-up; she lands in whichever stance follows, Idle or Wax Arm Raised: the scene shows her next stance, `strike` is its Idle for the viewer)
-    "Usurp Flame": { act: "wd-usurp", windup: "wd-usurp-dash", strike: "wd-idle" },
+    // (until her turn to strike comes, she holds Wax Arm Back, the stance it is used from: not the old 2D Usurp Flame pose, `wd-usurp`, which only its 2D scene still uses)
+    "Usurp Flame": { act: "wd-arm-back", windup: "wd-usurp-dash", strike: "wd-idle" },
     // (a leap past your left side, the flail swung through you as she passes, landing behind you and sliding round into Flail Spinning Behind)
     "Flail Swing": { act: "wd-clutch-flail", windup: "wd-swing-windup", strike: "wd-swing", leap: { hold: 250, ms: 400, hop: 0.45, pass: 0.9, behind: 1.4, slide: { far: 1.2, ms: 700 } } },
     "Rising Flail": { act: "wd-spin-behind", strike: "wd-rising" },

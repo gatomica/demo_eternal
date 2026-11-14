@@ -16,7 +16,7 @@ import { StickFigure } from "./StickFigure";
 import { AMBIENT } from "./shade";
 import { facingYaw, liftPose, type P3, placeRig, ribcageOf } from "./rig3d";
 import { LittleFlame } from "./LittleFlame";
-import { UsurpWisps, WispStreams } from "./UsurpWisps";
+import { RaiseWisps, UsurpWisps, WispStreams } from "./UsurpWisps";
 import { FlameStrings } from "./FlameStrings";
 import { FlameAnchor, HeadFlame } from "./HeadFlame";
 import { HEAD_TOP, Waxed3D } from "./Waxed3D";
@@ -105,14 +105,13 @@ export interface SceneFigure {
    * It is striking this one (`key`: which blow, the same for every beat of it): it faces the way it faced it when the blow began, and does not turn from
    * there, whatever the target does (knocked back, dodging past, backing off) until the blow is over.
    */
-  faceToward?: { id: string; key: string };
+  faceToward?: {
+    id: string; key: string;
+    /** It turns to face that one smoothly, from facing you, starting at `since` (a `performance.now()` time) over `ms` (Usurp Flame's first beat). */
+    turn?: { since: number; ms: number };
+  };
   /** The Warden gathering a Flame Blast: red wisps circle round her wax arm, as they do round a lit waxed gathering its flame (`FlameStrings`). */
   armBlaze?: boolean;
-  /**
-   * Whom it stands facing before its blow: the one it has picked, when that is another enemy (the waxed whose flame the Warden's Usurp Flame goes for), instead of you. Its blow
-   * itself is faced as `faceToward` has it.
-   */
-  faceAt?: string;
   /** It fell as the turn now playing plays: the player still faces it (as it struck it) until the turn is over. */
   fellThisTurn?: boolean;
   /** The Warden's remains in his second form: the wax is burnt black. */
@@ -158,7 +157,9 @@ const rand = (seed: number, i: number) => {
  * Draws the floor and every figure through the camera. When a new shot arrives, everyone (and
  * the camera) moves from wherever they are right now to the new spots, over the shot's duration.
  */
-export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [], arena, arenaLit, ignite, light, shade = true, onSelectedBox, orbit, peek }: {
+export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [], raiseWisps, arena, arenaLit, ignite, light, shade = true, onSelectedBox, orbit, peek }: {
+  /** Staggered in his second form, the Warden's wisps flying from his hand (`from`) to circle the fallen waxed he raises (`to`); `gather`: it rises, they go into its head (`RaiseWisps`). */
+  raiseWisps?: { from: string; to: string; key: string; gather: boolean };
   figures: SceneFigure[];
   shot: SceneShot;
   projectiles?: Projectile[];
@@ -426,7 +427,12 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         if (me && foe) faceLock.current.set(f.id, { key: f.faceToward.key, yaw: facingYaw(cFight, me, foe, f.player3d ? "front" : f.view, false), target: f.faceToward.id });
         else faceLock.current.delete(f.id);
       }
-      const held = faceLock.current.get(f.id);
+      const held = faceLock.current.get(f.id), turn = f.faceToward.turn;
+      if (held && turn) {
+        // (turning round to it: from the way it faces you, eased in and out)
+        const k = turn.ms > 0 ? Math.max(0, Math.min(1, (performance.now() - turn.since) / turn.ms)) : 1;
+        if (k < 1) return lerpAngle(facingYaw(cFight, at, posNow("player"), f.view, false), held.yaw, ease(k));
+      }
       if (held) return held.yaw;
     }
     // The player in 3D faces the enemies (the middle of those still up), unless the viewer shows it straight on. One that falls to its blow still
@@ -436,12 +442,25 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
       const foes = (up.length ? up : all).map(g => posNow(g.id)).filter((p): p is Vec => !!p);
       if (foes.length) return facingYaw(cFight, at, { x: foes.reduce((n, p) => n + p.x, 0) / foes.length, z: foes.reduce((n, p) => n + p.z, 0) / foes.length }, "front", false);
     }
-    if (f.faceAt && !f.straight) {
-      const foe = posNow(f.faceAt);
-      if (foe) return facingYaw(cFight, at, foe, f.view, false);
-    }
     return facingYaw(cFight, at, posNow("player"), f.view, !!f.straight);
   };
+  /**
+   * What a 3D figure is drawn from: the camera, where it stands, the way it faces, and its box. One the shot slides (`SceneShot.rigid`) keeps, while it moves,
+   * what it had when the move began: its drawing stays the same (so it is not drawn again: `sameDrawing`), and its slot, placed by where it really is, carries it.
+   */
+  const drawOf = (f: SceneFigure, at: Vec, box: { x: number; y: number; w: number; h: number; depth: number }) => {
+    const live = { cam: c, at, yaw: figureYaw(f, at), box };
+    const m = pos.current.get(f.id);
+    if (!rigidNow.current.ids.has(f.id) || !m || performance.now() - m.start >= m.ms) { held.current.delete(f.id); return live; }
+    const was = held.current.get(f.id);
+    if (was) return was;
+    held.current.set(f.id, live);
+    return live;
+  };
+  /** The figures the current shot slides as pictures (and which shot it is), and the drawing each one keeps meanwhile. */
+  const rigidNow = useRef({ version: -1, ids: new Set<string>() });
+  if (rigidNow.current.version !== shot.version) rigidNow.current = { version: shot.version, ids: new Set(shot.rigid ?? []) };
+  const held = useRef(new Map<string, { cam: Cam; at: Vec; yaw: number; box: { x: number; y: number; w: number; h: number; depth: number } }>());
   /** Where on the floor the Warden's blow lands (his flail's head for the Slam, else his candle fist: `wardenFist`), from his 3D rig, standing at `at`. */
   const wardenFloorAt = (f: SceneFigure, at: Vec): Vec => {
     const { wr } = placeWarden(f.pose, at, figureYaw(f, at), c, w, h, f.scale), p = wardenFist(f.pose), yaw = figureYaw(f, at) + wr.yaw, k = f.scale ?? 1;
@@ -582,8 +601,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
     return [{ body, box, lo, filter: `brightness(${Math.max(0.68, Math.min(1, 1.12 - mid.box.depth * 0.06)) * lightAt(mid.at)})` }];
   });
   // Where each flame on a head burns (a lit waxed's, the candles of the waxed remains): its marker goes inside the figure, so the flame follows it.
-  const headFlames = new Map(placed.filter(({ f }) => f.candle || f.headFlame).map(({ f, box, at }) => [f.id, flameSpot(f, box, at, true)]));
-  const coversFigure = (box: ReturnType<typeof figureBox>) => placed.some(({ box: b }) =>
+  const headFlames = new Map(placed.filter(({ f }) => f.candle || f.headFlame).map(({ f, box, at }) => [f.id, flameSpot(f, box, at, true)]));  const coversFigure = (box: ReturnType<typeof figureBox>) => placed.some(({ box: b }) =>
     b.depth > box.depth && b.x < box.x + box.w && b.x + b.w > box.x && b.y < box.y + box.h && b.y + b.h > box.y);
 
   // The selected figure's box as the camera has it this frame (the camera may still be moving), for the ring over it.
@@ -699,7 +717,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         >
           {f.holdsString && !f.dead && <StringAura layer="back" spread={f.body ? 2.4 : 1} />}
           <div key={wrapKey(f)} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" && !((f.sleepwalker3d || f.player3d) && w > 0) ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.warden3d && w > 0 ? <Warden3D pose={f.pose} lingerFrom={f.lingerFrom} arm={f.arm} phase2Look={f.phase2Look} flailFire={f.flailFire} dead={!!f.dead} charred={f.charred} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} rise={riseOf(f)} w={w} h={h} box={box} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : (f.sleepwalker3d || f.player3d) && w > 0 ? <Sleepwalker3D pose={f.pose} hand={f.hand} punch={f.punch} mirror={f.mirror} weapon={f.weapon} gear={f.player3d ? { weaponItem: f.weaponItem, armor: f.armor, armorItem: f.armorItem, headItem: f.headItem } : undefined} hooded={f.hooded} encased={f.encased} waxCaked={f.waxCaked && !f.dead} dead={!!f.dead} eternalFlash={f.eternalFlash} swayId={f.id} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} cam={c} at={at} yaw={figureYaw(f, at)} scale={f.scale} w={w} h={h} box={box} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
+            {f.dead === "pieces" && !((f.sleepwalker3d || f.player3d) && w > 0) ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.warden3d && w > 0 ? <Warden3D pose={f.pose} lingerFrom={f.lingerFrom} arm={f.arm} phase2Look={f.phase2Look} flailFire={f.flailFire} dead={!!f.dead} charred={f.charred} {...drawOf(f, at, box)} scale={f.scale} rise={riseOf(f)} w={w} h={h} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : (f.sleepwalker3d || f.player3d) && w > 0 ? <Sleepwalker3D pose={f.pose} hand={f.hand} punch={f.punch} mirror={f.mirror} weapon={f.weapon} gear={f.player3d ? { weaponItem: f.weaponItem, armor: f.armor, armorItem: f.armorItem, headItem: f.headItem } : undefined} hooded={f.hooded} encased={f.encased} waxCaked={f.waxCaked && !f.dead} dead={!!f.dead} eternalFlash={f.eternalFlash} swayId={f.id} {...drawOf(f, at, box)} scale={f.scale} w={w} h={h} /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} {...drawOf(f, at, box)} scale={f.scale} w={w} h={h} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {headFlames.has(f.id) && <FlameAnchor id={f.id} x={headFlames.get(f.id)![0] - box.x} y={headFlames.get(f.id)![1] - box.y} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}
@@ -769,12 +787,19 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         const size = Math.max(t.box.h * 1.1, 90);
         return <div className="scene-orb-glow" style={{ left: t.box.x + t.box.w / 2 - size / 2, top: t.box.y + t.box.h * 0.62 - size / 2, width: size, height: size }} />;
       })()}
+      {raiseWisps && w > 0 && (() => {
+        const a = placed.find(x => x.f.id === raiseWisps.from), b = placed.find(x => x.f.id === raiseWisps.to);
+        if (!a || !b) return null;
+        // (up over his head first: a tenth of his height above the top of his box)
+        return <RaiseWisps key={raiseWisps.key} hand={handSpot(a.f, a.box, a.at)} head={flameSpot(b.f, b.box, b.at, true)} size={b.box.h} peak={a.box.y - a.box.h * 0.1} gather={raiseWisps.gather} />;
+      })()}
       {usurpTrails.map(usurpTrail => {
         const a = placed.find(x => x.f.id === usurpTrail.from), b = placed.find(x => x.f.id === usurpTrail.to);
         if (!a || !b) return null;
         const from = flameSpot(a.f, a.box, a.at);
         const hand = handSpot(b.f, b.box, b.at);
-        if (usurpTrail.wisps) return <UsurpWisps key={usurpTrail.key} from={from} to={hand} ms={usurpTrail.wisps} />;
+        // (the wisps fly up first, over his head, then come down into his hand: as the old trail of fire arched over him)
+        if (usurpTrail.wisps) return <UsurpWisps key={usurpTrail.key} from={from} to={hand} ms={usurpTrail.wisps} peak={b.box.y - b.box.h * 0.1} />;
         // Arching up over him: the control point well above both.
         const ctl: Pt = [(from[0] + hand[0]) / 2, Math.min(from[1], hand[1]) - b.box.h * 0.22];
         const N = 28, w = b.box.h * 0.05;
@@ -818,7 +843,6 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
                 key={`wisps-${ignite.seed}`}
                 routes={sources.map(src => ({ from: src.at, to: [hx, hy] as Pt, at: src.draw - IGNITE.draw }))}
                 ms={900}
-                count={5}
               />
             )}
             {/* His flame, growing as they pour in. */}
@@ -1020,32 +1044,40 @@ function FloorGridDrawn({ cam, w, h }: { cam: Cam; w: number; h: number }) {
  * the light is darkened by it.
  */
 const LightFall = memo(LightFallDrawn, (a, b) => a.w === b.w && a.h === b.h && a.center.x === b.center.x && a.center.z === b.center.z && sameCam(a.cam, b.cam));
-function LightFallDrawn({ cam, center, w, h }: { cam: Cam; center: Vec; w: number; h: number }) {
-  const STEP = 0.25, POINTS = 72, BIG = 60000;
-  /** The ring of floor at distance `r` from the player, as screen points (what lies behind the camera is pinned to its near edge). */
-  const ring = (r: number) => {
-    const pts: string[] = [];
-    for (let i = 0; i < POINTS; i++) {
-      const a = (i / POINTS) * Math.PI * 2;
-      const { u, v } = toCamera(cam, { x: center.x + r * Math.cos(a), z: center.z + r * Math.sin(a) });
-      const { sx, sy } = screenOf(u, Math.max(v, NEAR), w, h);
-      pts.push(`${i ? "L" : "M"}${sx.toFixed(1)} ${sy.toFixed(1)}`);
-    }
-    return `${pts.join("")}Z`;
-  };
-  const outside = `M${-BIG} ${-BIG}H${BIG}V${BIG}H${-BIG}Z`;
+/** The light's rings: how many points round each, the way to each point (worked out once), the step between rings, and how far off the dark's outer edge is. */
+const LIGHT_POINTS = 72, LIGHT_STEP = 0.25, LIGHT_BIG = 60000;
+const LIGHT_ROUND = Array.from({ length: LIGHT_POINTS }, (_, i) => [Math.cos((i / LIGHT_POINTS) * Math.PI * 2), Math.sin((i / LIGHT_POINTS) * Math.PI * 2)] as const);
+/** Each ring's distance and how much darkness it adds on top of those inside it (they never change: worked out once). */
+const LIGHT_LAYERS = (() => {
   const layers: { r: number; alpha: number }[] = [];
   let before = 0;
-  for (let r = LIGHT.clear + STEP; r < LIGHT.edge + 1e-6; r += STEP) {
+  for (let r = LIGHT.clear + LIGHT_STEP; r < LIGHT.edge + 1e-6; r += LIGHT_STEP) {
     const now = darkAt(Math.min(r, LIGHT.edge));
     // This ring has to add just enough on top of those inside it to reach the darkness wanted at r.
     layers.push({ r: Math.min(r, LIGHT.edge), alpha: before >= 1 ? 0 : 1 - (1 - now) / (1 - before) });
     before = now;
   }
+  // (a ring that adds nothing is not drawn)
+  return layers.filter(l => l.alpha > 0);
+})();
+const LIGHT_OUTSIDE = `M${-LIGHT_BIG} ${-LIGHT_BIG}H${LIGHT_BIG}V${LIGHT_BIG}H${-LIGHT_BIG}Z`;
+
+function LightFallDrawn({ cam, center, w, h }: { cam: Cam; center: Vec; w: number; h: number }) {
+  /** The ring of floor at distance `r` from the player, as screen points (what lies behind the camera is pinned to its near edge). */
+  const ring = (r: number) => {
+    let d = "";
+    for (let i = 0; i < LIGHT_POINTS; i++) {
+      const [cos, sin] = LIGHT_ROUND[i];
+      const { u, v } = toCamera(cam, { x: center.x + r * cos, z: center.z + r * sin });
+      const { sx, sy } = screenOf(u, Math.max(v, NEAR), w, h);
+      d += `${i ? "L" : "M"}${sx.toFixed(1)} ${sy.toFixed(1)}`;
+    }
+    return `${d}Z`;
+  };
   return (
     <svg className="scene-light" width={w} height={h} aria-hidden="true">
-      {layers.map(({ r, alpha }) => (
-        <path key={r} d={`${outside}${ring(r)}`} fillRule="evenodd" fill="#000" fillOpacity={alpha} />
+      {LIGHT_LAYERS.map(({ r, alpha }) => (
+        <path key={r} d={`${LIGHT_OUTSIDE}${ring(r)}`} fillRule="evenodd" fill="#000" fillOpacity={alpha} />
       ))}
     </svg>
   );

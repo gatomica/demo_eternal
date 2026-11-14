@@ -9,6 +9,7 @@ import { ITEMS, loadoutOfItems, type Picks } from "../explore/items";
 import { StickFigure } from "../render/StickFigure";
 import { cycle, useKeys, menuSound } from "./input";
 import { Picker } from "./Picker";
+import { Kbd } from "./Kbd";
 
 const WEAPON_KEYS = ["none", "shortsword", "axe", "sickle"] as const;
 const ARMOR_KEYS = ["none", "bronze-chestplate", "garb", "robe"] as const;
@@ -78,7 +79,7 @@ export function SetupScreen<S extends Picks & { encounterId?: string }>({ setup,
         <StickFigure view="back" pose="idle" weapon={look.weapon} armor={look.armor} weaponItem={look.weaponItem} armorItem={look.armorItem} headItem={look.headItem} title="Your loadout" />
       </div>
       <p className="hint">
-        <kbd>W</kbd><kbd>S</kbd> choose · <kbd>A</kbd><kbd>D</kbd> change · <kbd>E</kbd> {startLabel.toLowerCase()} · <kbd>Q</kbd> menu
+        <Kbd k="up" /><Kbd k="down" /> choose · <Kbd k="left" /><Kbd k="right" /> change · <Kbd k="yes" /> {startLabel.toLowerCase()} · <Kbd k="no" /> menu
       </p>
       <div className="setup-buttons">
         <button className="hud-button" onClick={onExit}>Menu</button>

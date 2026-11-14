@@ -249,8 +249,9 @@ export const MAP_PROPS: Prop[] = [
   ...sealed(10, scatter(10, [23, 5, 29, 10], 0.3, (x, y) => (x === 26 && y >= 9) || (x >= 25 && x <= 27 && y >= 5 && y <= 7))),
   // South room (the bridge, the three waxed and the lit one among them).
   ...sealed(10, scatter(10, [23, 26, 29, 31], 0.3, (x, y) => (x === 26 && y <= 27) || (x === 24 && y === 28) || (x === 28 && y === 28) || (x === 26 && y === 30) || (x === 26 && y === 28))),
-  // West room (the bridge runs out of it along row 18; the stairs start in its south-west corner).
-  ...sealed(10, scatter(10, [10, 15, 16, 21], 0.3, (x, y) => y === 18 || (x === 11 && y === 21))),
+  // West room (the bridge runs out of it along row 18; the stairs start in its south-west corner; the ladder's hole is in its north-west corner,
+  // with the ladder folded on its north edge until it is let down; three lit waxed).
+  ...sealed(10, scatter(10, [10, 15, 16, 21], 0.3, (x, y) => y === 18 || (x === 11 && y === 21) || (x === 10 && y <= 16) || (x === 13 && y === 17) || (x === 15 && y === 20) || (x === 11 && y === 20))),
   // East room (the bridge comes in along row 18; the passage north is at column 44; the three enemies).
   ...sealed(10, scatter(10, [36, 15, 45, 21], 0.3, (x, y) => y === 18 || (x === 44 && y <= 16) || (x === 40 && (y === 16 || y === 20)))),
   // The side room, waxed over, floor and walls: thick with them.

@@ -351,6 +351,11 @@ export interface SceneShot {
    * `stages`: the move in stages, one after the other along the same line (a dash, then its slide), each easing `out` on its own.
    */
   own?: Record<string, { ms: number; easing?: "out"; endSpeed?: number; since?: number; stages?: MoveStage[] }>;
+  /**
+   * Figures this shot only slides a short way (a knockback, a block's push): while they move, their 3D drawing is kept as it was when they started
+   * and carried along with them (moved and scaled with their box), instead of being drawn again on every frame; once they stop, it is drawn where they are.
+   */
+  rigid?: string[];
   /** Bumped on every new shot, so the scene knows to start moving. */
   version: number;
 }

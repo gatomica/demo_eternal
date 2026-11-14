@@ -3,7 +3,7 @@
  */
 import { sealedAt, paintSealedFloor, paintSealedWall } from "./sealed";
 import { isWaxedLevel, MINED, WAX_FLOOR, WAX_WALL, WOOD, type Palette, paletteOf, RISE } from "./tuning";
-import { blackAt, grateAt, diagRise, RAMP_END, RAMP_START, topAt, rockZoneAt, rubbleAt, wallBase, woodAt, splodgeAt, minedAt, waxAt, barsAt, CLIFFS, type CliffBlock, DIAG, FLOOR, isAir, isArrival, isDiagonalRamp, isRamp, LADDER, type Ramp, diagSide, isHoleDiag, shaftDiagSide, rampAlong, rampAt, rampHeight, type Slope, slopeAt, tileAt, VOID, WALL, wallFacesInto, WORLD } from "./world";
+import { raisedLadderAt, blackAt, grateAt, diagRise, RAMP_END, RAMP_START, topAt, rockZoneAt, rubbleAt, wallBase, woodAt, splodgeAt, minedAt, waxAt, barsAt, CLIFFS, type CliffBlock, DIAG, FLOOR, isAir, isArrival, isDiagonalRamp, isRamp, LADDER, type Ramp, diagSide, isHoleDiag, shaftDiagSide, rampAlong, rampAt, rampHeight, type Slope, slopeAt, tileAt, VOID, WALL, wallFacesInto, WORLD } from "./world";
 
 export const makeCanvas = (w: number, h: number) => {
   const c = document.createElement("canvas");
@@ -106,7 +106,15 @@ export function paintRect(z: number, T: number, x0: number, y0: number, x1: numb
     }
     if (t === DIAG) paintDiag(g, w, f, z, x, y, T, grout, Pt);
     const sd = shaftDiagSide(z, x, y);
-    if (sd >= 0) {
+    if (sd >= 0 && waxAt(z, x, y)) {
+      // A diagonal wall of wax going up past a floor (the end of Floor C's NE corridor): the same coated band as a wax diagonal tile's,
+      // its lip and drips only on the topmost.
+      if (sd < 2) {
+        const ends = [0, 1, 2, 3].filter(i => i !== sd && i !== 3 - sd);
+        const [ax, ay] = [(x + CORNERS[ends[0]][0]) * T, (y + CORNERS[ends[0]][1]) * T], [bx, by] = [(x + CORNERS[ends[1]][0]) * T, (y + CORNERS[ends[1]][1]) * T];
+        paintWaxBand(w, z, ax, ay, bx, by, T, seeded(z, x, y, 9), grout, !(shaftDiagSide(z + 1, x, y) >= 0 && waxAt(z + 1, x, y)));
+      }
+    } else if (sd >= 0) {
       let k = z;
       while (k - 1 >= 1 && shaftDiagSide(k - 1, x, y) >= 0) k--;
       paintShaftWall(w, z, x, y, T, grout, sd, k === z ? P : paletteOf(k));
@@ -135,7 +143,8 @@ export function paintRect(z: number, T: number, x0: number, y0: number, x1: numb
   // Ramps go last, north to south, since each one rises over the row behind it. A ladder is on the wall, so it goes up with the wall.
   for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
     const t = tileAt(z, x, y);
-        if (t === LADDER) { if (ws && own.w(x, y)) paintLadder(ws, x, y, T, grout, ladderLook(z, x, y), tileAt(z - 1, x, y) !== LADDER, tileAt(z + 1, x, y) !== LADDER); continue; }
+        // (A ladder still pulled up isn't there to paint: it lies on the floor above, drawn by the map.)
+        if (t === LADDER) { if (ws && own.w(x, y) && !raisedLadderAt(x, y)) paintLadder(ws, x, y, T, grout, ladderLook(z, x, y), tileAt(z - 1, x, y) !== LADDER, tileAt(z + 1, x, y) !== LADDER); continue; }
     const r = isRamp(t) ? rampAt(z, x, y) : undefined;
     if (r && fs && own.c(x, y)) paintRamp(fs, z, x, y, r, false, T, grout, waxAt(z, x, y) ? WAX_WALL : woodAt(z, x, y) ? WOOD : minedAt(z, x, y) ? MINED : P);
   }
@@ -723,7 +732,7 @@ function paintDiag(g: CanvasRenderingContext2D, w: CanvasRenderingContext2D, f: 
     if (waxAt(z, x, y)) {
       // A wall of wax: the band is coated, like the wax walls; the floor half is the ordinary floor.
       const [ax, ay] = at(CORNERS[ends[0]]), [bx, by] = at(CORNERS[ends[1]]);
-      paintWaxBand(w, z, ax, ay, bx, by, T, seeded(z, x, y, 9), grout, !(tileAt(z + 1, x, y) === DIAG && waxAt(z + 1, x, y)));
+      paintWaxBand(w, z, ax, ay, bx, by, T, seeded(z, x, y, 9), grout, !((tileAt(z + 1, x, y) === DIAG || shaftDiagSide(z + 1, x, y) >= 0) && waxAt(z + 1, x, y)));
     } else {
       paintShaftWall(w, z, x, y, T, grout, opposite, P);
       // (The labyrinth is wax: its diagonal walls drip too, along the slanted top of the band.)

@@ -10,7 +10,8 @@
  *  - you: Idle (`p3-idle`), the feet shuffling along the floor;
  *  - the sleepwalkers: Idle (`sw-idle`) with the feet shuffling, and once they have seen you the Chase (`sw-charge`), its legs swapping each step;
  *  - the waxed: the Crawl (`w-crawl`), one hand reaching ahead while the other pulls back;
- *  - the Wax Blob: its three parts, the waxed sealed in wax (`encased`), crawling out of the low dome of wax they share (`BlobPool`).
+ *  - the Wax Blob: its three parts, the waxed sealed in wax (`encased`), crawling out of the low dome of wax they share (`BlobPool`);
+ *  - the Penitent Warden: standing still in her fight's Wax Arm Raised stance (`Warden3D`), her candle out (sealed, as the fight opens), as big as in the fight.
  *
  * The picture is made when first asked for (it is an image that has to load), so `drawSprite` says whether it drew anything:
  * until it has, the caller draws the figure its old way.
@@ -25,6 +26,8 @@ import { Sleepwalker3D } from "../render/Sleepwalker3D";
 import { liftPose, placeRig } from "../render/rig3d";
 import { HEAD_TOP, Waxed3D } from "../render/Waxed3D";
 import { BlobPool } from "../render/WaxBlob";
+import { Warden3D } from "../render/Warden3D";
+import { ENEMY_KINDS } from "../core/bestiary";
 import type { Frame, Look } from "./figures";
 import type { Dir } from "./world";
 
@@ -149,7 +152,7 @@ function figureCss(): string {
     let rules: CSSRuleList;
     try { rules = sheet.cssRules; } catch { continue; }
     for (const rule of Array.from(rules)) {
-      if (rule instanceof CSSStyleRule && /\.(fig-|armor-|blob-)/.test(rule.selectorText)) css += `${rule.cssText}\n`;
+      if (rule instanceof CSSStyleRule && /\.(fig-|armor-|blob-|wd-)/.test(rule.selectorText)) css += `${rule.cssText}\n`;
     }
   }
   const root = getComputedStyle(document.documentElement);
@@ -225,6 +228,24 @@ function blobSvg(look: Look, weapons: Record<"left" | "mid" | "right", WeaponTie
     inner += one.inner;
   }
   return pictureSvg(inner, "", look, BLOB_BOX, px);
+}
+
+/** The Warden's picture: she is a good deal taller than the others (her kind's `scale`), and her wax arm is raised over her head. */
+const WARDEN_BOX = { x: -45, y: -45, size: 190 };
+
+/** The Penitent Warden as the map shows her, facing `facing`: still, in her stance as the fight opens (Wax Arm Raised), her candle out. */
+function wardenSvg(facing: Dir, px: number): string | undefined {
+  const kind = ENEMY_KINDS.warden;
+  const pose = (kind.stancePoses["Wax Arm Raised"] ?? "wd-shoulder") as PoseName;
+  const box = orbitBox(CAM, SPOT, W, H, kind.scale);
+  const html = renderToStaticMarkup(createElement(Warden3D, { pose, arm: "out", cam: CAM, at: SPOT, yaw: yawFor(facing, true), scale: kind.scale, w: W, h: H, box }));
+  const open = /^<svg[^>]*?class="([^"]*)"[^>]*>/.exec(html);
+  const end = html.lastIndexOf("</svg>");
+  if (!open || end < 0) return undefined;
+  const inner = `<g transform="translate(${box.x} ${box.y}) scale(${box.w / 100})">${html.slice(open[0].length, end)}</g>`;
+  // (In the fight's own ink: she has no map colours of her own.)
+  const ink = getComputedStyle(document.documentElement).getPropertyValue("--ink").trim() || "#1a1a1f";
+  return pictureSvg(inner, open[1], { ink } as Look, WARDEN_BOX, px);
 }
 
 /** The pictures made, by look, side, step and size; "pending" while one loads, "failed" if it will not come. */
@@ -324,4 +345,9 @@ export function drawBlobSprite(
   g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir, frame: Frame, look: Look, weapons: Record<"left" | "mid" | "right", WeaponTier>,
 ): boolean {
   return show(g, x, y, T, facing, frame, `blob|${lookKey(look)}|${weapons.left}|${weapons.mid}|${weapons.right}`, BLOB_BOX, (f, px) => blobSvg(look, weapons, facing, f, px));
+}
+
+/** The Penitent Warden standing on the map, the way her fight draws her (see `wardenSvg`). False until her picture is ready. */
+export function drawWardenSprite(g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir): boolean {
+  return show(g, x, y, T, facing, "stand", "warden", WARDEN_BOX, (_f, px) => wardenSvg(facing, px));
 }

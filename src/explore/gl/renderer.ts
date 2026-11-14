@@ -24,6 +24,8 @@ const wallTone = (fade: number) => Math.min(1, fade * 2.5);
 
 /** Every ladder, drawn over everything else on the map (a ladder is on top of whatever wall it climbs). */
 const LADDER_LIST = ladderTiles();
+/** The columns of the drop ladders (`DROP_LADDER_LIST`), which the painted pages may not have. */
+const DROP_TILES = new Set(DROP_LADDER_LIST.map(d => `${d.x},${d.y}`));
 
 /** Per room, its lines grouped by where they lie: a wall a room has on several levels is one group. */
 const GROUPS: (Line[][] | undefined)[] = [];
@@ -45,7 +47,7 @@ import { BODY_ABOVE_FEET, COLORS, GHOST_ALPHA, MAX_PIXEL_RATIO, RENDER_SCALE, RI
 import type { Light, MapRenderer, View } from "../view";
 import { groupRows, WALL_TILES } from "../view";
 import { isDev } from "../../ui/dev";
-import { blackAt, openAboveAt, ladderTiles, rampishAt, barsAt, CLIFFS, DIAG, diagSide, FLOOR, isHoleDiag, levelOf, LEVELS, onShaftOpen, roomLimit, shaftDiagSide, slopeAt, STAIRS, tileAt, WALL, wallFacesInto, WORLD } from "../world";
+import { blackAt, openAboveAt, ladderTiles, DROP_LADDER_LIST, raisedLadderAt, rampishAt, barsAt, CLIFFS, DIAG, diagSide, FLOOR, isHoleDiag, levelOf, LEVELS, onShaftOpen, roomLimit, shaftDiagSide, slopeAt, STAIRS, tileAt, WALL, wallFacesInto, WORLD } from "../world";
 import { createStatsOverlay } from "./stats";
 
 const VERTEX = `#version 300 es
@@ -878,8 +880,12 @@ export function createGLRenderer(canvas: HTMLCanvasElement): MapRenderer | null 
       if (lightDebug && z === base) tileFacts(z);
       if (z < base && inSight[z] && fade > 0) actorsOnly(z, () => true);
     }
-    /** The ladders, over the walls: seen wherever the floor in front of them is lit. */
-    const ladderOverlay = () => {
+    /**
+     * The ladders, over the walls: seen wherever the floor in front of them is lit. Not the one you climb, which you are in front of (the
+     * painted pages have it behind you); `behindYou`: only that one, if it is a drop ladder let down after the pages were painted, drawn
+     * before you so it doesn't vanish where you are.
+     */
+    const ladderOverlay = (behindYou = false) => {
       ag.globalCompositeOperation = "source-over";
       ag.globalAlpha = 1;
       ag.clearRect(0, 0, W, H);
@@ -887,6 +893,8 @@ export function createGLRenderer(canvas: HTMLCanvasElement): MapRenderer | null 
       let any = false;
       ag.lineCap = "round";
       for (const l of LADDER_LIST) {
+        // (Not one still pulled up.)
+        if (raisedLadderAt(l.x, l.y)) continue;
         if (wallFade(Math.abs(l.z - cur)) <= 0 || (l.z > cur && noWallsAbove) || hiddenAbove(l.z, l.x, l.y)) continue;
         // (Not through a floor above it that is drawn: the bridges of a higher floor cover a ladder far below.)
         let covered = false;
@@ -896,7 +904,8 @@ export function createGLRenderer(canvas: HTMLCanvasElement): MapRenderer | null 
         }
         if (covered) continue;
         // (Not over you: you climb in front of it.)
-        if (v.player && Math.floor(v.x) === l.x && Math.floor(v.y) === l.y && v.alt >= l.z - 0.01 && v.alt <= l.z + 1.01) continue;
+        const atYou = !!v.player && Math.floor(v.x) === l.x && Math.floor(v.y) === l.y && v.alt >= l.z - 0.01 && v.alt <= l.z + 1.01;
+        if (behindYou ? !(atYou && DROP_TILES.has(`${l.x},${l.y}`)) : atYou) continue;
         const sx = ox + l.x * T, sy = levelY(l.z) + l.y * T;
         if (sx < -T || sx > W || sy < -T || sy > H + T) continue;
         const light = lightOf(l.z)(l.x + 0.5, l.y + 0.5);
@@ -941,6 +950,7 @@ export function createGLRenderer(canvas: HTMLCanvasElement): MapRenderer | null 
     } else if (inSight[base]) actorsOnly(base, y => !v.player || y <= v.y);
     if (!v.player) ladderOverlay();
     if (v.player) {
+      ladderOverlay(true);
       ag.globalCompositeOperation = "source-over";
       ag.globalAlpha = 1;
       ag.clearRect(0, 0, W, H);

@@ -1,7 +1,7 @@
 /**
  * effects.tsx — things flying and spreading across the field: projectiles, shockwaves, impact rings.
  */
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { NEAR, type Vec } from "./camera";
 import type { Pt } from "./geom";
 
@@ -225,15 +225,29 @@ const FLAME_HIT = [
 ] as const;
 
 /**
+ * The fire hit's glow, as its old 5 px blur left a disc of radius 34 (about 3.5 of its units of softness at a figure's usual size): solid to `GLOW_SOLID` of the
+ * gradient's radius (where the disc's edge, half faded, is), then fading out as a blurred edge does.
+ */
+const GLOW_SOLID = 34 / 41;
+const GLOW_EDGE: [number, number][] = [[0, 1], [0.66, 1], [0.75, 0.84], [GLOW_SOLID, 0.5], [0.91, 0.16], [1, 0]];
+
+/**
  * Flames licking a unit a fire attack has hit: tongues flaring up around its body in a flash of
  * orange glow, then dying away. Drawn over the unit, centered on `cx`, `cy` (screen pixels), the
  * size of its box.
  */
 export function FlameHit({ cx, cy, size }: { cx: number; cy: number; size: number }) {
+  const glow = useId();
   return (
     <div className="flame-hit" style={{ left: cx, top: cy, width: size * 0.8, height: size * 0.9 }} aria-hidden="true">
       <svg viewBox="-50 -60 100 100" overflow="visible">
-        <circle cx={0} cy={-8} r={34} className="flame-hit-glow" />
+        {/* The glow: a disc of radius 34 with soft edges, drawn as a gradient (a blur filter would be blurred again on every frame of its swelling). */}
+        <defs>
+          <radialGradient id={glow}>
+            {GLOW_EDGE.map(([at, a]) => <stop key={at} offset={at} stopColor="rgb(255 140 50)" stopOpacity={0.45 * a} />)}
+          </radialGradient>
+        </defs>
+        <circle cx={0} cy={-8} r={34 / GLOW_SOLID} className="flame-hit-glow" fill={`url(#${glow})`} />
         {FLAME_HIT.map(([x, y, k, delay], i) => (
           <g key={i} transform={`translate(${x * 100} ${y * 100 + 28}) scale(${k * 2.3})`}>
             <g className="flame-hit-tongue" style={{ animationDelay: `${delay}s` }}>

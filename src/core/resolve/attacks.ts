@@ -40,6 +40,17 @@ export function resolveAttacks(t: Turn, rng: Rng) {
   queue.forEach(({ attacker, target }) => {
     strike(t, attacker, target);
     shockwave(t, attacker);
+    // An attack it dies of (a lit waxed's Flame Immolation): it dies the moment its blast goes out, sealed in wax (no candle left to burn); it falls
+    // with this very blow, below.
+    if (attacker !== p && !t.cancelled.has(attacker.id)) {
+      const self = attacker as Enemy;
+      if (self.intent.action && kindOf(self).fatalActions?.includes(self.intent.action)) {
+        self.hp = 0;
+        self.fatigue = 0;
+        self.staggered = false;
+        self.fate = "encased";
+      }
+    }
     // After each blow, falls and staggers take effect before the next one.
     for (const f of fighters) {
       if (t.out.has(f.id)) continue;

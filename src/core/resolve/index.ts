@@ -47,7 +47,34 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
   settleRests(t);
   resolveMovement(t);
   endTurn(t);
+  return finishTurn(t, rng);
+}
 
+/**
+ * The developer tools' Skip battle: a turn in which no one acts (you included), and every enemy still up falls on the spot, as if struck down.
+ * The turn ends as any other, so revives still land: the Warden falls, rises with his revive and goes into his second form; skipped again
+ * there, he falls for good and the fight is won.
+ */
+export function resolveSkip(prev: CombatState, rng: Rng = Math.random): CombatState {
+  if (prev.status !== "playing") return prev;
+  const t = beginTurn(prev, { type: "rest" });
+  t.act = null;
+  t.resting.clear();
+  for (const e of t.alive) {
+    e.hp = 0;
+    e.fatigue = 0;
+    e.staggered = false;
+    t.out.add(e.id);
+    t.fallen.add(e.id);
+    t.emit({ kind: "fall", who: e.id });
+  }
+  t.endStep();
+  endTurn(t);
+  return finishTurn(t, rng);
+}
+
+/** A resolved turn's last touches: its steps kept, the turn counted, and every enemy's next intent picked. */
+function finishTurn(t: ReturnType<typeof beginTurn>, rng: Rng): CombatState {
   const { s } = t;
   s.lastTurn = t.steps;
   s.turn += 1;

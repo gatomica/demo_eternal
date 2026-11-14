@@ -8,7 +8,7 @@
  *
  * The robe was removed from this drawing (it is to be modelled again, in parts, from scratch); only the fallen heap (`dead`) still draws a cloak.
  */
-import { Fragment, memo, type ReactNode, useContext, useEffect, useId, useState } from "react";
+import { Fragment, memo, type ReactNode, type Ref, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { type Cam, METERS_PER_UNIT as U, type Vec } from "./camera";
 import { DebugLimbsContext } from "./debugLimbs";
 import { visibleCap } from "./hoodCap";
@@ -151,14 +151,149 @@ function smooth(ps: [number, number][]): string {
   return `M${f(start[0])},${f(start[1])}${ps.map((p, i) => { const e = m(i); return `Q${f(p[0])},${f(p[1])} ${f(e[0])},${f(e[1])}`; }).join("")}z`;
 }
 
-/** The outline of a set of points on the screen (a convex hull: the silhouette of a cone is its tip and its base's outline together). */
-function hull(ps: [number, number][]): [number, number][] {
+const turn = (o: [number, number], a: [number, number], b: [number, number]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+/** The convex hull of a few points (the monotone chain: each corner turning the same way, points along an edge left out). */
+function chainHull(ps: [number, number][]): [number, number][] {
   const pts = [...ps].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const turn = (o: [number, number], a: [number, number], b: [number, number]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
   const lower: [number, number][] = [], upper: [number, number][] = [];
   for (const p of pts) { while (lower.length >= 2 && turn(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop(); lower.push(p); }
-  for (const p of [...pts].reverse()) { while (upper.length >= 2 && turn(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop(); upper.push(p); }
+  for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (upper.length >= 2 && turn(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop(); upper.push(p); }
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
+}
+
+/**
+ * The outline of a set of points on the screen (a convex hull: the silhouette of a cone is its tip and its base's outline together).
+ * An egg's outline is the hull of some 750 points a frame, most of them well inside it: first the points furthest out eight ways (left, right, up, down
+ * and the diagonals) are taken, and every point strictly inside the shape they make is dropped before the sort, since none of those can be a corner of
+ * the outline. The outline is the same as from all the points.
+ */
+function hull(ps: [number, number][]): [number, number][] {
+  if (ps.length < 16) return chainHull(ps);
+  const ext: [number, number][] = [ps[0], ps[0], ps[0], ps[0], ps[0], ps[0], ps[0], ps[0]];
+  for (const p of ps) {
+    const [x, y] = p;
+    if (x < ext[0][0]) ext[0] = p;
+    if (x > ext[1][0]) ext[1] = p;
+    if (y < ext[2][1]) ext[2] = p;
+    if (y > ext[3][1]) ext[3] = p;
+    if (x + y < ext[4][0] + ext[4][1]) ext[4] = p;
+    if (x + y > ext[5][0] + ext[5][1]) ext[5] = p;
+    if (x - y < ext[6][0] - ext[6][1]) ext[6] = p;
+    if (x - y > ext[7][0] - ext[7][1]) ext[7] = p;
+  }
+  const ring = chainHull(ext);
+  if (ring.length < 3) return chainHull(ps);
+  const n = ring.length, keep: [number, number][] = [];
+  for (const p of ps) {
+    let inside = true;
+    for (let k = 0; k < n; k++) if (turn(ring[k], ring[(k + 1) % n], p) <= 0) { inside = false; break; }
+    if (!inside) keep.push(p);
+  }
+  return chainHull(keep);
+}
+
+/**
+ * The edge of an opening in a robe egg (`cutOpening`), as lines of points in space: a contour through a grid of the egg's surface (marching squares, each
+ * crossing placed by interpolation, so it is a smooth line and not steps). `nodes` holds each node's point, the way it faces and how far beyond the cutting
+ * plane it is (7 numbers a node, `NU + 1` rows of `NA` round); a node is in the opening where it is beyond the plane, faces the viewer (`look`) and, with
+ * `hiddenBy`, is not behind that egg. `field` is the same test anywhere on the surface (for a saddle cell's middle), and `surface` a point of it.
+ */
+function traceOpening(o: {
+  nodes: Float64Array; look: P3; NU: number; NA: number; uOf: (i: number) => number; aOf: (j: number) => number;
+  surface: (u: number, a: number) => P3; field: (u: number, a: number) => number; hiddenBy?: Egg;
+}): P3[][] {
+  const { nodes, look, NU, NA, uOf, aOf, surface, field, hiddenBy } = o;
+  const f = new Float64Array((NU + 1) * NA), on = new Uint8Array((NU + 1) * NA), p: [number, number, number] = [0, 0, 0];
+  for (let n = 0; n < f.length; n++) {
+    const k = n * 7;
+    let v = Math.min(nodes[k + 6], -(nodes[k + 3] * look[0] + nodes[k + 4] * look[1] + nodes[k + 5] * look[2]));
+    if (v > 0 && hiddenBy) { p[0] = nodes[k]; p[1] = nodes[k + 1]; p[2] = nodes[k + 2]; v = Math.min(v, clearAlong(hiddenBy, p, look)); }
+    f[n] = v;
+    on[n] = v > 0 ? 1 : 0;
+  }
+  const at = (i: number, j: number) => i * NA + (j % NA);
+  // Where the contour crosses each edge of the grid (an edge is numbered by which way it runs and its first corner), and which crossings a cell joins.
+  const cross2 = new Map<number, P3>(), links = new Map<number, number[]>();
+  const crossing = (i0: number, j0: number, i1: number, j1: number): number => {
+    const id = ((i0 === i1 ? 0 : NU + 1) + Math.min(i0, i1)) * NA + (Math.min(j0, j1) % NA);
+    if (!cross2.has(id)) {
+      const f0 = f[at(i0, j0)], f1 = f[at(i1, j1)], t = f0 / (f0 - f1);
+      cross2.set(id, surface(uOf(i0) + (uOf(i1) - uOf(i0)) * t, aOf(j0) + (aOf(j1) - aOf(j0)) * t));
+    }
+    return id;
+  };
+  const join = (x: number, y: number) => { (links.get(x) ?? links.set(x, []).get(x)!).push(y); (links.get(y) ?? links.set(y, []).get(y)!).push(x); };
+  const ci = [0, 0, 1, 1], cj = [0, 1, 1, 0], hit: number[] = [], c = [0, 0, 0, 0];
+  for (let i = 0; i < NU; i++) {
+    for (let j = 0; j < NA; j++) {
+      for (let e = 0; e < 4; e++) c[e] = on[at(i + ci[e], j + cj[e])];
+      // (a cell wholly in or wholly out of the opening has no edge through it: most of them)
+      if (c[0] === c[1] && c[1] === c[2] && c[2] === c[3]) continue;
+      hit.length = 0;
+      for (let e = 0; e < 4; e++) {
+        const e1 = (e + 1) % 4;
+        if (c[e] === c[e1]) continue;
+        hit.push(crossing(i + ci[e], j + cj[e], i + ci[e1], j + cj[e1]));
+      }
+      if (hit.length === 2) join(hit[0], hit[1]);
+      else if (hit.length === 4) {
+        // (a saddle: the contour crosses all four sides. Which pairs it joins depends on the middle of the cell: if the middle is on the first corner's side, the
+        // first and third corners are joined through it, and the second and fourth are each cut off on their own; otherwise the first and third are. The
+        // crossings are listed by side, the first side running from the first corner to the second)
+        const mid = field(uOf(i + 0.5), aOf(j + 0.5)) > 0;
+        if (mid === (c[0] === 1)) { join(hit[0], hit[1]); join(hit[2], hit[3]); } else { join(hit[3], hit[0]); join(hit[1], hit[2]); }
+      }
+    }
+  }
+  // The crossings, chained into closed lines (or, where the opening runs off the egg's end, open ones, closed straight across).
+  const seen2 = new Set<number>(), lines: P3[][] = [];
+  const starts = [...links.keys()].sort((x, y) => (links.get(x)!.length - links.get(y)!.length));
+  for (const start of starts) {
+    if (seen2.has(start)) continue;
+    const line: number[] = [];
+    let at2: number | undefined = start, from: number | undefined;
+    while (at2 !== undefined && !seen2.has(at2)) {
+      seen2.add(at2); line.push(at2);
+      const next: number | undefined = links.get(at2)!.find(q => q !== from && !seen2.has(q));
+      from = at2; at2 = next;
+    }
+    if (line.length < 4) continue;
+    lines.push(line.map(id => cross2.get(id)!));
+  }
+  return lines;
+}
+
+/* ---------- Eggs (her ribcage, her pelvis and the robe over them): shared by every frame and every pose ---------- */
+/** An egg (convex, so its outline on the screen is the hull of its surface's points, drawn as a smooth curve): its sections along its axis are an ellipse's, each
+ *  scaled by how far down it is, wider below the middle and narrower above. */
+const eggRing = (u: number, taper: number) => Math.sqrt(Math.max(0, 1 - u * u)) * (1 - taper * u * (1 - 0.3 * u * u));
+/** An egg's section across (side to side) at `u`, as a share of its half width: its own taper across, and narrowed (`narrow`), steadily along it. */
+const ringAcross = (E: Egg, u: number) => {
+  const ring = eggRing(u, E.taperW ?? E.taper), n = E.narrow;
+  return n ? ring * (n.mid + (n.mid - n.low) * u) : ring;
+};
+/** How far the point (`x`, `y`, `z`) is outside an egg (above 0: outside, below: inside), roughly, in shares of its size. (Above its middle, a bent egg's upper
+ *  half's axis.) Plain numbers in and out, nothing made: the robe's openings ask it tens of thousands of times a frame. */
+function outsideAt(E: Egg, x: number, y: number, z: number): number {
+  const m = E.middle, dx = x - m[0], dy = y - m[1], dz = z - m[2], T = E.upper;
+  let up = E.up, fwd = E.fwd, halfH = E.halfH;
+  if (T && dx * T.up[0] + dy * T.up[1] + dz * T.up[2] > 0) { up = T.up; fwd = T.fwd; halfH = T.halfH; }
+  const u = (dx * up[0] + dy * up[1] + dz * up[2]) / halfH;
+  if (Math.abs(u) >= 1) return u * u - 1;
+  const sd = E.side;
+  const s = (dx * sd[0] + dy * sd[1] + dz * sd[2]) / (E.halfW * Math.max(1e-3, ringAcross(E, u))), f = (dx * fwd[0] + dy * fwd[1] + dz * fwd[2]) / (E.halfD * Math.max(1e-3, eggRing(u, E.taper)));
+  return Math.max(s * s + f * f - 1, u * u - 1);
+}
+/** Whether a point is in sight past an egg (above 0) or behind it (below): how far outside the egg the line from it toward the viewer (`toViewer`, the way
+ *  the viewer looks) stays, at its closest, tried at 25 points along it. */
+function clearAlong(E: Egg, p: P3, toViewer: P3): number {
+  const reach = 2.5 * Math.max(E.halfH, E.halfW, E.halfD), STEPS = 24;
+  let least = Infinity;
+  for (let s = 0; s <= STEPS; s++) {
+    const k = (-reach * s) / STEPS;
+    least = Math.min(least, outsideAt(E, p[0] + toViewer[0] * k, p[1] + toViewer[1] * k, p[2] + toViewer[2] * k));
+  }
+  return least;
 }
 
 /**
@@ -180,9 +315,46 @@ const geometryOf = (wr: object): PoseGeometry => {
   return g;
 };
 
-function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred, title, cam, at, yaw, scale = 1, rise = 0, lingerFrom, w, h, box }: Warden3DProps) {
-  const clip = `wd3${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
-  const debug = useContext(DebugLimbsContext);
+function Warden3DView(props: Warden3DProps) {
+  const clip = `wd3${useId().replace(/[^a-zA-Z0-9]/g, "")}`, root = useRef<SVGSVGElement>(null);
+  // (his second form's paints, and the burning flail's: pinned to the page's clock)
+  const beats = !!(props.phase2Look || props.arm === "scorched" || props.flailFire);
+  useLayoutEffect(() => { if (beats && root.current) pinBeats(root.current); });
+  return drawWarden(props, clip, useContext(DebugLimbsContext), root);
+}
+
+/**
+ * The paints his fading colours are worn in (`.wd-p-*` in index.css): for his second form, his wax in each shade a piece uses it in, his skirt's edges, his
+ * belt, his candle arm, and the inside of his hood burning; for his burning flail, its ball's wax in its shades. Each is a gradient of a single stop, so one
+ * plain colour, and only that stop is animated: a dozen elements fade, and the pieces that wear them are only painted again, never restyled.
+ */
+const SECOND_FORM_PAINTS = ["wd-p-wax", "wd-p-wax88", "wd-p-wax76", "wd-p-wax55", "wd-p-edge", "wd-p-belt", "wd-p-arm", "wd-p-fire"];
+const FLAIL_FIRE_PAINTS = ["wd-p-ball", "wd-p-ball88", "wd-p-ball78"];
+function WaxPaints({ ids }: { ids: string[] }) {
+  return (
+    <defs>
+      {ids.map(id => <linearGradient key={id} id={id} gradientUnits="userSpaceOnUse"><stop className={id} /></linearGradient>)}
+    </defs>
+  );
+}
+const BEATS = new Set([...SECOND_FORM_PAINTS, ...FLAIL_FIRE_PAINTS]);
+/** Starts every paint's fade at the page's clock's zero: a paint drawn anew (the figure redrawn, a second Warden on the page) is at once where the others are. */
+function pinBeats(root: Element) {
+  for (const a of root.getAnimations({ subtree: true })) if (a instanceof CSSAnimation && BEATS.has(a.animationName) && a.startTime !== 0) a.startTime = 0;
+}
+
+/**
+ * Works out, ahead of time, all of a pose's drawing that does not depend on the camera (`PoseGeometry`: the eggs' surfaces, the robe's openings, the skirt,
+ * the belt): the first drawing of a pose costs several frames' time, which would stall the fight the first time the Warden takes it up. Drawn once, out of
+ * sight, from an ordinary camera; the picture itself is thrown away.
+ */
+export function warmWardenPose(pose: string) {
+  const cam: Cam = { x: 0, z: -3, yaw: 0 }, at = { x: 0, z: 0 }, w = 1280, h = 720;
+  drawWarden({ pose: pose as PoseName, cam, at, yaw: Math.PI, w, h, box: { x: 0, y: 0, w: 100, h: 120 } }, "warm", false);
+}
+
+/** The Warden's drawing (`Warden3D`), with what it takes from React given: its own id for its clip paths and masks, and whether the Debug status is on. */
+function drawWarden({ pose, arm = "lit", phase2Look, flailFire, dead, charred, title, cam, at, yaw, scale = 1, rise = 0, lingerFrom, w, h, box }: Warden3DProps, clip: string, debug: boolean, rootRef?: Ref<SVGSVGElement>) {
   // (Dead, she kneels in `wd-dead`, fully encased in wax under her robes.)
   const { wr, placed } = placeWarden(dead ? "wd-dead" : pose, at, yaw, cam, w, h, scale, rise);
   // (his right arm and her left leg are always the one white: the robe's opening shows them, and with the robe on nothing white is beside them for the far-limb shade
@@ -194,11 +366,35 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
   // (his second form's look, for the scene that ignites it and for the rest of the fight, his candle arm scorched)
   const className = `wd-figure${phase2Look || arm === "scorched" ? " wd-phase2" : ""}${flailFire ? " wd-flaming" : ""}${dead ? " wd-encased" : ""}${dead && charred ? " is-charred" : ""}`;
   const pts = (ps: P3[]) => ps.map(p => { const q = see(p); return `${X(q)},${Y(q)}`; }).join(" ");
-  /** The way the viewer looks at a point, in body space: where depth grows fastest. */
-  const look3At = (p: P3): P3 => {
-    const d0 = see(p).depth;
-    return unit([0, 1, 2].map(i => see(plus(p, [0, 1, 2].map(k => (k === i ? 0.01 : 0)) as unknown as P3)).depth - d0) as unknown as P3);
+  /**
+   * Where points land in the drawing (`X`, `Y` of what `see` gives), without making anything for each. The lens is an affine map of a point (its
+   * placing, lean and the camera) followed by the perspective divide, so a point's screen x over its pixels-a-meter, its y over that, and one over that
+   * are each affine in it: they are worked out once a frame from four points, and each point after costs a few multiplications.
+   */
+  const lens = (() => {
+    // (four points a quarter of a meter apart, all well in front of the camera)
+    const S = 0.25, q0 = see([0, 0, 0]), qs = ([[S, 0, 0], [0, S, 0], [0, 0, S]] as P3[]).map(p => see(p));
+    const a = (q: { sx: number; ppm: number }) => q.sx / q.ppm, b = (q: { sy: number; ppm: number }) => q.sy / q.ppm, c = (q: { ppm: number }) => 1 / q.ppm;
+    const A = [a(q0), ...qs.map(q => (a(q) - a(q0)) / S)], B = [b(q0), ...qs.map(q => (b(q) - b(q0)) / S)], C = [c(q0), ...qs.map(q => (c(q) - c(q0)) / S)];
+    return { A, B, C };
+  })();
+  const { ux, uy } = c;
+  /** A point's place in the drawing, as `[X(see(p)), Y(see(p))]`. */
+  const xyOf = (x: number, y: number, z: number): [number, number] => {
+    const { A, B, C } = lens, k = C[0] + C[1] * x + C[2] * y + C[3] * z;
+    const sx = (A[0] + A[1] * x + A[2] * y + A[3] * z) / k, sy = (B[0] + B[1] * x + B[2] * y + B[3] * z) / k;
+    return [Math.round(((sx - box.x) / ux) * 100) / 100, Math.round(((sy - box.y) / uy) * 100) / 100];
   };
+  const xy = (p: P3) => xyOf(p[0], p[1], p[2]);
+  /**
+   * The way the viewer looks, in body space: where depth grows fastest. Depth is a point's distance along the camera's own axis, an affine map of it, so
+   * this is the same way at every point of the figure: worked out once a frame (at the pelvis), whatever point it is asked at.
+   */
+  let lookOnce: P3 | null = null;
+  const look3At = (_p?: P3): P3 => lookOnce ??= (() => {
+    const p = j.pelvis, d0 = see(p).depth;
+    return unit([0, 1, 2].map(i => see(plus(p, [0, 1, 2].map(k => (k === i ? 0.01 : 0)) as unknown as P3)).depth - d0) as unknown as P3);
+  })();
   /** The cylinder trick: of a band round a rod from `a` to `b` (radius `r`, figure units), the half of its outside that faces the viewer, as one outline: along
    *  the near half of the circle round `a`, then back along the near half of the circle round `b`. Its two edges curve as a cylinder's do, and the rest of it,
    *  turned away, is never drawn. */
@@ -286,53 +482,52 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
   // its top tipped back and its bottom brought forward, so that seen from the side it is full and rounded low on the front, as a bust hangs, and slopes back above.
   // The pelvis is an egg leaned the other way, its top forward and its round bottom back: its narrow top is the waist, going up under the ribcage, and its full
   // bottom her hips and seat. Then both legs)
-  /** An egg in space (convex, so its outline on the screen is the hull of its surface's points, drawn as a smooth curve): its sections along its axis are an ellipse's, each
-   *  scaled by how far down it is, wider below the middle and narrower above. */
-  const eggRing = (u: number, taper: number) => Math.sqrt(Math.max(0, 1 - u * u)) * (1 - taper * u * (1 - 0.3 * u * u));
-  /** An egg's section across (side to side) at `u`, as a share of its half width: its own taper across, and narrowed (`narrow`), steadily along it. */
-  const ringAcross = (E: Egg, u: number) => {
-    const ring = eggRing(u, E.taperW ?? E.taper), n = E.narrow;
-    return n ? ring * (n.mid + (n.mid - n.low) * u) : ring;
-  };
   /** A point on an egg's surface: `u` along its axis (-1 the bottom, 1 the top), `a` round it (0 to its side, π/2 to its front). */
   /** An egg's axis at `u`: its own, or above its middle its upper half's (eased from one to the other across the bend, when it has a `blend`). */
+  // (the egg's own axis, `E` itself, where it does not bend; where it bends gradually, worked out once for each height asked: a grid asks for a row's many times)
+  const bentAxes = new WeakMap<Egg, Map<number, { up: P3; fwd: P3; halfH: number }>>();
   const axisAt = (E: Egg, u: number): { up: P3; fwd: P3; halfH: number } => {
     const T = E.upper;
-    if (!T) return { up: E.up, fwd: E.fwd, halfH: E.halfH };
-    if (!T.blend) return u > 0 ? T : { up: E.up, fwd: E.fwd, halfH: E.halfH };
-    const c = Math.max(0, Math.min(1, (u + T.blend) / (2 * T.blend))), w = c * c * (3 - 2 * c);
-    return { up: unit(mix(E.up, T.up, w)), fwd: unit(mix(E.fwd, T.fwd, w)), halfH: E.halfH + (T.halfH - E.halfH) * w };
+    if (!T) return E;
+    if (!T.blend) return u > 0 ? T : E;
+    let kept = bentAxes.get(E);
+    if (!kept) bentAxes.set(E, kept = new Map());
+    let A = kept.get(u);
+    if (!A) {
+      const c = Math.max(0, Math.min(1, (u + T.blend) / (2 * T.blend))), w = c * c * (3 - 2 * c);
+      kept.set(u, A = { up: unit(mix(E.up, T.up, w)), fwd: unit(mix(E.fwd, T.fwd, w)), halfH: E.halfH + (T.halfH - E.halfH) * w });
+    }
+    return A;
   };
+  // (written out a coordinate at a time: a pose's first drawing asks for some hundred thousand of these)
   const eggPoint = (E: Egg, u: number, a: number): P3 => {
-    const ring = eggRing(u, E.taper), ringW = ringAcross(E, u), A = axisAt(E, u);
-    return [0, 1, 2].map(i => E.middle[i] + A.up[i] * A.halfH * u + E.side[i] * E.halfW * ringW * Math.cos(a) + A.fwd[i] * E.halfD * ring * Math.sin(a)) as unknown as P3;
+    const ring = eggRing(u, E.taper), ringW = ringAcross(E, u), A = axisAt(E, u), m = E.middle, up = A.up, sd = E.side, fw = A.fwd, ca = Math.cos(a), sa = Math.sin(a);
+    return [
+      m[0] + up[0] * A.halfH * u + sd[0] * E.halfW * ringW * ca + fw[0] * E.halfD * ring * sa,
+      m[1] + up[1] * A.halfH * u + sd[1] * E.halfW * ringW * ca + fw[1] * E.halfD * ring * sa,
+      m[2] + up[2] * A.halfH * u + sd[2] * E.halfW * ringW * ca + fw[2] * E.halfD * ring * sa,
+    ];
+  };
+  /** The point of an egg's axis level with its surface's point at `u` (where `eggPoint` is with no width or depth). */
+  const axisPoint = (E: Egg, u: number): P3 => {
+    const A = axisAt(E, u), m = E.middle, up = A.up;
+    return [m[0] + up[0] * A.halfH * u, m[1] + up[1] * A.halfH * u, m[2] + up[2] * A.halfH * u];
   };
   /** The way a point of an egg's surface faces (a unit vector out of it), from the surface's true slope, the cross of the two ways along it. The slope matters: an egg that widens
    *  toward its bottom has a lower half that tilts up to a viewer above it, which a plain "outward from the axis" would count as turned away. */
-  const eggNormal = (E: Egg, u: number, a: number): P3 => {
+  // (`at`: the point itself, `eggPoint(E, u, a)`, if it is already known)
+  const eggNormal = (E: Egg, u: number, a: number, at?: P3): P3 => {
     const e = 0.01, uu = Math.max(-1 + e, Math.min(1 - e, u));
     const du = minus(eggPoint(E, uu + e, a), eggPoint(E, uu - e, a)), da = minus(eggPoint(E, uu, a + e), eggPoint(E, uu, a - e));
     let nrm = unit(cross(du, da));
-    const out = minus(eggPoint(E, uu, a), eggPoint({ ...E, halfW: 0, halfD: 0 }, uu, a));
+    const out = minus(at && uu === u ? at : eggPoint(E, uu, a), axisPoint(E, uu));
     if (dot(nrm, out) < 0) nrm = [-nrm[0], -nrm[1], -nrm[2]];
     return nrm;
   };
   /** How much a point of an egg's surface faces the viewer (positive: toward them, 1 square on). */
   const eggFacing = (E: Egg, u: number, a: number, look: P3): number => -dot(eggNormal(E, u, a), look);
-  /** How far a point is outside an egg (above 0: outside, below: inside), roughly, in shares of its size. (Above its middle, a bent egg's upper half's axis.) */
-  const outsideOf = (E0: Egg, p: P3): number => {
-    const d = minus(p, E0.middle), E = E0.upper && dot(d, E0.upper.up) > 0 ? { ...E0, ...E0.upper } : E0, u = dot(d, E.up) / E.halfH;
-    if (Math.abs(u) >= 1) return u * u - 1;
-    const s = dot(d, E.side) / (E.halfW * Math.max(1e-3, ringAcross(E, u))), f = dot(d, E.fwd) / (E.halfD * Math.max(1e-3, eggRing(u, E.taper)));
-    return Math.max(s * s + f * f - 1, u * u - 1);
-  };
-  /** Whether a point is in sight past an egg (above 0) or behind it (below): how far outside the egg the line from it toward the viewer stays, at its closest. */
-  const clearOf = (E: Egg, p: P3, viewer?: P3): number => {
-    const toViewer = viewer ?? look3At(p), reach = 2.5 * Math.max(E.halfH, E.halfW, E.halfD), STEPS = 24;
-    let least = Infinity;
-    for (let s = 0; s <= STEPS; s++) least = Math.min(least, outsideOf(E, plus(p, toViewer, (-reach * s) / STEPS)));
-    return least;
-  };
+  /** Whether a point is in sight past an egg (above 0) or behind it (below): `clearAlong`, toward the viewer. */
+  const clearOf = (E: Egg, p: P3, viewer?: P3): number => clearAlong(E, p, viewer ?? look3At(p));
   /** An egg's outline on the screen (the hull of its surface's points, as a smooth curve). Its points are the same in every frame of a pose (kept); an egg is asked for
    *  more than once a frame (the thigh's mask), so each is outlined once. */
   const outlines = new Map<string, string>();
@@ -340,7 +535,7 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     let d = outlines.get(key);
     if (d === undefined) {
       const surface = geo.get(`skin:${key}`, () => Array.from({ length: 21 }, (_, n) => -Math.cos((Math.PI * n) / 20)).flatMap(u => Array.from({ length: 36 }, (_, m) => eggPoint(E, u, (m / 36) * Math.PI * 2))));
-      d = smooth(hull(surface.map(p => { const q = see(p); return [X(q), Y(q)] as [number, number]; })));
+      d = smooth(hull(surface.map(xy)));
       outlines.set(key, d);
     }
     return d;
@@ -357,7 +552,8 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
       for (let u = -1; u <= 1; u += 0.1) for (let k = 0; k < 24; k++) reach = Math.max(reach, dot(minus(eggPoint(E, u, (k / 24) * Math.PI * 2), E.middle), n));
       return { n, reach };
     });
-    return (u: number, a: number) => (dot(minus(eggPoint(E, u, a), E.middle), n) - reach * at.at) / (reach || 1);
+    // (`p`: the surface's point there, if it is already known)
+    return (u: number, a: number, p = eggPoint(E, u, a)) => (dot(minus(p, E.middle), n) - reach * at.at) / (reach || 1);
   };
   /** An opening cut in a robe egg by a plane, drawn as skin over it: everything of the egg's surface beyond the plane, which is square to `at.n` (given along the egg's side, up and
    *  front) and stands at `at.at` of the egg's reach that way, seen as the round, ellipse-like edge where a plane meets an egg. Only the part facing the viewer shows.
@@ -377,66 +573,23 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     const nodes = geo.get(`open:${key}`, () => {
       const out = new Float64Array((NU + 1) * NA * 7);
       for (let i = 0; i <= NU; i++) for (let j = 0; j < NA; j++) {
-        const u = uOf(i), a = aOf(j), p = eggPoint(E, u, a), n = eggNormal(E, u, a);
-        out.set([p[0], p[1], p[2], n[0], n[1], n[2], beyond(u, a)], (i * NA + j) * 7);
+        const u = uOf(i), a = aOf(j), p = eggPoint(E, u, a), n = eggNormal(E, u, a, p);
+        out.set([p[0], p[1], p[2], n[0], n[1], n[2], beyond(u, a, p)], (i * NA + j) * 7);
       }
       return out;
     });
-    const f: number[] = [];
-    for (let i = 0; i <= NU; i++) {
-      for (let j = 0; j < NA; j++) {
-        const o = (i * NA + j) * 7;
-        let v = Math.min(nodes[o + 6], -(nodes[o + 3] * look[0] + nodes[o + 4] * look[1] + nodes[o + 5] * look[2]));
-        if (v > 0 && hiddenBy) v = Math.min(v, clearOf(hiddenBy, [nodes[o], nodes[o + 1], nodes[o + 2]], look));
-        f.push(v);
-      }
+    // The opening's edge in space depends on the pose and on the way the viewer looks (`look`, the same at every point of the figure) and on nothing
+    // else: where the camera is, or where she stands, only changes where it lands on the screen. So the edge is kept for the last few ways she was seen
+    // from (a camera that slides along without turning, or a figure that moves without turning, finds it there), and only placed on the screen each frame.
+    const kept = geo.get(`open:${key}:edges`, () => new Map<string, P3[][]>());
+    const lookKey = look.map(v => v.toFixed(7)).join(",");
+    let lines = kept.get(lookKey);
+    if (!lines) {
+      lines = traceOpening({ nodes, look, NU, NA, uOf, aOf, surface: (u, a) => eggPoint(E, u, a), field, hiddenBy });
+      kept.set(lookKey, lines);
+      if (kept.size > 24) kept.delete(kept.keys().next().value!);
     }
-    const fv = (i: number, j: number) => f[i * NA + (j % NA)];
-    // Where the contour crosses each edge of the grid (an edge is named by its first corner and which way it runs), and which crossings a cell joins.
-    const cross2 = new Map<string, P3>(), links = new Map<string, string[]>();
-    const crossing = (id: string, i0: number, j0: number, i1: number, j1: number): string => {
-      if (!cross2.has(id)) {
-        const f0 = fv(i0, j0), f1 = fv(i1, j1), t = f0 / (f0 - f1);
-        cross2.set(id, eggPoint(E, uOf(i0) + (uOf(i1) - uOf(i0)) * t, aOf(j0) + (aOf(j1) - aOf(j0)) * t));
-      }
-      return id;
-    };
-    const join = (x: string, y: string) => { (links.get(x) ?? links.set(x, []).get(x)!).push(y); (links.get(y) ?? links.set(y, []).get(y)!).push(x); };
-    for (let i = 0; i < NU; i++) {
-      for (let j = 0; j < NA; j++) {
-        const c = [[i, j], [i, j + 1], [i + 1, j + 1], [i + 1, j]] as const, on = c.map(([ci, cj]) => fv(ci, cj) > 0);
-        const hit: string[] = [];
-        for (let e = 0; e < 4; e++) {
-          const [i0, j0] = c[e], [i1, j1] = c[(e + 1) % 4];
-          if (on[e] === on[(e + 1) % 4]) continue;
-          const lo = [Math.min(i0, i1), Math.min(j0, j1)];
-          hit.push(crossing(`${i0 === i1 ? "a" : "b"}${lo[0]},${lo[1] % NA}`, i0, j0, i1, j1));
-        }
-        if (hit.length === 2) join(hit[0], hit[1]);
-        else if (hit.length === 4) {
-          // (a saddle: the contour crosses all four sides. Which pairs it joins depends on the middle of the cell: if the middle is on the first corner's side, the
-          // first and third corners are joined through it, and the second and fourth are each cut off on their own; otherwise the first and third are. The
-          // crossings are listed by side, the first side running from the first corner to the second)
-          const mid = field(uOf(i + 0.5), aOf(j + 0.5)) > 0;
-          if (mid === on[0]) { join(hit[0], hit[1]); join(hit[2], hit[3]); } else { join(hit[3], hit[0]); join(hit[1], hit[2]); }
-        }
-      }
-    }
-    // The crossings, chained into closed lines (or, where the opening runs off the egg's end, open ones, closed straight across), each rounded off as a curve.
-    const seen2 = new Set<string>(), path: string[] = [];
-    const starts = [...links.keys()].sort((x, y) => (links.get(x)!.length - links.get(y)!.length));
-    for (const start of starts) {
-      if (seen2.has(start)) continue;
-      const line: string[] = [];
-      let at2: string | undefined = start, from: string | undefined;
-      while (at2 && !seen2.has(at2)) {
-        seen2.add(at2); line.push(at2);
-        const next: string | undefined = links.get(at2)!.find(q => q !== from && !seen2.has(q));
-        from = at2; at2 = next;
-      }
-      if (line.length < 4) continue;
-      path.push(smooth(line.map(id => { const q = see(cross2.get(id)!); return [X(q), Y(q)] as [number, number]; })));
-    }
+    const path = lines.map(line => smooth(line.map(xy)));
     if (path.length) parts.push({ key, depth, node: <path key={key} d={path.join("")} className="fig-robe-opening" /> });
   };
   /** The way to the back of a thigh: across it, square to it and to the line of the hips, away from the way the legs face. */
@@ -1191,14 +1344,15 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     const footAt = (top: P3, a: number): P3 => {
       const ring = ringAt(j.neck, CONE_BASE, a), d = minus(ring, top);
       if (!robeEgg) return ring;
-      const at = (t: number) => plus(top, d, t), STEPS = 40, FAR = 1.8;
+      const E = robeEgg, at = (t: number) => plus(top, d, t), STEPS = 40, FAR = 1.8;
+      const outside = (t: number) => outsideAt(E, top[0] + d[0] * t, top[1] + d[1] * t, top[2] + d[2] * t);
       let prev = 0;
       for (let k = 1; k <= STEPS; k++) {
         const t = (FAR * k) / STEPS;
-        if (outsideOf(robeEgg, at(t)) <= 0) {
+        if (outside(t) <= 0) {
           // (found the robe between the last step and this one: closed in on it)
           let lo = prev, hi = t;
-          for (let r = 0; r < 12; r++) { const m = (lo + hi) / 2; if (outsideOf(robeEgg, at(m)) <= 0) hi = m; else lo = m; }
+          for (let r = 0; r < 12; r++) { const m = (lo + hi) / 2; if (outside(m) <= 0) hi = m; else lo = m; }
           return at(hi);
         }
         prev = t;
@@ -1413,9 +1567,12 @@ function Warden3DView({ pose, arm = "lit", phase2Look, flailFire, dead, charred,
     }
   }
 
+  // The paints his fading colours are worn in, first in the drawing (and so never moved as it re-sorts).
+  const paints = [...(phase2Look || arm === "scorched" ? SECOND_FORM_PAINTS : []), ...(flailFire ? FLAIL_FIRE_PAINTS : [])];
+  if (paints.length) parts.push({ key: "wax-paints", depth: 1e12, node: <WaxPaints key="wax-paints" ids={paints} /> });
   // (her right leg is not drawn in a pose whose skirt covers it all: `hideRightLeg`)
   const shown = wr.hideRightLeg ? parts.filter(x => x.key !== "thighR" && x.key !== "legR") : parts;
-  return <FlailFire.Provider value={!!flailFire}><Figure3DSvg parts={shown} title={title} className={className} /></FlailFire.Provider>;
+  return <FlailFire.Provider value={!!flailFire}><Figure3DSvg parts={shown} title={title} className={className} rootRef={rootRef} /></FlailFire.Provider>;
 }
 
 /** The radius of the flail's whirl: the chain's length (figure units). */
@@ -1443,14 +1600,22 @@ function SpinningFlails({ frames }: { frames: (() => ReactNode)[] }) {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, []);
+  // Every step drawn so far stays in the page, hidden while no flail is at it: a flail moving on a step only shows one group and hides another,
+  // instead of the page making a whole flail's shapes anew (and throwing the last ones away) on every frame. (Until the figure is drawn again.)
+  const kept = useRef<{ frames: typeof frames; steps: Set<number> }>({ frames, steps: new Set() });
+  if (kept.current.frames !== frames) kept.current = { frames, steps: new Set() };
+  const shown = new Map<number, number>();
+  SPIN_PHASES.forEach((phase, i) => {
+    const round = (now / SPIN_TURN_MS + i / 3) % 1, step = Math.floor(round * frames.length) % frames.length;
+    const cycle = SPIN_SHOW_MS + SPIN_FADED_MS, at = ((now / cycle + phase) % 1) * cycle;
+    shown.set(step, at >= SPIN_SHOW_MS ? 0.5 : 0.5 + 0.5 * Math.sin((Math.PI * at) / SPIN_SHOW_MS) ** 2);
+    kept.current.steps.add(step);
+  });
   return (
     <g>
-      {SPIN_PHASES.map((phase, i) => {
-        const round = (now / SPIN_TURN_MS + i / 3) % 1, step = Math.floor(round * frames.length) % frames.length;
-        const cycle = SPIN_SHOW_MS + SPIN_FADED_MS, at = ((now / cycle + phase) % 1) * cycle;
-        const fade = at >= SPIN_SHOW_MS ? 0.5 : 0.5 + 0.5 * Math.sin((Math.PI * at) / SPIN_SHOW_MS) ** 2;
-        return <g key={i} opacity={fade}>{frames[step]()}</g>;
-      })}
+      {[...kept.current.steps].sort((a, b) => a - b).map(n => (
+        <g key={n} opacity={shown.get(n) ?? 0} display={shown.has(n) ? undefined : "none"}>{frames[n]()}</g>
+      ))}
     </g>
   );
 }

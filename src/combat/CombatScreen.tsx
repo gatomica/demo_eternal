@@ -4,8 +4,8 @@
 import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PHASE_TWO, playMusic } from "../audio/music";
 import { eternalSfx, play as playSfx, prepare as prepareSfx, sfxFor } from "../audio/sfx";
-import { ActionWheel, type Anchor } from "./ActionWheel";
-import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_LATERAL, DODGE_PAST, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, PREP_MS, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, USURP_WISP_MS, USURP_AFTER_MS, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
+import { ActionWheel, type Anchor, type WheelHints } from "./ActionWheel";
+import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_LATERAL, DODGE_PAST, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, PREP_MS, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, USURP_TURN_MS, USURP_WISP_MS, USURP_AFTER_MS, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
 import { LessonBox } from "./LessonBox";
 import { prepareWalk, speak } from "../audio/walk";
 import { useDev } from "../ui/dev";
@@ -13,7 +13,7 @@ import { DETOUR, isWanted, type Beat, lessonAllows, lessonMet, typeDelay } from 
 import { preferredAlternative, rememberAlternative } from "./preferred";
 import { defaultSelection, moveSelection, rowsOf, sameSel, subKey, type Selection, type SubSlot, type Wheel, type WheelOption } from "./selection";
 import { kindOf } from "../core/bestiary";
-import { forcedAction, resolveTurn, snapshotOf } from "../core/resolve";
+import { forcedAction, resolveSkip, resolveTurn, snapshotOf } from "../core/resolve";
 import { attackCost, restRecovery } from "../core/rules";
 import type { CombatEvent, CombatState, Enemy, Opening, Player, PlayerAction, Stance, Swing } from "../core/types";
 import { behind, right as rightOf, bodiesOfEnemies, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, SCENE_TILT, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
@@ -22,10 +22,14 @@ import { type BarValues, HealthBar, PlayerBars } from "../render/HealthBar";
 import { lookOf } from "../render/looks";
 import { actionPose, asPose, downPoseOf, flinchPoseOf, handOffOf, idlePoseOf, impactPoint, player3dPose, poseForIntent, type PoseName, strikePose, windUpPose } from "../render/poses";
 import { Scene, type SceneFigure } from "../render/Scene";
+import { raiseGatherMs } from "../render/UsurpWisps";
 import { StringFx, type StringBurst } from "../render/StringFx";
 import type { StringPop } from "../render/StringCounter";
 import { type Dir, menuSound, useKeys, wrapIndex } from "../ui/input";
 import { type MenuOption, PauseMenu } from "../ui/Menu";
+import { openSettings } from "../ui/settings";
+import { Kbd } from "../ui/Kbd";
+import { actionKey, triedAction, useHints } from "../explore/hints";
 import { DebugLimbsContext } from "../render/debugLimbs";
 import { IGNITE } from "../warden/scenes";
 import type { CandleArm, WardenPoseName } from "../warden/skeleton";
@@ -47,7 +51,7 @@ const PUNCH_POSES = new Set<PoseName>(["attack", "punch", "strike", "swing-left-
 /** Whether the game itself (fights, not the Model viewer) draws the Warden from the 3D rig. Off while it is built. */
 const WARDEN_3D_IN_GAME = true;
 
-export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, restOnPlay, shade = true, playerAction, playerHold, playerDead, light = true, debugLimbs = false, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, orbit, peek, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
+export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExit, onDone, override, panel, playSignal, attackOnPlay, restOnPlay, shade = true, playerAction, playerHold, playerDead, light = true, debugLimbs = false, changeLabel, exitLabel, wonText, onTurnPlayed, lesson, wakeUp, music = false, hints: showHints = false, orbit, peek, playTarget, string: carried = 0, eternalString = 0, knotOwned = false }: {
   initial: CombatState;
   /** A scene to play before the first turn (it leaves the fight as `initial`). */
   opening?: Opening;
@@ -92,6 +96,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   wakeUp?: boolean;
   /** Plays the fight's music (the model viewer's fights have none): the church's in the lesson, the Penitent Warden's in his fight, else the dungeon's. */
   music?: boolean;
+  /** The first fights' key hints on the mark and the wheel (see `explore/hints.ts`); the actions you take are remembered as tried. */
+  hints?: boolean;
   /** The title when you win (fights off the map have their own). */
   wonText?: string;
   /** Called as a turn finishes playing, with the fight as it now stands. */
@@ -207,6 +213,25 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const view = playback && step ? (impact ? stepView! : prevView!) : fight;
   const fx = effectsOf(impact ? step : undefined, playback?.action?.type === "maneuver");
   const stepKey = playback ? `${playback.from.turn}-${playback.index}-${playback.phase}` : "rest";
+  /**
+   * Staggered in his second form, the Warden raises a fallen waxed as the turn ends: who (`by`) raises whom (`who`), the step it rises in (`at`),
+   * and the step his stagger shows in (`from`): his wisps leave his hand then, and circle it until it rises.
+   */
+  const raising = useMemo(() => {
+    const steps = playback?.steps;
+    if (!steps) return undefined;
+    for (let at = 0; at < steps.length; at++) {
+      const ev = steps[at].events.find(x => x.kind === "raised" && !!x.by);
+      if (!ev || ev.kind !== "raised" || !ev.by) continue;
+      const by = ev.by, from = steps.findIndex(st => st.events.some(x => x.kind === "stagger" && x.who === by));
+      return { by, who: ev.who, at, from: from >= 0 && from <= at ? from : at };
+    }
+    return undefined;
+  }, [playback?.steps]);
+  /** The step key in which the raised waxed's wisps have all gone into its head (it is up, its flame lit, from then on). */
+  const [raiseArrived, setRaiseArrived] = useState<string | null>(null);
+  /** How long the raising's wisps take to go into its head, from the moment its step shows. */
+  const raiseMs = raising ? raiseGatherMs(raising.from === raising.at) : 0;
   const p = view.player;
 
   // Get the sounds ready as the fight opens, so the first blow doesn't wait for them to load.
@@ -293,7 +318,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   };
 
   /* ---------- the wheel for the current selection ---------- */
-  const wheel: Wheel = (() => {
+  const wheelOf = (sel: Selection): Wheel => {
     const opt = (label: string, action: PlayerAction): WheelOption => ({ label, action });
     if (sel.kind === "player") {
       return {
@@ -319,6 +344,58 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       down: null,
       right: opt("Block", { type: "block", target: sel.id }),
     };
+  };
+  const wheel: Wheel = wheelOf(sel);
+
+  /* ---------- the first fights' key hints (see explore/hints.ts) ---------- */
+  const { tried } = useHints();
+  /** Every action a wheel offers, by its `actionKey` (an action opened into alternatives counts each part). */
+  const actionKeysOf = (w: Wheel, on: Selection["kind"]): string[] =>
+    (Object.keys(w) as Dir[]).flatMap(d => {
+      const o = w[d];
+      if (!o) return [];
+      return o.alternatives ? (Object.keys(o.alternatives) as SubSlot[]).filter(s => o.alternatives![s]).map(s => actionKey(on, d, s)) : [actionKey(on, d)];
+    });
+  const untried = (keys: string[]) => keys.some(k => !tried.includes(k));
+  /** The `actionKey` of an option on the current wheel (the closed Attack is whichever part it stands for). */
+  const triedKeyOf = (option: WheelOption): string | null => {
+    for (const d of Object.keys(wheel) as Dir[]) {
+      const o = wheel[d];
+      if (!o) continue;
+      if (o.alternatives) {
+        const slot = (Object.keys(o.alternatives) as SubSlot[]).find(s => o.alternatives![s]?.action === option.action);
+        if (slot) return actionKey(sel.kind, d, slot);
+      } else if (o.action === option.action) return actionKey(sel.kind, d);
+    }
+    return null;
+  };
+  /**
+   * The hints on the ring. On the mark: each direction that moves it, quicker where it leads to someone with actions you have
+   * never tried that the one under it doesn't offer (yourself, when you have never rested or dodged back); Yes, quicker when
+   * the one under it has actions never tried. On the wheel: each action, quicker if never tried (an opened-up action: any of
+   * its parts); its parts, once it is opened up; Yes beside the one you are on.
+   */
+  const wheelHints: WheelHints | undefined = (() => {
+    if (!showHints) return undefined;
+    if (!wheelOpen) {
+      const dirs: WheelHints["dirs"] = {};
+      for (const d of ["up", "left", "down", "right"] as Dir[]) {
+        const to = moveSelection(rows, sel, d);
+        if (to) dirs[d] = { fast: to.kind !== sel.kind && untried(actionKeysOf(wheelOf(to), to.kind)) };
+      }
+      return { dirs, select: { fast: untried(actionKeysOf(wheel, sel.kind)) } };
+    }
+    const dirs: WheelHints["dirs"] = {};
+    for (const d of Object.keys(wheel) as Dir[]) {
+      const o = wheel[d];
+      if (o) dirs[d] = { fast: untried(o.alternatives ? actionKeysOf({ up: null, left: null, down: null, right: null, [d]: o }, sel.kind) : [actionKey(sel.kind, d)]) };
+    }
+    const open = expanded && highlight ? wheel[highlight]?.alternatives : undefined;
+    const parts: WheelHints["parts"] = {};
+    if (open && highlight) for (const s of Object.keys(open) as SubSlot[]) if (open[s]) parts[s] = { fast: !tried.includes(actionKey(sel.kind, highlight, s)) };
+    const on = highlight && wheel[highlight] ? (expanded ? open?.[subSlot] : wheel[highlight]) : null;
+    const onKey = on ? triedKeyOf(on) : null;
+    return { dirs, parts, select: on ? { fast: !!onKey && !tried.includes(onKey) } : undefined };
   })();
   const chosen = wheelOpen && highlight ? (expanded ? wheel[highlight]?.alternatives?.[subSlot] ?? null : wheel[highlight]) : null;
   // Hovering an Attack (before you commit to it): the Fatigue it would cost flickers on your bar.
@@ -359,6 +436,14 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const leapPlan = useRef<{ key: string; approach: number; after: number } | null>(null);
   /** The step (its key) in which a leap has left the floor: it takes its strike pose from then on. */
   const [leapt, setLeapt] = useState<string | null>(null);
+  /**
+   * Usurp Flame played as an attack: its first beat, turning to the one whose flame he goes for (`USURP_TURN_MS`). When it started, in which step, and
+   * the step (key) in which it is over (then the wind-up and the rest of the approach play as usual).
+   */
+  const usurpTurn = useRef<{ key: string; since: number } | null>(null);
+  const [usurpTurned, setUsurpTurned] = useState<string | null>(null);
+  /** This step is Usurp Flame played as an attack, and its turning beat is still on (not in the impact yet, and not turned). */
+  const usurpTurning = (st = step) => usurpAsAttack && !!playback && playback.phase === "approach" && !!usurpOf(st) && isAttackStep(st) && usurpTurned !== stepKey;
   /** Where anyone that stepped out to the side (its Maneuver changing nothing, dodging nothing) stands until its next turn is over. */
   const sidestep = useRef<Record<string, Vec>>({});
   /** Who dashed and slid to their new spot this turn (their Maneuver's own move), so they do not walk off after it. */
@@ -479,9 +564,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   shotRef.current = shot;
   const playbackRef = useRef(playback);
   playbackRef.current = playback;
-  const shoot = (positions: Record<string, Vec>, camera: ShotCamera, ms: number, snap?: string[], easing?: "out", own?: SceneShot["own"]) => {
+  const shoot = (positions: Record<string, Vec>, camera: ShotCamera, ms: number, snap?: string[], easing?: "out", own?: SceneShot["own"], rigid?: string[]) => {
     world.current.pos = positions;
-    setShot(s => ({ positions, camera, ms, snap, easing, own, version: s.version + 1 }));
+    setShot(s => ({ positions, camera, ms, snap, easing, own, rigid, version: s.version + 1 }));
   };
 
   useLayoutEffect(() => {
@@ -618,6 +703,16 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       const at = attack.ranged ? a : closeIn(a, t, STRIKE_GAP);
       // (It stays centered between the two as they move: closing in, knocked back, dodging.)
       const camera: ShotCamera = { between: [attack.attacker, attack.target], yaw: sceneYaw(attack.attacker, attack.target, shotCamera(shot).yaw) };
+      // Usurp Flame played as an attack opens with a beat of its own: he turns to the one whose flame he goes for, where he stands, as the camera swings
+      // round to show them both; only then does he wind up and close in (this effect runs again once it is over: `usurpTurned`).
+      if (usurpTurning()) {
+        if (usurpTurn.current?.key !== stepKey) {
+          usurpTurn.current = { key: stepKey, since: performance.now() };
+          shoot(w.pos, camera, USURP_TURN_MS);
+        }
+        const key = stepKey, timer = window.setTimeout(() => setUsurpTurned(key), Math.max(0, usurpTurn.current.since + USURP_TURN_MS - performance.now()));
+        return () => window.clearTimeout(timer);
+      }
       /**
        * A leap past someone (`leap`): `who` winds up, then jumps from `from` along a line that passes `past`'s left side (the left of the screen, the
        * camera being behind it), and comes down behind it; the blow lands as it passes. Landed, it loses speed (its slide starts slower than it flew)
@@ -687,12 +782,15 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // A clean hit knocks the target back, and it stays there.
       // (by a leap: away from where it passed, the leaper flying on)
       const leaping = !!dodging[attack.attacker]?.leap;
-      shoot(dragBody(w.pos, attack.target, pushedAway(leaping ? { x: t.x * 2 - (t.x + a.x) / 2, z: t.z * 2 - (t.z + a.z) / 2 } : a, t, KNOCKBACK)), shot.camera, KNOCK_MS);
+      // (a short slide: the one knocked back slides as it is drawn, and is drawn again once it stops: `SceneShot.rigid`)
+      shoot(dragBody(w.pos, attack.target, pushedAway(leaping ? { x: t.x * 2 - (t.x + a.x) / 2, z: t.z * 2 - (t.z + a.z) / 2 } : a, t, KNOCKBACK)), shot.camera, KNOCK_MS, undefined, undefined, undefined, [attack.target]);
     } else if (attack.result === "blocked") {
       // A block jolts them both apart a little, and they stay there (like a knockback).
       let knocked = dragBody(w.pos, attack.target, pushedAway(a, t, BLOCK_PUSH));
-      if (!attack.ranged && !dodging[attack.attacker]?.leap) knocked = dragBody(knocked, attack.attacker, pushedAway(t, a, BLOCK_PUSH));
-      shoot(knocked, shot.camera, KNOCK_MS);
+      const pushed = [attack.target];
+      if (!attack.ranged && !dodging[attack.attacker]?.leap) { knocked = dragBody(knocked, attack.attacker, pushedAway(t, a, BLOCK_PUSH)); pushed.push(attack.attacker); }
+      // (both slide as they are drawn, and are drawn again once they stop: `SceneShot.rigid`)
+      shoot(knocked, shot.camera, KNOCK_MS, undefined, undefined, undefined, pushed);
     } else if (attack.result === "dodged") {
       // A dodge that slides on (its Maneuver's `slide`): landed, it carries on along its dodge, slowing to a halt, and turns as it goes (`Scene`).
       // (with a longer dash, once the dash is over)
@@ -713,7 +811,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // (Otherwise a dodge already got out of the way during the approach, so there's nothing more to move at the impact.)
     return cleanup;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playback?.index, playback?.phase, !!playback, selId, fight, usurpStage, igniteState, waking]);
+  }, [playback?.index, playback?.phase, !!playback, selId, fight, usurpStage, igniteState, waking, usurpTurned]);
 
   // Waking up: black but for the guide's light, which comes closer; then the dark lifts and the lesson begins.
   useEffect(() => {
@@ -757,15 +855,16 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   };
 
   /** Resolve the turn, then play it back step by step. */
-  const play = (action: PlayerAction) => {
+  const play = (action: PlayerAction, skip = false) => {
     turnStart.current = performance.now();
-    const next = resolveTurn(fight, action);
-    const pose: PoseName = forced ? "kneel" : action.type; // staggered or reviving: down on one knee
+    // (Skip battle: a turn where you do nothing and every enemy falls; see `resolveSkip`.)
+    const next = skip ? resolveSkip(fight) : resolveTurn(fight, action);
+    const pose: PoseName = forced ? "kneel" : skip ? "idle" : action.type; // staggered or reviving: down on one knee
     setFight(next);
     // A turn where nothing happens (a Block, with nothing to block, and no one else doing anything) still plays one quiet step, so it lasts
     // the minimum a turn lasts (MIN_ATTACK_PHASE_MS, then the step) rather than ending the moment you commit.
     const steps = next.lastTurn.length ? next.lastTurn : [{ events: [], after: snapshotOf(next.player, next.enemies) }];
-    setPlayback({ from: fight, steps, index: 0, phase: prepsIn({ from: fight }, steps[0]) ? "approach" : phaseAt(steps, 0, 0, !usurpAsAttack), playerPose: pose, action: forced ? null : action });
+    setPlayback({ from: fight, steps, index: 0, phase: prepsIn({ from: fight }, steps[0]) ? "approach" : phaseAt(steps, 0, 0, !usurpAsAttack), playerPose: pose, action: forced || skip ? null : action });
     closeWheel();
   };
   const commit = (option: WheelOption | null) => {
@@ -776,6 +875,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // An alternative you used becomes what its action does from now on.
     const used = (["left", "right"] as const).find(slot => wheel.up?.alternatives?.[slot]?.action === option.action);
     if (used && !current) rememberAlternative("attack", used);
+    if (showHints) { const key = triedKeyOf(option); if (key) triedAction(key); }
     play(option.action);
   };
 
@@ -880,10 +980,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return () => window.clearTimeout(timer);
   }, [playing, forced, busy, paused]);
 
+  // (A turn of its own: every enemy falls, and a revive left still lands, so the Warden rises into phase two; skipped there, the fight is won.)
   const skipBattle = () => {
     setPaused(false);
-    setPlayback(null);
-    setFight(f => ({ ...f, status: "won", enemies: f.enemies.map(e => ({ ...e, hp: 0, alive: false, fate: "fallen" as const })) }));
+    if (fight.status === "playing") play({ type: "rest" }, true);
   };
   // Giving up a fight from the map: you fall as if you had lost it (the lesson can't be lost).
   const forfeit = () => { setPaused(false); onDone?.(false, fight.player.charges, fight.player.eternity, { earned: earned.current, fell: [...fell.current] }); };
@@ -893,11 +993,12 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const pauseOptions: MenuOption[] = [
     { label: "Resume", run: () => setPaused(false) },
     ...(onDone && !lesson ? [{ label: "Reawaken", run: forfeit }] : []),
+    { label: "Settings", run: openSettings },
     ...(tools ? [{ label: "Restart fight", run: onRetry }] : []),
     ...(tools && onChangeLoadout ? [{ label: changeLabel ?? "Change loadout", run: onChangeLoadout }] : []),
     ...(tools ? [{ label: exitLabel ?? "Main menu", run: onExit }] : []),
-    // A shortcut for testing: win the fight on the spot (every enemy lies down).
-    ...(tools && playing && playSignal === undefined ? [{ label: "Skip battle", quiet: true, run: skipBattle }] : []),
+    // A shortcut for testing: every enemy falls (a boss's revive still lands).
+    ...(tools && playing && !busy && playSignal === undefined ?[{ label: "Skip battle", quiet: true, run: skipBattle }] : []),
   ];
   const finish = () => {
     // Fallen for good: whose blow it was, so what you lost can be found on it.
@@ -940,13 +1041,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   useEffect(() => { setDetourN(0); }, [detour]);
   useEffect(() => {
     if (!detour || busy || paused || detourN >= DETOUR.say.length) return;
-    const t = window.setTimeout(() => { speak(DETOUR.say[detourN], detourN); setDetourN(n => n + 1); }, typeDelay(DETOUR.say, detourN));
+    const t = window.setTimeout(() => { speak(DETOUR.say, detourN); setDetourN(n => n + 1); }, typeDelay(DETOUR.say, detourN));
     return () => window.clearTimeout(t);
   }, [detour, detourN, busy, paused]);
   // Each beat's words are written out from the start, once the last turn has played out.
   useEffect(() => {
     if (!current || busy || paused || written >= current.say.length) return;
-    const t = window.setTimeout(() => { speak(current.say[written], written); setWritten(w => w + 1); }, typeDelay(current.say, written));
+    const t = window.setTimeout(() => { speak(current.say, written); setWritten(w => w + 1); }, typeDelay(current.say, written));
     return () => window.clearTimeout(t);
   }, [current, written, busy, paused]);
   // Undo the step the previous beat asked for (move away, close the wheel, light another option): its instruction is back.
@@ -1064,8 +1165,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // An attacker closes in; the first step after the attacks holds until the attack phase has lasted
       // MIN_ATTACK_PHASE_MS. The last step stays long enough for a Rest's animation, if one goes through.
       playback.phase === "approach"
-        ? risesNow ? 250 : isAttackStep(step) ? (leapPlan.current?.key === stepKey ? leapPlan.current.approach : APPROACH_MS) : Math.max(prepsIn(playback, step) ? PREP_MS : 0, MIN_ATTACK_PHASE_MS - (performance.now() - turnStart.current))
-        : Math.max(STEP_MS, usurpAsAttack && usurpOf(step) ? USURP_WISP_MS + USURP_AFTER_MS : 0, playback.index === playback.steps.length - 1 && resting ? REST_ANIM_MS : 0, slideMs(playback), leapPlan.current?.key === `${playback.from.turn}-${playback.index}-approach` ? leapPlan.current.after + 100 : 0),
+        ? risesNow ? 250 : isAttackStep(step) ? (leapPlan.current?.key === stepKey ? leapPlan.current.approach : APPROACH_MS) + (usurpTurning() ? USURP_TURN_MS : 0) :Math.max(prepsIn(playback, step) ? PREP_MS : 0, MIN_ATTACK_PHASE_MS - (performance.now() - turnStart.current))
+        : Math.max(STEP_MS, usurpAsAttack && usurpOf(step) ? USURP_WISP_MS + USURP_AFTER_MS : 0, raising?.at === playback.index ? raiseMs + USURP_AFTER_MS : 0,playback.index === playback.steps.length - 1 && resting ? REST_ANIM_MS : 0, slideMs(playback), leapPlan.current?.key === `${playback.from.turn}-${playback.index}-approach` ? leapPlan.current.after + 100 : 0),
     );
     return () => window.clearTimeout(timer);
   }, [playback, paused, waitingForString]);
@@ -1112,6 +1213,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   useEffect(() => {
     if (!usurpAsAttack || playback?.phase !== "impact" || !usurpOf(playback.steps[playback.index])) return;
     const t = window.setTimeout(() => setWispsArrived(stepKey), USURP_WISP_MS);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepKey]);
+  // The waxed he raises: it rises as its wisps have gone into its head.
+  useEffect(() => {
+    if (!raising || playback?.index !== raising.at || !reached(raising.at)) return;
+    const t = window.setTimeout(() => setRaiseArrived(stepKey), raiseMs);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepKey]);
@@ -1423,7 +1531,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     if (!e.staggered && reached(flinchStep(e))) return flinchPoseOf(e);
     // Usurp Flame: crouched to spring, the dash, then standing in Idle as the light returns.
     const u = usurpStep(e.id);
-    // (played as an attack, it closes in in its wind-up pose, the ordinary way, and takes its next stance as the blow lands)
+    // (played as an attack, it first turns to its target in its stance, Wax Arm Back, then closes in in its wind-up pose, the ordinary way, and takes its
+    // next stance as the blow lands)
+    if (playback && u === playback.index && usurpTurning()) return poseForIntent(e);
     if (playback && u >= 0 && playback.index >= u && !(usurpAsAttack && playback.index === u && !impact)) {
       if (playback.index === u && playback.phase === "usurp") {
         // (Before it starts, as an opening scene's arena shows, he just stands in his stance.)
@@ -1482,10 +1592,12 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   if (impact && step) {
     for (const ev of step.events) {
       if (ev.kind === "drained") usurpTrails.push({ from: ev.who, to: ev.by, key: `${stepKey}-drained-${ev.who}` });
-      // Staggered in phase two, the Warden sends a flame to a fallen waxed, and it rises.
-      else if (ev.kind === "raised" && ev.by) usurpTrails.push({ from: ev.by, to: ev.who, key: `${stepKey}-raised-${ev.who}` });
     }
   }
+  // Staggered in phase two, the Warden's wisps fly from his hand as his stagger shows, circle the fallen waxed he is raising, and go into its head as it rises.
+  const raiseWisps = raising && playback && reached(raising.from) && playback.index <= raising.at
+    ? { from: raising.by, to: raising.who, key: `${playback.from.turn}-raise-${raising.who}`, gather: reached(raising.at) }
+    : undefined;
 
   // Ranged attacks throw something across the field as they land.
   const projectiles: Projectile[] = [];
@@ -1550,13 +1662,18 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const looksDead = (e: Enemy): boolean => {
     // Sealed in wax by the Warden (its flame taken), or because it died lit: its remains from that step on.
     if (!e.alive && e.fate === "encased") return true;
+    // (The Model viewer plays the phase-two scene with no turn behind it: he lies dead until all is dark, as in a fight, where he enters it fallen.)
+    if (!playback && ignite && ignite.who === e.id) return igniteNow < IGNITE.kindle;
     if (!playback) return e.alive ? e.reviving : true;
     const was = playback.from.enemies.find(x => x.id === e.id);
     if (was && !was.alive) {
       // A fallen waxed rises when it is raised: with the fire shockwave of phase two, or as its step plays.
       const raised = stepOf("raised", e.id);
       if (raised < 0) return true;
-      return raised === (turnIx?.phaseTwo ?? -1) ? !arenaLit : !reached(raised);
+      if (raised === (turnIx?.phaseTwo ?? -1)) return !arenaLit;
+      // (raised by his stagger: once the wisps circling it have gone into its head)
+      if (raising?.who === e.id && raising.at === raised) return playback.index === raised ? raiseArrived !== stepKey : playback.index < raised;
+      return !reached(raised);
     }
     // It fell this turn and rises again at the turn's end (a boss with a revive left).
     const rises = stepOf("revived", e.id);
@@ -1606,12 +1723,17 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return repositioning >= 0 && playback.index >= repositioning ? undefined : d;
   };
   /**
+   * A fallen waxed the Warden has raised this turn, risen on the screen already. The figures may still be shown as the step before had them (the phase-two
+   * scene plays before its own step does), where it lies dead and unlit: rising, it is lit and staggered, so it is drawn so from the moment it rises.
+   */
+  const risenNow = (e: Enemy) => !!playback && !!kindOf(e).flame && stepOf("raised", e.id) >= 0 && !!playback.from.enemies.find(x => x.id === e.id && !x.alive) && !looksDead(e);
+  /**
    * A lit waxed's flame on its head, as shown: blazing in the poses where it gathers it to burst (its kind's `blazePoses`), and gone once it
    * has burst (its death pose) or while the Warden's Usurp Flame scene draws it itself.
    */
   const headFlameOf = (e: Enemy): SceneFigure["headFlame"] => {
     const k = kindOf(e);
-    if (!e.alive || looksDead(e) || !k.flame || !shownFlags(e).lit || usurpNow?.target === e.id || usurpHit?.target === e.id) return undefined;
+    if (!(e.alive || risenNow(e)) || looksDead(e) || !k.flame || !(shownFlags(e).lit || risenNow(e)) || usurpNow?.target === e.id || usurpHit?.target === e.id) return undefined;
     const pose = enemyPose(e);
     if (pose === k.deathPose) return undefined;
     return k.blazePoses?.includes(pose) ? "blaze" : "lit";
@@ -1619,7 +1741,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   /** An enemy's blow being played, if it has one in the step now: at whom, and which blow (for `SceneFigure.faceToward`). */
   const enemyBlow = (id: string) => {
     const ev = playback?.steps[playback.index]?.events.find((x): x is Extract<typeof x, { kind: "attack" }> => x.kind === "attack" && x.attacker === id);
-    return ev && playback ? { id: ev.target, key: `${playback.from.turn}:${playback.index}:${id}` } : undefined;
+    if (!ev || !playback) return undefined;
+    // (Usurp Flame's first beat: he turns to his target smoothly, from facing you, over the beat; until the beat has started, he still faces you.)
+    const turning = usurpTurning() && usurpOf(step)?.who === id;
+    const turn = turning ? { since: usurpTurn.current?.key === stepKey ? usurpTurn.current.since : performance.now(), ms: USURP_TURN_MS } : undefined;
+    return { id: ev.target, key: `${playback.from.turn}:${playback.index}:${id}`, turn };
   };
   /** Your own blow being played, if one is: whom it strikes (you face them, as you began, for all of it). */
   const yourBlow = playback?.steps[playback.index]?.events.find((ev): ev is Extract<typeof ev, { kind: "attack" }> => ev.kind === "attack" && ev.attacker === "player");
@@ -1697,8 +1823,6 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         faceToward: playback ? enemyBlow(e.id) : undefined,
         // Unsealed, in Wax Arm Back (in the stance, and gathering a Flame Blast from it, until the blow lands): red wisps circle her wax arm.
         armBlaze: e.alive && !e.staggered && !e.intent.forced && !shownFlags(e).sealed && kindOf(e).figure3d === "warden" && enemyPose(e) === "wd-arm-back",
-        // Before its blow it faces whom it has picked, if that is another enemy (Usurp Flame on a waxed's flame); you, as usual, otherwise.
-        faceAt: e.alive && e.intent.target && (!playback || !reached(strikeStep(e.id))) ? e.intent.target : undefined,
         // The fallen lie there, a little faded: they drop (instead of fading out), then stay.
         // (A unit that is about to lie down, but still has its own attack to finish, stays up and unfaded until then.)
         classes: looksDead(e)
@@ -1710,13 +1834,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         fellThisTurn: !!playback && looksDead(e) && !!playback.from.enemies.find(x => x.id === e.id)?.alive,
         // His second form: the wax he leaves is burnt black.
         charred: !!e.flags.phase2,
-        // The fallen waxed burn as candles once the arena is lit (not the sealed ones); the lit ones, alive, carry theirs on their heads.
+        // Once the arena is lit, only the waxed on their feet carry a flame on their heads: the fallen have none, so the dead and the raised can be told apart.
         // (And in the Warden's fight, a waxed that is staggered shows its flame on its head, for him to take; his scene lights it itself.)
-        candle: (!!kindOf(e).remains && candlesLit && (e.alive ? !looksDead(e) : e.fate !== "encased")) || (warden && !!kindOf(e).flame && e.alive && e.staggered && !(usurpNow?.target === e.id)),
+        candle: (!!kindOf(e).remains && candlesLit && e.alive && !looksDead(e)) || (warden && !!kindOf(e).flame && e.alive && e.staggered && !(usurpNow?.target === e.id)),
         // Its flame taken, or fallen (the waxed): sealed whole in wax.
         // (The parts of a Wax Blob are sealed whole in wax, always.)
         // (And the waxed he has raised in phase two: lit, with a flame on their heads, and sealed whole in wax all the same.)
-        encased: (!e.alive && e.fate === "encased") || (looksDead(e) && kindOf(e).deathLook === "wax") || !!e.body || (e.alive && !!kindOf(e).flame && !!shownFlags(e).lit)
+        encased: (!e.alive && e.fate === "encased") || (looksDead(e) && kindOf(e).deathLook === "wax") || !!e.body || (e.alive && !!kindOf(e).flame && !!shownFlags(e).lit) || risenNow(e)
           // Staggered with the Waxed status on it (a Waxed Torch's wax, or a waxed one's own): it goes down sealed whole in wax, until it gets up. (The Warden has a figure of his own.)
           || (e.alive && e.staggered && e.waxed && kindOf(e).variant !== "warden" && kindOf(e).variant !== "guide"),
         stepKey,
@@ -1807,11 +1931,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       <section className="stage" aria-label="Battlefield">
         <DebugLimbsContext.Provider value={debugLimbs}>
         <Scene
-          figures={figures} shot={shot} projectiles={projectiles} usurpTrails={usurpTrails} arenaLit={candlesLit}
+          figures={figures} shot={shot} projectiles={projectiles} usurpTrails={usurpTrails} raiseWisps={raiseWisps} arenaLit={candlesLit}
           arena={fight.enemies.some(e => kindOf(e).arena)}
           light={light} shade={shade} orbit={orbit} peek={orbit ? undefined : peek}
           onSelectedBox={b => { if (!busy) setAnchor(b); }}
-          dark={wakeDark ?? (ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle } : usurpDark)}
+          dark={wakeDark ?? (ignite ? { level: igniteNow >= IGNITE.flare || igniteNow < IGNITE_DARK ? 0 : 1, ms: igniteNow >= IGNITE.flare ? 700 : IGNITE.kindle - IGNITE_DARK } : usurpDark)}
           ignite={ignite ? { who: ignite.who, start: ignite.start, seed: ignite.seed } : undefined}
         />
         </DebugLimbsContext.Provider>
@@ -1840,12 +1964,20 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           sub={subSlot}
           center={wheelCenter}
           anchor={anchor}
+          hints={wheelHints}
           onHighlight={d => { if (!lesson) { if (d !== highlight) menuSound(d); setHighlight(d); } }}
           onCommit={o => { menuSound("select"); commit(o); }}
         />
       )}
 
-      {paused && <PauseMenu options={pauseOptions} focus={pauseIndex} onFocus={setPauseIndex} />}
+      {paused && (
+        <PauseMenu options={pauseOptions} focus={pauseIndex} onFocus={setPauseIndex}>
+          {/* The fight's controls, always there to look up. */}
+          <div className="inv-keys pause-keys">
+            <Kbd k="up" /><Kbd k="left" /><Kbd k="down" /><Kbd k="right" /> choose a target, then an action · <Kbd k="yes" /> focus, then act · <Kbd k="no" /> cancel · <kbd>Esc</kbd> pause
+          </div>
+        </PauseMenu>
+      )}
 
       {fading && <div className="combat-fadeout" aria-hidden="true" />}
 

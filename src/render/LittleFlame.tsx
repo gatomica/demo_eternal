@@ -5,8 +5,9 @@
  */
 import { useId } from "react";
 
-/** A trefoil knot, as a closed path of points around (0, 0), about 2.2 across each way. */
-const KNOT = (() => {
+/** A trefoil knot, as a closed path of points around (0, 0), its three lobes' tips 2.16 from the middle (`KNOT_REACH`). Also drawn on the yarn balls (`YarnBall`). */
+export const KNOT_REACH = 2.16;
+export const KNOT = (() => {
   const pts = Array.from({ length: 49 }, (_, i) => {
     const t = (i / 48) * Math.PI * 2;
     return [(Math.sin(t) + 2 * Math.sin(2 * t)) * 0.72, (Math.cos(t) - 2 * Math.cos(2 * t)) * 0.72] as const;

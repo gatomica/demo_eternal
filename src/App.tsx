@@ -9,6 +9,7 @@ import { MapViewer } from "./screens/MapViewer";
 import { MusicViewer } from "./screens/MusicViewer";
 import { ModelViewer } from "./screens/ModelViewer";
 import { TestCombat } from "./screens/TestCombat";
+import { SettingsOverlay } from "./ui/SettingsPanel";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("menu");
@@ -32,6 +33,8 @@ export default function App() {
       {screen === "viewer" && <ModelViewer onExit={() => setScreen("menu")} />}
       {screen === "map" && <MapViewer onExit={() => setScreen("menu")} />}
       {screen === "music" && <MusicViewer onExit={() => setScreen("menu")} />}
+      {/* (Opened from the main menu and the pause menus, over whatever screen is showing.) */}
+      <SettingsOverlay />
     </div>
   );
 }

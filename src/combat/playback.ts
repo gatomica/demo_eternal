@@ -142,6 +142,11 @@ export const IGNITE_MARKS = [IGNITE_DARK, IGNITE.kindle, IGNITE.flare];
  */
 /** Usurp Flame played as an attack: how long its wisps take from the flame to the Warden's wax hand (ms), and the rest of the step after they arrive. */
 export const USURP_WISP_MS = 800, USURP_AFTER_MS = 300;
+/**
+ * Usurp Flame played as an attack opens with a beat of its own before its wind-up: he stays in Wax Arm Back and turns, smoothly, from you to the one
+ * whose flame he goes for, while the camera swings round to show them both (ms).
+ */
+export const USURP_TURN_MS = 600;
 export const USURP_STAGES = { focus: 0, dash: 900, black: 1500, reveal: 2000, done: 3000 } as const;
 
 export type UsurpStage = Exclude<keyof typeof USURP_STAGES, "done">;
@@ -163,7 +168,8 @@ export function viewAt(from: CombatState, after: Step["after"]): CombatState {
     if (a.encased !== undefined) f.encased = a.encased;
     if (a.coated !== undefined) f.coated = a.coated;
     if (a.eternity !== undefined && "eternity" in f) f.eternity = a.eternity;
-    if ("fate" in f && a.fate) f.fate = a.fate;
+    // ("alive", not "fate": an enemy that has never fallen has no `fate` key yet, and one sealed by Usurp Flame mid-turn must take it.)
+    if ("alive" in f && a.fate) f.fate = a.fate;
   }
   return v;
 }
@@ -233,7 +239,8 @@ export function indexTurn(steps: Step[]): TurnIndex {
         if (ev.result === "interrupted") { ix.interrupted.add(ev.who); first(ix.broken, ev.who, i); }
         if (ev.result === "recovered") first(ix.backUp, ev.who, i);
       } else if (ev.kind === "revive") { first(ix.backUp, ev.who, i); first(ix.revived, ev.who, i); }
-      else if (ev.kind === "fall") first(ix.fall, ev.who, i);
+      // (Sealed whole in wax by Usurp Flame, it dies then and there: that is its fall.)
+      else if (ev.kind === "fall" || ev.kind === "encased") first(ix.fall, ev.who, i);
       else if (ev.kind === "raised") first(ix.raised, ev.who, i);
     }
     const usurp = usurpOf(st);

@@ -22,31 +22,36 @@
 import { useEffect, useRef, useState } from "react";
 import { canEmpower, empowerCost, payment, START_STATS, type Stats } from "./empower";
 import type { Player } from "../core/types";
-import { dirOf, menuSound, wrapIndex } from "../ui/input";
+import { dirOf, keyOf, menuSound, wrapIndex } from "../ui/input";
 import { type MenuOption, PauseMenu } from "../ui/Menu";
-import { Dialogue } from "./Dialogue";
-import { blobWeapons, drawBlob, drawPickup, drawKeeper, drawRemains, drawStringAura, drawStringPile, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
+import { getSettings, openSettings } from "../ui/settings";
+import { Kbd } from "../ui/Kbd";
+import { DUNGEON_ALT, getHints, hintsOff, leftFirstRoom, openedInventory, useHints } from "./hints";
+import { ROOM } from "./rooms";
+import { type Conversation, DOORWAY, DREAMS_TALK, FINAL, LET_GO, MENU, PERSIST, STRING_TALK, WAKE } from "./dialogues";
+import { blobWeapons, drawBlob, drawFoldedLadder, drawPickup, drawKeeper, drawRemains, drawStringAura, drawStringPile, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
 import { StringCounter, YarnBall } from "../render/StringCounter";
-import { equippedSide, equipSide, gearName, type GearSpec, hasMemories, type Inventory as Bag, loadoutOf, pieceAt, readDreams, receive, setEternal, SLOTS, type Slot, unequip } from "./gear";
+import { equippedSide, equipSide, gearName, type GearSpec, hasUnread, type Inventory as Bag, loadoutOf, pieceAt, readDreams, receive, setEternal, SLOTS, type Slot, unequip } from "./gear";
 import { GearSprite } from "./GearIcons";
-import { GuideMenu } from "./GuideMenu";
+import { DialogueScene } from "./DialogueScene";
 import { type InvFocus, InventoryScreen, type Place } from "./InventoryScreen";
 import { type GroundItem, PICKUP_REACH, PICKUPS } from "./pickups";
 import { ALERT_RADIUS, CHASE_MEMORY, HOWL_RADIUS, ladderPlan, type Corpse, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, GRACE_MS, inFightArea, livingDef, MAP_FOES, type MapFoe, MAX_IN_FIGHT, memberKey, nodeAt, spotsOf, stepsToNode, TOUCH, wakeEnemies, waypoint3, withCorpses } from "./foes";
 import { playMusic } from "../audio/music";
 import { drawProp, propsOn } from "./props";
 import { play as playSfx } from "../audio/sfx";
-import { cry, drip, type Floor, prepareWalk, speak, step, type Stepper } from "../audio/walk";
-import { typeDelay } from "../combat/lesson";
+import { cry, drip, type Floor, prepareWalk, step, type Stepper } from "../audio/walk";
 import { groundAt } from "./ground";
-import { FADE_FAR, FADE_NEAR, KEEPER_REACH, KEEPERS } from "./keepers";
+import { END_KEEPER, FADE_FAR, FADE_NEAR, KEEPER_REACH, KEEPERS } from "./keepers";
 import { slide, surfaceNear, type Walker, walkStep } from "./movement";
 import { createMapRenderer, type Light } from "./render";
 import { sight } from "./sight";
-import { type After, CHAT, FIRST_FLOOR_KEEPER, GIFT, type Knot, knotCharges, type Talk, type TutorialState } from "./tutorial";
-import { ACCEL, BODY_ABOVE_FEET, CAMERA_FOLLOW, FALL_DEATH_ALT, FALL_FATAL, GRAVITY, HALF_W, LADDER_SPEED, RISE, SPEED, STAIRS_SPEED, PLAYER_STRIDE, STEP_TOLERANCE, STRIDE, VISION_RADIUS } from "./tuning";
-import { type Dir, doorAt, LADDER, ladderSpan, LEVELS, STAIRS, WORLD } from "./world";
+import { FIRST_FLOOR_KEEPER, type Knot, knotCharges, type TutorialState } from "./tutorial";
+import { paletteOf, ACCEL, BODY_ABOVE_FEET, CAMERA_FOLLOW, FALL_DEATH_ALT, FALL_FATAL, GRAVITY, HALF_W, LADDER_SPEED, RISE, SPEED, STAIRS_SPEED, PLAYER_STRIDE, STEP_TOLERANCE, STRIDE, VISION_RADIUS } from "./tuning";
+import { type Dir, doorAt, DROP_LADDER_LIST, raisedLadderAt, setLoweredLadders, LADDER, ladderSpan, LEVELS, STAIRS, WORLD } from "./world";
 
+/** How close to the middle of the hole at a pulled-up ladder's top you must stand to let it down, in tiles. */
+const LADDER_REACH = 1.3;
 /** How long what you picked up stays on screen, fading at the end. */
 const PICKED_UP_MS = 2200;
 /**
@@ -55,6 +60,10 @@ const PICKED_UP_MS = 2200;
  * square (world tile 32, 14), right before the door.
  */
 const DEMO_BEFORE = { x: 32.5, y: 14.5, alt: 13, facing: "right" as Dir };
+/** How long the screen takes to go dark after you accept the guide's last offer, before "Thanks for playing" comes up. */
+const ENDING_MS = 6000;
+/** Whether crossing the corridor's threshold ends the demo (off for now: the corridor is being made into the final scene). */
+const DEMO_END = false;
 
 /** Resting is a sleep: how long the screen is dark in all, and when, in the dark, it happens. */
 const SLEEP_MS = 2400;
@@ -80,6 +89,8 @@ export interface Journey {
   fallen?: Record<string, Corpse>;
   /** The keeper you last rested by (a keeper's id). */
   rested?: string;
+  /** The ladders you have let down (`DROP_LADDERS` in plans.ts, by id): they stay down. */
+  lowered?: string[];
   /** The guide's teaching: the lesson passed, and the knot given at the first floor's safe spot. */
   tutorial: TutorialState;
   /** The guide's gift, once given: your revive for the demo (see tutorial.ts). */
@@ -122,6 +133,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   const [entering, setEntering] = useState(false);
   /** The demo is over: the "Thanks for playing" card is up. */
   const [thanks, setThanks] = useState(false);
+  /** You accepted the guide's last offer: the screen is going dark, very slowly, before the card. */
+  const [ending, setEnding] = useState(false);
   const thanksRef = useRef(false);
   // The map being got ready before the first frame (how far along it is, 0 to 1), or null once it is.
   const [preparing, setPreparing] = useState<number | null>(0);
@@ -130,26 +143,32 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   latest.current = { journey, onEncounter, onSave, onDie, onExit };
   /**
    * What is open over the map, if anything (the map stands still meanwhile): the inventory (E; `start`:
-   * where its cursor begins), the guide's menu (E by a keeper), or the pause menu (Esc).
+   * where its cursor begins), a talk with the guide (`talk`, by the keeper `keeper`: E by a keeper opens its menu), or the pause menu (Esc).
    */
-  type Screen = { kind: "inventory"; start?: InvFocus } | { kind: "guide"; unwindFirst?: boolean; empowerFirst?: boolean } | { kind: "pause" };
-  const [screen, setScreen] = useState<Screen | null>(null);
+  type Screen = { kind: "inventory"; start?: InvFocus } | { kind: "guide"; talk: Conversation; keeper: string; instant?: boolean } | { kind: "pause" };
+  // A new game opens already speaking with the guide, by the start room's keeper.
+  const [screen, setScreen] = useState<Screen | null>(() => (journey.tutorial.greeted === false ? { kind: "guide", talk: WAKE, keeper: "start", instant: true } : null));
+  // The keeper whose guide you are speaking with (it stays fully there meanwhile).
+  const talkingAt = useRef<string | null>(null);
+  talkingAt.current = screen?.kind === "guide" ? screen.keeper : null;
   const pausedRef = useRef(false);
   pausedRef.current = screen !== null;
   const paused = screen !== null;
   const [pauseAt, setPauseAt] = useState(0);
+  // The control hints of the opening stretch (see hints.ts): WASD round you, which the map's loop keeps on you, and "E Open Inventory".
+  const hints = useHints();
+  const moveHintRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (screen?.kind === "inventory") openedInventory(); }, [screen]);
   const held = useRef<Dir[]>([]);
   // The keeper you last rested by, and the one you're standing by now (if any).
   const restedAt = useRef<string | undefined>(journey.rested);
   const nearRef = useRef<string | null>(null);
   const [near, setNear] = useState<string | null>(null);
-  // Eternal gear you just picked up (or the knot the guide just gave you): its sprite and name pop up in a box where the "E Pick Up" prompt was, then fade.
-  const [got, setGot] = useState<{ gear?: GearSpec; knot?: boolean; id: number } | null>(null);
-  useEffect(() => {
-    if (!got) return;
-    const t = window.setTimeout(() => setGot(cur => (cur?.id === got.id ? null : cur)), PICKED_UP_MS);
-    return () => window.clearTimeout(t);
-  }, [got]);
+  // Eternal gear you just picked up (or the knot the guide just gave you): its sprite and name pop up in a box where the "E Pick Up" prompt was,
+  // and stay until you close it (Q Close, E Ok: both only close it). Meanwhile the map stands still, and the guide's words wait.
+  const [got, setGotState] = useState<{ gear?: GearSpec; knot?: boolean; id: number } | null>(null);
+  const gotRef = useRef(false);
+  const setGot = (g: { gear?: GearSpec; knot?: boolean; id: number } | null) => { gotRef.current = g !== null; if (g) held.current = []; setGotState(g); };
   // String you just gathered: the counter shows at the top for a moment, with a "+X" below it.
   const [stringHud, setStringHud] = useState<{ id: number; amount?: number; eternal?: number } | null>(null);
   useEffect(() => {
@@ -175,6 +194,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   const corpsesRef = useRef<Record<string, Corpse>>(withCorpses(journey.corpses ?? {}, journey.defeated));
   /** Set up by the map's loop: the sleepwalkers get up again, back where they started. */
   const respawnRef = useRef<() => void>(() => {});
+  /** Puts you in front of a keeper (by its id), as you wake after sleeping there (set by the map's loop). */
+  const wakeByRef = useRef<(id: string) => void>(() => {});
   const groundRef = useRef<GroundItem[]>(journey.ground ?? []);
   // Your String, and what the enemies who killed you hold of it.
   const stringRef = useRef(journey.string ?? 0);
@@ -187,6 +208,22 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   const safeRef = useRef<{ x: number; y: number; alt: number } | null>(null);
   const nearPickupRef = useRef<string | null>(null);
   const [nearPickup, setNearPickup] = useState<string | null>(null);
+  // The ladders let down (`DROP_LADDERS`), which the world goes by; and the one still pulled up that you stand by, at the hole at its top.
+  const loweredRef = useRef<string[]>(journey.lowered ?? []);
+  setLoweredLadders(loweredRef.current);
+  const nearLadderRef = useRef<string | null>(null);
+  const [nearLadder, setNearLadder] = useState<string | null>(null);
+  /** Lets down the ladder you stand by: it drops into its hole with a clatter, and is there to climb from then on (and saved so). */
+  const lowerLadder = () => {
+    const id = nearLadderRef.current;
+    if (!id) return;
+    loweredRef.current = [...loweredRef.current, id];
+    setLoweredLadders(loweredRef.current);
+    nearLadderRef.current = null;
+    setNearLadder(null);
+    step("player", "land", 1, 0);
+    latest.current.onSave(snapshot.current());
+  };
   /** Everything lying within reach to be picked up: gear set on the map that you haven't taken, and what lies where things fell. */
   const floorItems = () => [
     ...PICKUPS.filter(p => !takenRef.current.includes(p.id)).map(p => ({ id: p.id, at: p.at, gear: p.gear, string: undefined as number | undefined, eternalString: p.eternalString })),
@@ -309,10 +346,11 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   // (to lie there as remains, if it reaches the ground). E on the card wakes you as after any death.
   const [doomed, setDoomed] = useState(false);
   const doomedRef = useRef(false);
-  const rest = () => {
-    const id = nearRef.current;
-    if (!id) return;
-    const gift = id === FIRST_FLOOR_KEEPER && !tutorialRef.current.done;
+  /**
+   * Lying down by the keeper `id` (from a talk with the guide there). The talk's scene stays as the screen goes dark over it; in the
+   * dark it goes, and you wake on the map.
+   */
+  const rest = (id: string) => {
     held.current = [];
     leaving.current = true;
     setSleeping(true);
@@ -322,6 +360,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
     sleepTimers.current = [
       // In the dark: your candle moves here, and the knot, if slack, winds itself tight.
       window.setTimeout(() => {
+        setScreen(null);
+        wakeByRef.current(id);
         restedAt.current = id;
         respawnRef.current();
         eternityRef.current = undefined;
@@ -331,53 +371,78 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         setSleeping(false);
         leaving.current = false;
         latest.current.onSave(snapshot.current());
-        if (gift) setTalk({ ...GIFT, at: 0 });
       }, SLEEP_MS),
     ];
   };
 
-  // The guide speaking: its lines, which one you're at, and what follows the last. The map
-  // stands still meanwhile.
-  const [talk, setTalk] = useState<(Talk & { at: number }) | null>(null);
-  const talkRef = useRef(false);
-  // The guide's words are written out as it speaks, a soft blip for the letters. E finishes the line, and then moves on.
-  const [spoken, setSpoken] = useState({ key: "", n: 0 });
-  const line = talk ? talk.lines[talk.at] : "";
-  const lineKey = talk ? `${talk.after}:${talk.at}:${line}` : "";
-  const written = spoken.key === lineKey ? spoken.n : 0;
-  useEffect(() => {
-    if (!talk || written >= line.length) return;
-    const t = window.setTimeout(() => { speak(line[written], written); setSpoken({ key: lineKey, n: written + 1 }); }, typeDelay(line, written));
-    return () => window.clearTimeout(t);
-  }, [lineKey, written]); // eslint-disable-line react-hooks/exhaustive-deps
-  talkRef.current = talk !== null;
   // Where you stand now, as a Journey (set by the map's loop).
   const snapshot = useRef<() => Journey>(() => latest.current.journey);
-  /** What follows the guide's last words: the knot, once, at the first floor's safe spot. */
-  const then = (after: After) => {
-    // Talking from the guide's menu: back to it.
-    if (after === "guide") { setScreen({ kind: "guide" }); return; }
-    if (after !== "knot") return;
+  /** The guide gives you the knot (in the middle of its talk): its pop-up, and the talk waits until it is closed. */
+  const giveKnot = () => {
     tutorialRef.current = { ...tutorialRef.current, done: true };
     setKnot("wound");
     setGot({ knot: true, id: Date.now() });
     latest.current.onSave(snapshot.current());
   };
+  /** You accepted the guide's last offer: everything stops, the screen goes dark over the talk, very slowly, and then "Thanks for playing". */
+  const endDemo = () => {
+    held.current = [];
+    leaving.current = true;
+    setEnding(true);
+    // (The music fades away with the light.)
+    playMusic(null, ENDING_MS / 1000);
+    sleepTimers.current.push(window.setTimeout(() => { thanksRef.current = true; setThanks(true); }, ENDING_MS));
+  };
+  /** A talk with the guide is over (you rest or leave): the wake-up and the doorway are behind you, once had. */
+  const talkEnded = (talk: Conversation) => {
+    const t = tutorialRef.current;
+    if (talk === WAKE && t.greeted === false) tutorialRef.current = { ...t, greeted: true };
+    else if (talk === DOORWAY && t.warned === false) tutorialRef.current = { ...t, warned: true };
+    else if (talk === LET_GO && t.letGo === false) tutorialRef.current = { ...t, letGo: true };
+    else return;
+    latest.current.onSave(snapshot.current());
+  };
 
   /**
-   * Speaking with the guide by a keeper. The first time after you have found a memory, its menu opens
-   * right on Unwind Memories, and the first time you have String enough to raise a stat, on Empower Self (and from then on, each is one of its options).
+   * What the guide has waiting to bring up, if anything, now said (so its option is in the menu from now on). Empower Self and Dreams
+   * are not in the menu until the guide has brought them up: once you have String enough to raise a stat, it talks of the String and
+   * opens Empower Self; once you carry a memory whose dreams are unread, it is curious of it and opens Dreams. (If both are waiting,
+   * the String comes first, and the memory the next time.) A story talk plays before these, and leaves them waiting: they come the next
+   * time you speak with the guide, or as soon as you choose Talk.
    */
+  const queuedTalk = (): Conversation | null => {
+    const t = tutorialRef.current;
+    const talk = canEmpower(stringRef.current, statsRef.current, eternalRef.current) && !t.empowered ? STRING_TALK
+      : hasUnread(invRef.current) && !t.unwound ? DREAMS_TALK : null;
+    if (!talk) return null;
+    tutorialRef.current = { ...t, ...(talk === STRING_TALK ? { empowered: true } : { unwound: true }) };
+    latest.current.onSave(snapshot.current());
+    // (So the scene, already open when it comes from Talk, has the new option.)
+    setStatsTick(n => n + 1);
+    return talk;
+  };
+
+  /** Speaking with the guide by a keeper: a story talk if one is due here, else what it has waiting to bring up (`queuedTalk`), else its menu. */
   const openGuide = () => {
-    // The first time you have String enough to raise a stat, it opens on Empower Self, and from then on that is an option, affordable or not.
-    // If a memory was waiting too, Empower Self goes first and Unwind Memories opens next time (until you have been to it once).
-    const introEmpower = canEmpower(stringRef.current, statsRef.current, eternalRef.current) && !tutorialRef.current.empowered;
-    const first = hasMemories(invRef.current) && !tutorialRef.current.unwound && !introEmpower;
-    if (first || introEmpower) {
-      tutorialRef.current = { ...tutorialRef.current, ...(first ? { unwound: true } : {}), ...(introEmpower ? { empowered: true } : {}) };
+    // Speaking with the guide makes its keeper the one you wake by after a fall, whether or not you sleep there.
+    if (nearRef.current && restedAt.current !== nearRef.current) {
+      restedAt.current = nearRef.current;
       latest.current.onSave(snapshot.current());
     }
-    setScreen({ kind: "guide", unwindFirst: first, empowerFirst: introEmpower });
+    // The first time you speak with it at the end of the last corridor: its last offer. (From then on Talk makes the offer again.)
+    if (nearRef.current === END_KEEPER && !tutorialRef.current.offered) {
+      tutorialRef.current = { ...tutorialRef.current, offered: true };
+      latest.current.onSave(snapshot.current());
+      setScreen({ kind: "guide", talk: FINAL, keeper: END_KEEPER });
+      return;
+    }
+    // The first time you speak with it at the first floor's safe spot (the Nave, past the ladder): it asks whether you will go on, and gives you the knot.
+    if (nearRef.current === FIRST_FLOOR_KEEPER && !tutorialRef.current.done) {
+      setScreen({ kind: "guide", talk: PERSIST, keeper: FIRST_FLOOR_KEEPER });
+      return;
+    }
+    if (!nearRef.current) return;
+    setScreen({ kind: "guide", talk: queuedTalk() ?? MENU, keeper: nearRef.current });
   };
   /** Empower Self: String for one more point of max health or max Eternity (what the stat stands at, summed from 1, is the cost). */
   const empower = (stat: "health" | "eternity") => {
@@ -398,6 +463,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
   const pauseOptions = (): MenuOption[] => [
     { label: "Resume", run: () => setScreen(null) },
     { label: "Reawaken", run: () => reawakenRef.current() },
+    { label: "Settings", run: openSettings },
     { label: "Save and Quit", run: () => onExit(snapshot.current()) },
   ];
 
@@ -409,43 +475,42 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    // The "Thanks for playing" card: E (or Enter, or Space) goes back to the menu.
+    // (What the key does, by the player's bindings: "select" is Yes (E), "back" is No (Q), "pause" is Escape.)
+    const act = keyOf(e.key);
+    // The "Thanks for playing" card: Yes (or Enter, or Space) goes back to the menu.
     if (thanksRef.current) {
-      if (!e.repeat && ["e", "enter", " "].includes(e.key.toLowerCase())) { e.preventDefault(); menuSound("select"); latest.current.onExit({ ...snapshot.current(), at: DEMO_BEFORE }); }
+      if (!e.repeat && act === "select") { e.preventDefault(); menuSound("select"); latest.current.onExit({ ...snapshot.current(), at: DEMO_BEFORE }); }
       return;
     }
     if (doomedRef.current) {
-      if (!e.repeat && ["e", "enter", " "].includes(e.key.toLowerCase())) { e.preventDefault(); menuSound("select"); reawakenRef.current(); }
+      if (!e.repeat && act === "select") { e.preventDefault(); menuSound("select"); reawakenRef.current(); }
       return;
     }
     if (leaving.current) return;
     const key = e.key.toLowerCase();
-    // The inventory and the guide's menu read their own keys.
+    if (got && act !== "pause" && screen?.kind !== "pause") {
+      // The pop-up of what you were given: Q (Close) or E (Ok) closes it; nothing else happens until then (a talk with the guide waits too).
+      e.preventDefault();
+      if (!e.repeat && (act === "select" || act === "back")) { menuSound("select"); setGot(null); }
+      return;
+    }
+    // The inventory and the talk with the guide read their own keys.
     if (screen && screen.kind !== "pause") return;
-    if (key === "escape") {
+    if (act === "pause") {
       e.preventDefault();
       if (!e.repeat) { held.current = []; setPauseAt(0); setScreen(s => (s ? null : { kind: "pause" })); }
       return;
     }
     if (screen?.kind === "pause") {
-      // The pause menu: W/S choose, E picks, Q (or Esc) resumes.
+      // The pause menu: up/down choose, Yes picks, No (or Esc) resumes.
       e.preventDefault();
       if (e.repeat) return;
       const options = pauseOptions();
       if (dir === "up" || dir === "down") menuSound(dir);
-      else if (key === "e" || key === "enter" || key === " ") menuSound("select");
+      else if (act === "select") menuSound("select");
       if (dir === "up" || dir === "down") setPauseAt(i => wrapIndex(i, dir === "up" ? -1 : 1, options.length));
-      else if (key === "e" || key === "enter" || key === " ") options[pauseAt]?.run();
-      else if (key === "q") setScreen(null);
-      return;
-    }
-    if (talk) {
-      // The guide's lines: E moves on; the last one ends the talk and does what follows.
-      e.preventDefault();
-      if (e.repeat || (key !== "e" && key !== "enter" && key !== " ")) return;
-      if (written < line.length) { setSpoken({ key: lineKey, n: line.length }); return; }
-      if (talk.at + 1 < talk.lines.length) setTalk({ ...talk, at: talk.at + 1 });
-      else { setTalk(null); then(talk.after); }
+      else if (act === "select") options[pauseAt]?.run();
+      else if (act === "back") setScreen(null);
       return;
     }
     if (dir) {
@@ -453,12 +518,13 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       if (!e.repeat) held.current = [...held.current.filter(d => d !== dir), dir];
       return;
     }
-    // E: pick up what lies here, or speak with the guide by a keeper, or open the inventory.
-    if ((key === "e" || key === "enter") && !e.repeat) {
+    // Yes: pick up what lies here, or speak with the guide by a keeper, or open the inventory. (Not Space, unless it is bound.)
+    if (act === "select" && (key !== " " || getSettings().keys.yes === " ") && !e.repeat) {
       e.preventDefault();
       held.current = [];
       if (nearPickupRef.current) pickUp();
       else if (nearRef.current) openGuide();
+      else if (nearLadderRef.current) lowerLadder();
       else setScreen({ kind: "inventory" });
     }
   };
@@ -531,6 +597,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       corpses: corpsesRef.current,
       ground: groundRef.current,
       rested: restedAt.current,
+      lowered: loweredRef.current,
       tutorial: tutorialRef.current,
       knot: knotRef.current,
       inventory: invRef.current,
@@ -549,13 +616,27 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       const ease = 1 - Math.exp(-3 * dtMs / 1000);
       for (const k of KEEPERS) {
         const d = Math.hypot(k.at.x - me.x, k.at.y - me.y) + Math.abs(k.at.z - me.alt) * 6;
-        const present = talkRef.current && k.id === restedAt.current;
+        const present = k.id === talkingAt.current;
         const want = present ? 1 : Math.min(1, Math.max(0, (FADE_FAR - d) / (FADE_FAR - FADE_NEAR)));
         fade[k.id] += (want - fade[k.id]) * ease;
       }
     };
     // The camera follows where you appear on screen: your height lifts you up the screen.
     const cam = { x: me.x, y: me.y - me.alt * RISE };
+    wakeByRef.current = (id: string) => {
+      // After sleeping by a keeper you wake in front of it, facing it, as after a fall: wherever you lay down. (The camera is already there.)
+      const k = KEEPERS.find(k => k.id === id);
+      if (!k) return;
+      Object.assign(me, { x: k.at.x, y: k.at.y + 0.9, alt: k.at.z, ground: k.at.z, vx: 0, vy: 0, fall: 0, climbing: false, facing: "up" as Dir, walked: 0 });
+      cam.x = me.x; cam.y = me.y - me.alt * RISE;
+    };
+    /** The room you are in, or -1 (between rooms). The hints' first room is the one you set out in. */
+    const roomAt = (x: number, y: number, alt: number) => ROOM[Math.round(alt)]?.[Math.floor(y) * WORLD.w + Math.floor(x)] ?? -1;
+    const roomHere = () => roomAt(me.x, me.y, me.alt);
+    const firstRoom = roomHere();
+    // The room you woke in (the start keeper's): the first time you try to leave it, the guide stops you.
+    const startKeeper = KEEPERS.find(k => k.id === "start")!.at;
+    const wokeRoom = roomAt(startKeeper.x, startKeeper.y, startKeeper.z);
     const renderer = createMapRenderer(canvas);
     prepareWalk();
 
@@ -649,8 +730,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         safeRef.current = mid && Math.abs(mid.h - me.alt) < 1e-3 ? { x: tx + 0.5, y: ty + 0.5, alt: me.alt } : { x: me.x, y: me.y, alt: me.alt };
       }
 
-      // The demo ends in the dark corridor past Floor C's NE bridge: crossing its threshold, the "Thanks for playing" card comes up, and its button takes you back to the menu; Continue puts you right before it.
-      if (!leaving.current && Math.abs(me.alt - 13) < 0.4 && doorAt(13, Math.floor(me.x), Math.floor(me.y))) {
+      // (Off for now, `DEMO_END`.) The demo ends in the dark corridor past Floor C's NE bridge: crossing its threshold, the "Thanks for playing" card comes up, and its button takes you back to the menu; Continue puts you right before it.
+      if (DEMO_END && !leaving.current && Math.abs(me.alt - 13) < 0.4 && doorAt(13, Math.floor(me.x), Math.floor(me.y))) {
         leaving.current = true;
         held.current = [];
         thanksRef.current = true;
@@ -658,7 +739,22 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       }
 
       // The music follows where you are: the lower labyrinth and its shaft, or the dungeon proper (Floor A's outer wheel, on level 6, and up).
-      playMusic(me.alt >= 6 ? "quella" : "temple");
+      playMusic(me.alt >= DUNGEON_ALT ? "quella" : "temple");
+      // Stepping out of the room you woke in (after the guide's first words): the first time, it stops you and asks you back; the
+      // second time (whether you lay with it again or not), it lets you go. Either way you are back on the spot you stepped from, and it speaks.
+      const tut = tutorialRef.current;
+      const stopper = tut.greeted === false ? null : tut.warned === false ? DOORWAY : tut.letGo === false ? LET_GO : null;
+      if (stopper && me.fall === 0 && !me.climbing && roomAt(startX, startY, startAlt) === wokeRoom && roomHere() !== wokeRoom) {
+        me.x = startX; me.y = startY; me.alt = startAlt; me.vx = me.vy = 0;
+        held.current = [];
+        pausedRef.current = true;
+        setScreen({ kind: "guide", talk: stopper, keeper: "start" });
+        return;
+      }
+      // The control hints: WASD round you until you leave the room you set out in; all of them over at the top of the shaft.
+      const h = getHints();
+      if (!h.off && me.alt >= DUNGEON_ALT - 1e-3 && !me.climbing && me.fall === 0) hintsOff();
+      else if (!h.leftRoom && me.fall === 0 && roomHere() !== firstRoom) leftFirstRoom();
 
       // The walk cycle follows the distance actually covered.
       const moved = Math.hypot(me.x - startX, me.y - startY) + (pinned ? Math.abs(me.alt - startAlt) : 0);
@@ -696,6 +792,9 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       reachRef.current = inReach.map(p => p.id);
       const onFloor = inReach[0]?.id ?? null;
       if (onFloor !== nearPickupRef.current) { nearPickupRef.current = onFloor; setNearPickup(onFloor); }
+      // By the hole at the top of a ladder still pulled up: you can let it down.
+      const ladder = DROP_LADDER_LIST.find(d => raisedLadderAt(d.x, d.y) && Math.abs(d.top - me.alt) < 0.2 && Math.hypot(d.x + 0.5 - me.x, d.y + 0.5 - me.y) < LADDER_REACH)?.id ?? null;
+      if (ladder !== nearLadderRef.current) { nearLadderRef.current = ladder; setNearLadder(ladder); }
     };
 
     /** How loud a foe sounds to you, 0 to 1 (by how far off it is, and how many floors), and which side it is on. */
@@ -1004,6 +1103,17 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         if (Math.round(c.alt) !== z || !test(c.y) || !onScreen(c.x, c.y, c.alt)) continue;
         list.push({ x: c.x, y: c.y, draw: () => MAP_REMAINS[c.kind](ctx, ox + c.x * T, oy + (c.y - c.alt * RISE - BODY_ABOVE_FEET) * T, T) });
       }
+      // A ladder still pulled up lies folded on the floor along the north edge of the hole it is let down through (the wall side, where it
+      // stands once down).
+      for (const d of DROP_LADDER_LIST) {
+        const fy = d.y - 0.05;
+        if (d.top !== z || !raisedLadderAt(d.x, d.y) || !test(fy) || !onScreen(d.x + 0.5, fy)) continue;
+        list.push({ x: d.x + 0.5, y: fy, draw: () => {
+          ctx.globalAlpha = light(d.x + 0.5, fy);
+          drawFoldedLadder(ctx, ox + (d.x + 0.5) * T, oy + (fy - z * RISE) * T, T, paletteOf(d.bottom).rung);
+          ctx.globalAlpha = 1;
+        } });
+      }
       // The map's props (people sealed in wax): features, not creatures; each one picture, drawn in its row like everything else.
       for (const d of propsOn(z)) {
         if (!test(d.y) || !onScreen(d.x, d.y)) continue;
@@ -1090,6 +1200,14 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
         player: { draw: (ctx, px, py, T, solid) => (bodyDown ? drawRemains(ctx, px, py, T) : drawWalker(ctx, px, py, T, me.facing, frame, solid, solid ? (me.alt - me.ground) * RISE : 0, look)) },
       }, dtMs);
       if (disturbRef.current) drawDisturbance(disturbRef.current, performance.now());
+      // The WASD round you sit on you, wherever the camera is.
+      const mh = moveHintRef.current;
+      if (mh) {
+        const w = canvas.clientWidth, hh = canvas.clientHeight, T = renderer.T * (w / (canvas.width || 1));
+        const px = w / 2 + (me.x - cam.x) * T, py = hh / 2 + (me.y - me.alt * RISE - cam.y - BODY_ABOVE_FEET) * T;
+        mh.style.transform = `translate(${px}px, ${py}px)`;
+        mh.style.setProperty("--t", `${T}px`);
+      }
     };
 
     /**
@@ -1170,7 +1288,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       const dt = Math.min(now - last, 100);
       last = now;
       if (doomedRef.current) fallOn(dt);
-      else if (!pausedRef.current && !talkRef.current && !leaving.current) update(dt);
+      else if (!pausedRef.current && !gotRef.current && !leaving.current) update(dt);
       draw(dt);
       raf = requestAnimationFrame(tick);
     };
@@ -1190,14 +1308,18 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       <canvas ref={canvasRef} className="explore-canvas" />
       <canvas ref={disturbRef} className="explore-disturb" aria-hidden="true" />
       {preparing !== null && <div className="explore-loading">Preparing the map… {Math.round(preparing * 100)}%</div>}
-      {nearPickup && !got && !paused && !entering && !talk && (
-        <div className="explore-prompt"><kbd>E</kbd> Pick Up</div>
+      {nearPickup && !got && !paused && !entering && (
+        <div className="explore-prompt"><Kbd k="yes" /> Pick Up</div>
       )}
-      {/* The eternal gear you just picked up, in the prompt's place: its sprite and its name, fading away. */}
-      {got && !paused && (
-        <div key={got.id} className="explore-prompt explore-got">
-          {got.gear ? <GearSprite slot={got.gear.slot} tier={got.gear.tier} item={got.gear.item} /> : <YarnBall className="explore-got-knot" red />}
-          <span>{got.gear ? gearName(got.gear) : "Knot"}</span>
+      {/* The eternal gear you just picked up, in the prompt's place: its sprite and its name, until you close it. */}
+      {/* (Over a talk with the guide too: it waits until the pop-up is closed.) */}
+      {got && screen?.kind !== "pause" && screen?.kind !== "inventory" && (
+        <div key={got.id} className={`explore-prompt explore-got ${screen ? "is-over-scene" : ""}`}>
+          <div className="explore-got-item">
+            {got.gear ? <GearSprite slot={got.gear.slot} tier={got.gear.tier} item={got.gear.item} /> : <YarnBall className="explore-got-knot" red />}
+            <span>{got.gear ? gearName(got.gear) : "Knot"}</span>
+          </div>
+          <div className="explore-got-keys"><Kbd k="no" /> Close · <Kbd k="yes" /> Ok</div>
         </div>
       )}
       {/* The String you just gathered: the counter at the top, with "+X" under it, fading away. */}
@@ -1210,8 +1332,24 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
           />
         </div>
       )}
-      {near && !nearPickup && !paused && !entering && !talk && (
-        <div className="explore-prompt"><kbd>E</kbd> Speak with the guide</div>
+      {nearLadder && !near && !nearPickup && !got && !paused && !entering && (
+        <div className="explore-prompt"><Kbd k="yes" /> Lower Ladder</div>
+      )}
+      {near && !nearPickup && !got && !paused && !entering && (
+        <div className="explore-prompt"><Kbd k="yes" /> Talk</div>
+      )}
+      {/* Until you first open it, and while nothing else is asked of you down there: how to open the inventory. */}
+      {!hints.off && !hints.inventory && !near && !nearPickup && !nearLadder && !got && !paused && !entering && !doomed && !thanks && preparing === null && (
+        <div className="explore-prompt"><Kbd k="yes" /> Open Inventory</div>
+      )}
+      {/* How to walk: WASD round you, until you leave the room you set out in. */}
+      {!hints.off && (
+        <div ref={moveHintRef} className={`move-hints ${hints.leftRoom || paused || preparing !== null || doomed ? "is-gone" : ""}`} aria-hidden="true">
+          <span className="key-hint" style={{ left: 0, top: "calc(var(--t) * -1)" }}><Kbd k="up" /></span>
+          <span className="key-hint" style={{ left: "calc(var(--t) * -0.8)", top: 0 }}><Kbd k="left" /></span>
+          <span className="key-hint" style={{ left: 0, top: "calc(var(--t) * 0.8)" }}><Kbd k="down" /></span>
+          <span className="key-hint" style={{ left: "calc(var(--t) * 0.8)", top: 0 }}><Kbd k="right" /></span>
+        </div>
       )}
       {sleeping && <div className="explore-sleep" />}
       {doomed && !sleeping && (
@@ -1222,36 +1360,41 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
           </div>
         </div>
       )}
-      {talk && <Dialogue speaker="The guide" text={talk.lines[talk.at]} written={written} last={talk.at + 1 >= talk.lines.length} />}
       {thanks && (
-        <div className="result" role="dialog" aria-label="Thanks for playing">
+        <div className="result is-thanks" role="dialog" aria-label="Thanks for playing">
           <div className="result-card">
             <h2>Thanks for playing</h2>
-            <div className="setup-buttons"><button className="commit" onClick={() => latest.current.onExit({ ...snapshot.current(), at: DEMO_BEFORE })}>Main menu <kbd>E</kbd></button></div>
+            <div className="setup-buttons"><button className="commit" onClick={() => latest.current.onExit({ ...snapshot.current(), at: DEMO_BEFORE })}>Main menu <Kbd k="yes" /></button></div>
           </div>
         </div>
       )}
       {entering && <div className="explore-fade" />}
+      {ending && <div className="explore-ending" style={{ animationDuration: `${ENDING_MS}ms` }} aria-hidden="true" />}
       {screen?.kind === "inventory" && (
         <InventoryScreen inv={inv} player={barsPlayer()} string={stringRef.current} eternalString={eternalRef.current} knot={knotRef.current} ground={groundNear()} start={screen.start} onUse={useInventory} onClose={() => setScreen(null)} />
       )}
-      {screen?.kind === "guide" && (
-        <GuideMenu
+      {screen?.kind === "guide" && preparing === null && (
+        <DialogueScene
+          key={screen.talk.id}
+          talk={screen.talk}
+          instant={screen.instant}
+          blocked={!!got || sleeping || ending}
+          offer={!!tutorialRef.current.offered}
+          onEnd={endDemo}
+          onTalk={() => queuedTalk()?.beats ?? null}
           inv={inv}
           player={barsPlayer()}
-          unwindFirst={screen.unwindFirst}
-          empowerFirst={screen.empowerFirst}
           empowerUnlocked={!!tutorialRef.current.empowered}
-          onVisitUnwind={() => { if (!tutorialRef.current.unwound) { tutorialRef.current = { ...tutorialRef.current, unwound: true }; latest.current.onSave(snapshot.current()); } }}
+          dreamsUnlocked={!!tutorialRef.current.unwound}
           string={stringRef.current}
           eternalString={eternalRef.current}
           stats={statsRef.current}
           onEmpower={empower}
-          onTalk={() => { setScreen(null); setTalk({ ...CHAT, at: 0 }); }}
-          onRest={() => { setScreen(null); rest(); }}
+          onGift={giveKnot}
+          onRest={() => { talkEnded(screen.talk); rest(screen.keeper); }}
           onRead={id => { setInv(readDreams(invRef.current, id)); latest.current.onSave(snapshot.current()); }}
           onSet={(slot, id) => { setInv(setEternal(invRef.current, slot, id)); latest.current.onSave(snapshot.current()); }}
-          onClose={() => setScreen(null)}
+          onClose={() => { talkEnded(screen.talk); setScreen(null); }}
         />
       )}
       {screen?.kind === "pause" && <PauseMenu options={pauseOptions()} focus={pauseAt} onFocus={setPauseAt} />}

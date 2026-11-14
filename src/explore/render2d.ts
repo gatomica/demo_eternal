@@ -21,7 +21,7 @@ import { createStatsOverlay } from "./gl/stats";
 import { groupRows, type Light, type MapRenderer, type View, WALL_TILES } from "./view";
 import { lampX, lampY, seeThrough } from "./sight";
 import { BODY_ABOVE_FEET, COLORS, GAP_PEEK, GHOST_ALPHA, MAX_PIXEL_RATIO, RENDER_SCALE, RISE, SIGHT_EASE, TILES_TALL, VISION_FADE, VISION_RADIUS, wallFade } from "./tuning";
-import { CLIFFS, DIAG, diagSide, FLOOR, isHoleDiag, isRamp, levelOf, LEVELS, onShaftOpen, roomLimit, shaftDiagSide, slopeAt, STAIRS, tileAt, WALL, wallFacesInto, WORLD } from "./world";
+import { ladderVersion, CLIFFS, DIAG, diagSide, FLOOR, isHoleDiag, isRamp, levelOf, LEVELS, onShaftOpen, roomLimit, shaftDiagSide, slopeAt, STAIRS, tileAt, WALL, wallFacesInto, WORLD } from "./world";
 
 /** A tile and the eight round it all this bright (of 1) count as fully lit. */
 const FULL = 0.998;
@@ -40,7 +40,10 @@ export function createMapRenderer2D(canvas: HTMLCanvasElement): MapRenderer {
   // Painted chunks of each level, as they've come into view (dropped once long out of view).
   const chunks = new Map<number, Chunk>();
   let frameNo = 0;
+  // (A ladder let down is painted into its chunks: when one is, they are all painted again.)
+  let ladders = ladderVersion;
   const chunkAt = (z: number, cx: number, cy: number): Chunk => {
+    if (ladders !== ladderVersion) { ladders = ladderVersion; chunks.clear(); }
     const key = (z * 256 + cy) * 256 + cx;
     let c = chunks.get(key);
     if (c === undefined) {

@@ -5,7 +5,7 @@ import { drawLostString } from "../render/lostString";
 import { ENEMY_KINDS, type KindId } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, EnemySetup, HeadItem, WeaponItem, WeaponTier } from "../core/types";
 import { paintSealed } from "./props";
-import { drawBlobSprite, drawSprite, UNITS_PER_TILE } from "./sprites";
+import { drawBlobSprite, drawSprite, drawWardenSprite, UNITS_PER_TILE } from "./sprites";
 import { COLORS } from "./tuning";
 import type { Dir } from "./world";
 
@@ -436,6 +436,43 @@ export function drawKeeper(g: CanvasRenderingContext2D, x: number, y: number, T:
   drawGuideBody(g, x, y, T, lit ? 1 : 0.25, t);
 }
 
+/**
+ * A ladder pulled up and folded, lying on the floor along the north edge of the hole it is let down through: its sections stacked one on
+ * another, each a short run of rails and rungs across the width of the hole. (x, y): the middle of the bundle's foot, on the floor (screen
+ * px); `color`: its rails' and rungs' colour (as it is drawn standing).
+ */
+export function drawFoldedLadder(g: CanvasRenderingContext2D, x: number, y: number, T: number, color: string) {
+  const len = 0.78 * T, deep = 0.3 * T, w = Math.max(1.5, T / 14), lift = Math.max(2, T / 10), FOLDS = 3;
+  g.save();
+  // A soft shadow on the floor under it.
+  g.fillStyle = "rgba(0,0,0,0.32)";
+  g.fillRect(x - len / 2 - w, y - deep - w, len + 2 * w, deep + 2 * w);
+  g.lineCap = "round";
+  for (let k = 0; k < FOLDS; k++) {
+    // Each section a little higher than the one under it (and nudged sideways, as folds never lie quite square).
+    const cy = y - k * lift, cx = x + (k % 2 ? 0.04 : -0.03) * T;
+    const x0 = cx - len / 2, x1 = cx + len / 2, back = cy - deep;
+    g.strokeStyle = color;
+    g.globalAlpha = 0.75 + 0.25 * (k / (FOLDS - 1));
+    g.lineWidth = w;
+    g.beginPath();
+    for (const ry of [back, cy]) { g.moveTo(x0, ry); g.lineTo(x1, ry); }
+    g.stroke();
+    g.lineWidth = w * 0.75;
+    g.beginPath();
+    for (let r = 0; r < 4; r++) { const rx = x0 + ((r + 0.5) / 4) * len; g.moveTo(rx, back); g.lineTo(rx, cy); }
+    g.stroke();
+  }
+  // The hinges where the sections fold, at the ends.
+  g.globalAlpha = 1;
+  g.fillStyle = color;
+  for (let k = 0; k < FOLDS - 1; k++) {
+    const hx = x + (k % 2 ? len / 2 : -len / 2), hy = y - (k + 0.5) * lift - deep / 2;
+    g.fillRect(hx - w / 2, hy - lift / 2, w, lift + w);
+  }
+  g.restore();
+}
+
 /** The ground under a body: a pool of the given color, flat on the floor. */
 function pool(g: CanvasRenderingContext2D, x: number, y: number, T: number, rx: number, ry: number, color: string) {
   g.fillStyle = color;
@@ -770,6 +807,7 @@ export const MAP_FIGURES: Record<KindId, (g: CanvasRenderingContext2D, x: number
   blobRight: () => {},
   blobLeftHammer: () => {},
   blobRightHammer: () => {},
-  warden: (g, x, y, T, facing) => drawWardenMap(g, x, y, T, facing),
+  // (Her fight's 3D figure, in Wax Arm Raised; the old flat drawing until the picture is ready.)
+  warden: (g, x, y, T, facing) => { if (!drawWardenSprite(g, x, y, T, facing)) drawWardenMap(g, x, y, T, facing); },
   guide: (g, x, y, T) => drawGuideMap(g, x, y, T),
 };

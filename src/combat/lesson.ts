@@ -34,7 +34,7 @@ export interface Goal {
 export interface Beat {
   /** The guide's words. */
   say: string;
-  /** The instruction (or reminder) under them, in brackets. */
+  /** The instruction (or reminder) under them, in brackets. Keys are written as `{yes}`, `{no}`, `{move}`... (see `keyText` in `ui/Kbd.tsx`), so they show as the player has bound them. */
   hint: string;
   /** What it asks of you. Without one, the beat is only read, and E goes on. */
   goal?: Goal;
@@ -51,23 +51,23 @@ export function isWanted(a: PlayerAction, want: Want): boolean {
 /** The lesson, in order. The turns play out after the beats that commit an action. */
 export const LESSON: Beat[] = [
   // Turn 1: attack
-  { say: "Over here, sleepless one.", hint: "Press E to focus on your target", goal: { on: "guide", until: "open" } },
-  { say: "Come, prove your strength to me.", hint: "Press E to Attack focused target", goal: { on: "guide", until: "commit", want: "attack" } },
+  { say: "Over here, sleepless one.", hint: "Press {yes} to focus on your target", goal: { on: "guide", until: "open" } },
+  { say: "Come, prove your strength to me.", hint: "Press {yes} to Attack focused target", goal: { on: "guide", until: "commit", want: "attack" } },
   { say: "Promising...", hint: "Attacks deal damage in exchange for fatiguing yourself" },
   // Turn 2: rest
-  { say: "Gather yourself...", hint: "Change your target to yourself with WASD", goal: { on: "player", until: "select" } },
-  { say: "Catch your breath.", hint: "Select Rest with E", goal: { on: "player", until: "commit", want: "rest" } },
+  { say: "Gather yourself...", hint: "Change your target to yourself with {move}", goal: { on: "player", until: "select" } },
+  { say: "Catch your breath.", hint: "Select Rest with {yes}", goal: { on: "player", until: "commit", want: "rest" } },
   // Turn 3: dodge
-  { say: "Let's change pace.", hint: "Focused, use WASD to switch action to Dodge", goal: { on: "player", until: "highlight", want: "dodge" } },
-  { say: "Stand back now...", hint: "Press E to fall back avoiding incoming attacks", goal: { on: "player", until: "commit", want: "dodge" } },
+  { say: "Let's change pace.", hint: "Focused, use {move} to switch action to Dodge", goal: { on: "player", until: "highlight", want: "dodge" } },
+  { say: "Stand back now...", hint: "Press {yes} to fall back avoiding incoming attacks", goal: { on: "player", until: "commit", want: "dodge" } },
   // Turn 4: block, on your own
-  { say: "Do not look away, brace thyself.", hint: "Select Block and press E to fend off a target's incoming attack", goal: { on: "guide", until: "commit", want: "block" } },
+  { say: "Do not look away, brace thyself.", hint: "Select Block and press {yes} to fend off a target's incoming attack", goal: { on: "guide", until: "commit", want: "block" } },
   // The end (placeholder words)
   { say: "Well done...", hint: "That is everything the guide can teach you here" },
 ];
 
 /** What the guide says when you have focused on the wrong one (its wheel is open): until you cancel. (Placeholder words.) */
-export const DETOUR: Beat = { say: "Not that one, sleepless one.", hint: "Press Q to cancel" };
+export const DETOUR: Beat = { say: "Not that one, sleepless one.", hint: "Press {no} to cancel" };
 
 /** What the screen knows when asking whether a key is allowed. */
 export interface Stand {

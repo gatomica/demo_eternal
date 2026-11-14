@@ -3,7 +3,8 @@
  * the mouse), and the pause menu built from them.
  */
 
-import { useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
+import { useScrollFocus } from "./scrollFocus";
 import { isMusicMuted, musicVolume, setMusicMuted, setMusicVolume } from "../audio/music";
 import { isMuted, play, setMuted, setSfxVolume, sfxVolume } from "../audio/sfx";
 
@@ -31,14 +32,18 @@ export function MenuButtons({ options, focus, onFocus }: { options: MenuOption[]
   );
 }
 
-/** The pause menu, over whatever is paused. */
-export function PauseMenu(props: { options: MenuOption[]; focus: number; onFocus: (i: number) => void }) {
+/** The pause menu, over whatever is paused. `children` go along the bottom of the screen (a fight's controls reminder). */
+export function PauseMenu({ children, ...props }: { options: MenuOption[]; focus: number; onFocus: (i: number) => void; children?: ReactNode }) {
+  // (Taller than the screen, it scrolls with the focus.)
+  const navRef = useRef<HTMLElement>(null);
+  useScrollFocus(navRef, props.focus);
   return (
     <div className="result" role="dialog" aria-label="Paused">
-      <nav className="pause-menu">
+      <nav className="pause-menu" ref={navRef}>
         <MenuButtons {...props} />
         <VolumeBars />
       </nav>
+      {children}
     </div>
   );
 }

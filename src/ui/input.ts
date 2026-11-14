@@ -1,34 +1,45 @@
 /**
- * input.ts — keys: the game is played on the keyboard (WASD, like exploring), with the mouse as a
- * convenience. Arrow keys, Enter and Escape mirror WASD, E and Q.
+ * input.ts — keys: the game is played on the keyboard, with the mouse as a convenience. The keys
+ * are the player's bindings (`ui/settings.ts`: WASD, E for Yes and Q for No unless changed);
+ * the arrow keys, Enter, Space and Escape always work too, unless one of them is bound to something else.
  */
 import { useEffect, useRef } from "react";
 import { play } from "../audio/sfx";
+import { getSettings } from "./settings";
 
 export type Dir = "up" | "left" | "down" | "right";
 
-type Key = Dir | "select" | "back" | "pause";
+export type Key = Dir | "select" | "back" | "pause";
 
-/** The direction a key stands for (WASD or the arrows), if any. */
-export function dirOf(key: string): Dir | null {
-  switch (key.toLowerCase()) {
-    case "w": case "arrowup": return "up";
-    case "a": case "arrowleft": return "left";
-    case "s": case "arrowdown": return "down";
-    case "d": case "arrowright": return "right";
+/** What a key (`KeyboardEvent.key`) does: the player's bindings first, then the fixed keys. */
+export function keyOf(key: string): Key | null {
+  const k = key.toLowerCase();
+  const b = getSettings().keys;
+  if (k === b.up) return "up";
+  if (k === b.left) return "left";
+  if (k === b.down) return "down";
+  if (k === b.right) return "right";
+  if (k === b.yes) return "select";
+  if (k === b.no) return "back";
+  switch (k) {
+    case "arrowup": return "up";
+    case "arrowleft": return "left";
+    case "arrowdown": return "down";
+    case "arrowright": return "right";
+    case "enter": case " ": return "select";
+    case "escape": return "pause";
     default: return null;
   }
 }
 
+/** The direction a key stands for (the bound directions or the arrows), if any. */
+export function dirOf(key: string): Dir | null {
+  const k = keyOf(key);
+  return k === "up" || k === "left" || k === "down" || k === "right" ? k : null;
+}
+
 function readKey(e: KeyboardEvent): Key | null {
-  const dir = dirOf(e.key);
-  if (dir) return dir;
-  switch (e.key.toLowerCase()) {
-    case "e": case "enter": case " ": return "select";
-    case "q": return "back";
-    case "escape": return "pause";
-    default: return null;
-  }
+  return keyOf(e.key);
 }
 
 export function useKeys(handler: (key: Key) => void) {

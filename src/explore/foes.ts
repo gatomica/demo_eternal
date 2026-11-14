@@ -13,7 +13,7 @@ import type { EnemySetup } from "../core/types";
 import type { Walker } from "./movement";
 import type { GroundItem } from "./pickups";
 import { surfaceNear } from "./movement";
-import { barsAt, DIAG, FLOOR, LADDER, LEVELS, rampAt, rampHeight, slopeAt, slopeRise, STAIRS, tileAt, WORLD } from "./world";
+import { barsAt, DIAG, FLOOR, LADDER, LEVELS, raisedLadderAt, rampAt, rampHeight, slopeAt, slopeRise, STAIRS, tileAt, WORLD } from "./world";
 import { HALF_D, HALF_W, STEP_TOLERANCE } from "./tuning";
 
 /** An enemy waiting somewhere on the map, and the fight it starts when it reaches you. */
@@ -156,7 +156,9 @@ export const MAP_FOES: MapFoe[] = [
   { id: "nave-se", kind: "sleepwalkerBare", home: { x: 33.5, y: 23.5, z: 7 }, fight: [{ kind: "sleepwalkerBare" }] },
   // In the west chapel.
   { id: "west-1", kind: "sleepwalkerBare", home: { x: 8.5, y: 18.5, z: 6 }, fight: [{ kind: "sleepwalkerBare" }] },
-  { id: "west-2", kind: "sleepwalkerBare", home: { x: 10.5, y: 20.5, z: 6 }, fight: [{ kind: "sleepwalkerBare" }] },
+  // (Where a second sleepwalker stood: two waxed.)
+  { id: "west-wx1", kind: "waxed", home: { x: 10.5, y: 20.5, z: 6 }, fight: [{ kind: "waxed" }] },
+  { id: "west-wx2", kind: "waxed", home: { x: 8.5, y: 20.5, z: 6 }, fight: [{ kind: "waxed" }] },
   // In the dug-out SW hall, hugging its bottom-left corner: a Wax Blob whose side parts wield hammers.
   { id: "blob-sw", kind: "blobMid", home: { x: 12.1, y: 29.9, z: 4 }, girth: 1, fightWithin: 3.5, fight: superBlob("blob-sw"), drop: { gear: { slot: "weapon", tier: "heavy", eternal: true } } },
   // In the north tunnel, one in each of the three one-tile nooks before the ladder up to the north chapel.
@@ -191,9 +193,11 @@ export const MAP_FOES: MapFoe[] = [
   { id: "b-patrol-s", kind: "patrolWarden", home: { x: 27.5, y: 27.5, z: 10 }, fight: [{ kind: "patrolWarden" }], patrol: [{ x: 27.5, y: 27.5 }, { x: 27.5, y: 20 }] },
   // The north room: a Wax Blob, hugging its north wall.
   { id: "b-north-blob", kind: "blobMid", home: { x: 27.5, y: 7.05, z: 10 }, girth: 1, fightWithin: 3.5, fight: waxBlob("b-north-blob"), drop: { eternalString: true } },
-  // Among the wax sculptures of Floor B's rooms: a lit waxed in the west room, a lit chisel waxed in the east room and one in the south room (each stands on a tile
-  // kept clear of sculptures in `props.ts`).
-  { id: "b-west-lit", kind: "waxedLit", home: { x: 12.5, y: 19.5, z: 10 }, fight: [{ kind: "waxedLit" }] },
+  // Among the wax sculptures of Floor B's rooms: a lit chisel waxed in the east room and one in the south room (each stands on a tile
+  // kept clear of sculptures in `props.ts`), and three lit waxed in the west room, where the ladder up from the west chapel comes out.
+  { id: "b-west-lit1", kind: "waxedLit", home: { x: 14.5, y: 18.5, z: 10 }, fight: [{ kind: "waxedLit" }] },
+  { id: "b-west-lit2", kind: "waxedLit", home: { x: 16.5, y: 21.5, z: 10 }, fight: [{ kind: "waxedLit" }] },
+  { id: "b-west-lit3", kind: "waxedLit", home: { x: 12.5, y: 21.5, z: 10 }, fight: [{ kind: "waxedLit" }] },
   { id: "b-east-lit", kind: "waxedChiselLit", home: { x: 40.5, y: 19.5, z: 10 }, fight: [{ kind: "waxedChiselLit" }] },
   { id: "b-south-lit", kind: "waxedChiselLit", home: { x: 27.5, y: 29.5, z: 10 }, fight: [{ kind: "waxedChiselLit" }] },
   // The south room: three chisel waxed.
@@ -465,7 +469,10 @@ export function waypoint3(f: { x: number; y: number; alt: number; half?: number 
 }
 
 /** Where each member of a group is drawn, relative to the group's position: its own spread, or the usual huddle. */
-export const spotsOf = (def: { fight: unknown[]; spread?: [number, number][] }): [number, number][] => def.spread ?? huddle(def.fight.length);
+export const spotsOf = (def: { fight: unknown[]; spread?: [number, number][]; members?: number[] }): [number, number][] =>
+  // (A set spread belongs to the whole group: once some of it lie dead for good, each still standing keeps its own place in it, by `members`;
+  // the usual huddle closes up round whoever is left.)
+  def.spread ? def.fight.map((_, i) => def.spread![def.members?.[i] ?? i]) : huddle(def.fight.length);
 
 export interface Foe extends Walker {
   /** Step counts toward its home, worked out when first needed. */
@@ -533,6 +540,8 @@ export function ladderPlan(x: number, y: number, alt: number, toX: number, toY: 
   if (!from || !to) return null;
   let best: { ladder: Ladder; up: boolean; at: { x: number; y: number }; level: number; score: number } | null = null;
   for (const l of LADDERS) for (const up of [true, false]) {
+    // (Not one still pulled up.)
+    if (raisedLadderAt(l.x, l.y)) continue;
     const access = up ? l.foot! : l.exit!, arrive = up ? l.exit! : l.foot!;
     const aLevel = up ? l.bottom : l.top, bLevel = up ? l.top : l.bottom;
     const sa = from[nodeIdx(aLevel, access.x, access.y)];
