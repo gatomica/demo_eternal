@@ -4,7 +4,7 @@
  * rests.ts, movement.ts, endTurn.ts) reads and changes it in turn.
  */
 import { bodyOf } from "../body";
-import { mirrorStance, swingFor } from "../stance";
+import { kickFor, mirrorStance, swingFor } from "../stance";
 import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Line, Player, PlayerAction, Step, Swing, WeaponTier } from "../types";
 
 /** The action the player is locked into this turn, if any. */
@@ -89,7 +89,7 @@ export interface Turn {
 }
 
 /** Starts resolving a turn from `prev`, with what the player chose. */
-export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
+export function beginTurn(prev: CombatState, action: PlayerAction, rng: () => number = Math.random): Turn {
   // Only the fighters change during a turn (the last turn's steps are replaced at the end).
   const s: CombatState = { ...prev, player: structuredClone(prev.player), enemies: structuredClone(prev.enemies), lastTurn: [] };
   const p = s.player;
@@ -112,7 +112,7 @@ export function beginTurn(prev: CombatState, action: PlayerAction): Turn {
     wasStaggered: new Set(fighters.filter(f => f.staggered).map(f => f.id)),
     hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(), shifts: new Map(),
     cancelled: new Set(), blocked: new Set(), attacked: new Map(), interrupted: new Set(), fellReviving: new Set(),
-    swing: act?.type === "attack" ? swingFor(act.hand === "left" ? mirrorStance(p.stance) : p.stance, alive.find(e => e.id === act.target)) : undefined,
+    swing: act?.type === "attack" && act.kick ? kickFor(p.stance, act.kick, rng) : act?.type === "attack" ? swingFor(act.hand === "left" ? mirrorStance(p.stance) : p.stance, alive.find(e => e.id === act.target)) : undefined,
     steps: [],
     events: [],
     emit: ev => {

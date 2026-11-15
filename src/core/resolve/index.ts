@@ -42,7 +42,7 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
   const problem = validateAction(prev, action);
   if (problem) throw new Error(problem);
 
-  const t = beginTurn(prev, action);
+  const t = beginTurn(prev, action, rng);
   resolveAttacks(t, rng);
   settleRests(t);
   resolveMovement(t);

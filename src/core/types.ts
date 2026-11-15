@@ -27,6 +27,11 @@ export interface PlayerAction {
   weight?: WeaponTier;
   /** An Attack thrown with the empty left hand (the Punch): the blow is the left hand's, whatever the weapon in the right. */
   hand?: Side;
+  /**
+   * An Attack that is a Kick (bare-handed numbers, no weapon's effect, both hands still holding what they hold). `true`: the stance decides the
+   * leg (`kickFor` in stance.ts), at random from a stance with no leg leading; a side: that leg (the Model viewer, to show each).
+   */
+  kick?: true | Side;
 }
 
 /** What an enemy telegraphs during planning. */
@@ -142,7 +147,7 @@ export type HeadItem = "helm" | "hood" | "mask" | "wardenhood";
 
 /** What you hold between turns (see `stance.ts`), and how an attack of yours swings. */
 export type Stance = "idle" | "low" | "lead-left" | "lead-right";
-export type Swing = "overhead" | "left" | "right";
+export type Swing = "overhead" | "left" | "right" | "kick-right" | "kick-left";
 
 export interface Player extends Fighter {
   /** Your stance: it lasts from turn to turn, and decides how your next attack swings. */

@@ -330,10 +330,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     }
     return {
       up: (() => {
-        // Opened up: the weapon's blow on the right, the empty left hand's Punch on the left (bare hands' cost and damage), the middle kept for later.
+        // Opened up: the weapon's blow on the right, the empty left hand's Punch on the left and the Kick in the middle (both with bare hands' cost and damage).
         const alternatives: NonNullable<WheelOption["alternatives"]> = {
           left: opt("Punch", { type: "attack", target: sel.id, weight: "baseline", hand: "left" }),
-          middle: null,
+          middle: opt("Kick", { type: "attack", target: sel.id, weight: "baseline", kick: true }),
           right: opt("Attack", { type: "attack", target: sel.id }),
         };
         // Closed, the attack is the alternative you used last (the lesson always teaches the plain one).
@@ -873,7 +873,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     if (current && (typing || current.goal?.until !== "commit" || !current.goal.want || !isWanted(option.action, current.goal.want) || !lessonStand?.onTarget)) return;
     if (current) nextBeat();
     // An alternative you used becomes what its action does from now on.
-    const used = (["left", "right"] as const).find(slot => wheel.up?.alternatives?.[slot]?.action === option.action);
+    const used = (["left", "middle", "right"] as const).find(slot => wheel.up?.alternatives?.[slot]?.action === option.action);
     if (used && !current) rememberAlternative("attack", used);
     if (showHints) { const key = triedKeyOf(option); if (key) triedAction(key); }
     play(option.action);
@@ -1382,6 +1382,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // a swing to the left the other way round.
     right: { windUp: "low-right", strike: "low-left" },
     left: { windUp: "low-left", strike: "low-right" },
+    // A Kick winds up in the stance it kicks from, the kicking knee lifted, and lands as the other stance with that leg stretched out: the right
+    // leg's from Left Lead into Right Lead, the left leg's the mirror of it (drawn mirrored, `kickMirrored` below).
+    "kick-right": { windUp: "p3-kick-up", strike: "p3-kick" },
+    "kick-left": { windUp: "p3-kick-up", strike: "p3-kick" },
   };
   // In 3D (the player always is, in a fight) a sideways swing has its own wind-up and landing, from the one stance into the other.
   if (PLAYER_3D) {
@@ -1411,6 +1415,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const playerPose: PoseName = !p.staggered && reached(playerFlinchAt) ? "flinch" : playerPoseActing;
   /** In 3D your Left leg leading stance is your Right leg leading one, mirrored (the gear not). */
   const leftLeading = PLAYER_3D && playerPose === "low-left";
+  /**
+   * A Kick's poses are Right Lead's: the right leg's wind-up is the left leg's mirrored (it kicks from Left Lead), and the left leg's kick as it
+   * lands is the right leg's mirrored (it lands in Left Lead).
+   */
+  const kickMirrored = (swingOf === "kick-right" && playerPose === "p3-kick-up") || (swingOf === "kick-left" && playerPose === "p3-kick");
   // While you plan, an enemy only shows its stance; as the turn plays, its action shows.
   // After its attack, an enemy already settles into the stance it takes next (if it's still up).
   /** Still on its feet once the turn is over (not staggered, fallen or reviving). */
@@ -1761,7 +1770,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // (Left leg leading is drawn as Right leg leading, mirrored.)
       pose: track("player", PLAYER_3D ? player3dPose(leftLeading ? "low-right" : playerPose) : playerPose),
       player3d: PLAYER_3D,
-      mirror: leftLeading,
+      mirror: leftLeading || kickMirrored,
       punch: PLAYER_3D && leftPunch && PUNCH_POSES.has(playerPose),
       dead: youDead ? "pieces" : undefined,
       encased: playerSealed,
@@ -1775,7 +1784,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       armorItem: p.armorItem,
       headItem: p.headItem,
       // A sideways swing's level arc, as the blow lands (the poses are the two stances, which have no trail of their own).
-      trail: playback && impact && swingOf !== "overhead" && !punching && !leftPunch && strikeStep("player") === playback.index ? 235 : undefined,
+      trail: playback && impact && (swingOf === "left" || swingOf === "right") && !punching && !leftPunch && strikeStep("player") === playback.index ? 235 : undefined,
       // Fallen, you drop and stay there, a little faded (instead of fading out).
       classes: youDead
         ? [...(fx.get("player")?.classes ?? []).filter(c => c !== "fx-fall"), ...(justFell("player") ? ["fx-die"] : []), "is-remains"]

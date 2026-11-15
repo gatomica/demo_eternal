@@ -19,6 +19,17 @@ export function swingFor(stance: Stance, target?: Pick<Enemy, "line" | "staggere
   return stance === "lead-right" ? "right" : "left";
 }
 
+/**
+ * Which leg a Kick throws from this stance: from Left Lead the right leg (spinning on the left foot, it lands as Right Lead with the right leg out),
+ * from Right Lead the left (its mirror); from a stance with no leg leading, either, at random. A Kick the action names the leg of keeps it.
+ */
+export function kickFor(stance: Stance, leg: true | "left" | "right", rng: () => number = Math.random): Swing {
+  if (leg !== true) return leg === "right" ? "kick-right" : "kick-left";
+  if (stance === "lead-left") return "kick-right";
+  if (stance === "lead-right") return "kick-left";
+  return rng() < 0.5 ? "kick-right" : "kick-left";
+}
+
 /** A stance as a mirror shows it: the leading leg is the other one. */
 export const mirrorStance = (st: Stance): Stance => (st === "lead-left" ? "lead-right" : st === "lead-right" ? "lead-left" : st);
 
@@ -27,9 +38,12 @@ export const mirrorStance = (st: Stance): Stance => (st === "lead-left" ? "lead-
  * would from the mirrored stance, and leaves you in the mirrored stance the right hand would. So each leading stance offers both sideways swings,
  * the Openhand (a Swing Left, or its mirror) and the Backhand (a Swing Right, or its mirror), the stance deciding which hand throws which: left leg
  * leading, the right hand's Openhand or the left hand's Backhand; right leg leading, the right hand's Backhand or the left hand's Openhand. Either
- * leaves the other leg leading.
+ * leaves the other leg leading. A Kick lands in the stance of the leg it kicked with.
  */
 export function stanceAfter(act: PlayerAction, swing: Swing | undefined): Stance {
+  // A Kick lands in the stance its body ends in: the right leg's in Right Lead, the left leg's in Left Lead.
+  if (swing === "kick-right") return "lead-right";
+  if (swing === "kick-left") return "lead-left";
   const st = stanceAfterRight(act, swing);
   return act.type === "attack" && act.hand === "left" ? mirrorStance(st) : st;
 }

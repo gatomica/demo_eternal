@@ -264,6 +264,15 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, punch: punchin
     const mid: P3 | undefined = ACROSS.has(pose) ? [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, sh[2] + far] : undefined;
     return swingArc(from, to, bare ? undefined : model && model.damage * U, mid);
   }, [windUp, pose, hand, rig, weapon, reach, model, bare, fist, fistShoulder, flipped]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A Kick as it lands leaves an arch from the kicking foot, like a bare-handed blow's from the fist: from where that foot was in the wind-up to where
+  // it ends. Its wind-up is drawn mirrored the other way (the right leg's winds up as Left Lead and lands as Right Lead), and the foot is the right
+  // one unless this kick is drawn mirrored (the left leg's).
+  const kickArc = useMemo(() => {
+    if (pose !== "p3-kick" || dead) return undefined;
+    const up = lift("p3-kick-up", hand, reach), before = flipped ? up : punched(up);
+    const foot: Joint = flipped ? "footL" : "footR";
+    return swingArc(before.joints[foot], rig.joints[foot]);
+  }, [pose, dead, hand, reach, flipped, rig]);
   // The swing this pose is part of, for the weapon's edge side to lead through: its own strike's arch, or (a wind-up) the one it is about to make.
   const swing = useMemo(() => {
     if (bare) return undefined;
@@ -841,6 +850,7 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, punch: punchin
   }
 
   if (arc) parts.push(arcPart(c, arc));
+  if (kickArc) parts.push(arcPart(c, kickArc));
 
   // Its weapon, in the weapon hand, as the pose points it; dead, dropped by its hand, lying flat on the floor, pointing out from its side.
   if (weapon !== "baseline") {

@@ -173,6 +173,12 @@ export interface Skeleton {
    */
   turn3?: number;
   /**
+   * The 3D rig only: everything above the pelvis leaned toward what the figure faces (its target, straight ahead once placed), this many degrees
+   * about the pelvis (negative: away from it), as one block, after the body's turns (`turn3`, `hips3`), so it leans at the target whichever way
+   * the chest is turned.
+   */
+  toward3?: number;
+  /**
    * The 3D rig only: both shoulders rounded forward this many figure units (and a third of that down), the arms with them unless the pose reaches
    * them to their spots (`arms3`), which then hang from the shoulders where they are: a slouch.
    */
@@ -238,7 +244,7 @@ export type PoseName =
   | "strike" | "fallen" | "kneel" | "punch"
   | "t-pose" | "t-pose-b" | "w-t" | "w-t-b"
   | "sw-windup" | "sw-brace" | "sw-flinch" | "sw-down" | "sw-idle" | "sw-charging" | "sw-struggling" | "sw-shoulder-in"
-  | "sw-overhead" | "sw-overhead-leap" | "sw-dead" | "p3-idle" | "p3-low" | "sw-chop" | "sw-overhead-strike" | "p3-overhead-leap" | "p3-overhead-strike" | "p3-flinch" | "p3-right-lead" | "sw-swing-l-windup" | "sw-swing-l" | "sw-swing-r-windup" | "sw-swing-r" | "sw-parry" | "sw-charge" | "sw-backstep" | "p3-backstep" | "sw-despair"
+  | "sw-overhead" | "sw-overhead-leap" | "sw-dead" | "p3-idle" | "p3-low" | "sw-chop" | "sw-overhead-strike" | "p3-overhead-leap" | "p3-overhead-strike" | "p3-flinch" | "p3-right-lead" | "p3-kick-up" | "p3-kick" | "sw-swing-l-windup" | "sw-swing-l" | "sw-swing-r-windup" | "sw-swing-r" | "sw-parry" | "sw-charge" | "sw-backstep" | "p3-backstep" | "sw-despair"
   | "w-idle" | "w-hands" | "w-scratch" | "w-wax-hand" | "w-hurl"
   | "w-staggered" | "w-dead" | "w-cower" | "w-reared" | "w-hurl-windup" | "w-clutch-eat" | "w-brace" | "w-brace-block" | "w-overhead-windup" | "w-overhead-strike" | "w-crawl" | "w-low-windup" | "w-low-strike" | "w-drag" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
   | WardenPoseName
@@ -251,6 +257,22 @@ export type PoseName =
 const KNEELING = {
   leadLeg: { knee: [58, 111] as Pt, foot: [38, 107] as Pt },
   rearLeg: { knee: [51, 112] as Pt, foot: [31, 108] as Pt },
+};
+
+/** The player's Right Lead in 3D (`p3-right-lead`), which the Kick's poses are built on. */
+const RIGHT_LEAD: Skeleton = {
+  head: [55, 52], neck: [52, 63], hip: [48, 89],
+  adjust: { torso: 0.85, leadThigh: 0.8, rearThigh: 0.8, leadShin: 0.65, rearShin: 0.65 },
+  weaponArm: { elbow: [66, 80], hand: [49, 77] },
+  freeArm: { elbow: [41, 76], hand: [53, 72] },
+  leadLeg: { knee: [62, 100], foot: [66, 114] },
+  rearLeg: { knee: [38, 101], foot: [32, 114] },
+  weapon: { at: [49, 77], angle: -140 }, torso34: "front", leadSide: "right", weaponOver: true,
+  for3d: {
+    turn3: -40, hips3: -40,
+    arms3: { right: { aim: { dir: [-0.7, -0.4, 0.6], reach: 0.8, bend: [0.3, 0, 1] } }, left: { aim: { dir: [-0.3, -0.55, -0.8], reach: 0.85 } } },
+    weapon3: [-0.8, -0.45, -0.3],
+  },
 };
 
 /** The waxed carry nothing; the grip just follows a hand (and isn't drawn). */
@@ -610,19 +632,20 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
   },
   // The player's Right Lead in 3D: the Sleepwalker's Shoulder In (`sw-shoulder-in`), the hips turned to its left with the chest (`hips3`), so the
   // whole stance faces that way. (Left Lead is this, mirrored.)
-  "p3-right-lead": {
-    head: [55, 52], neck: [52, 63], hip: [48, 89],
-    adjust: { torso: 0.85, leadThigh: 0.8, rearThigh: 0.8, leadShin: 0.65, rearShin: 0.65 },
-    weaponArm: { elbow: [66, 80], hand: [49, 77] },
-    freeArm: { elbow: [41, 76], hand: [53, 72] },
-    leadLeg: { knee: [62, 100], foot: [66, 114] },
-    rearLeg: { knee: [38, 101], foot: [32, 114] },
-    weapon: { at: [49, 77], angle: -140 }, torso34: "front", leadSide: "right", weaponOver: true,
-    for3d: {
-      turn3: -40, hips3: -40,
-      arms3: { right: { aim: { dir: [-0.7, -0.4, 0.6], reach: 0.8, bend: [0.3, 0, 1] } }, left: { aim: { dir: [-0.3, -0.55, -0.8], reach: 0.85 } } },
-      weapon3: [-0.8, -0.45, -0.3],
-    },
+  "p3-right-lead": RIGHT_LEAD,
+  // The Kick's wind-up from Right Lead (a kick with the left leg): Right Lead, the left knee bent and lifted ahead of the hips, the foot off the
+  // floor, ready to kick. (From Left Lead, the right leg's wind-up is this, mirrored.) The leg's directions are in the hips' own frame, before
+  // they are turned (`hips3`). The upper body leans in toward the target (`toward3`).
+  "p3-kick-up": {
+    ...RIGHT_LEAD,
+    for3d: { ...RIGHT_LEAD.for3d, toward3: 15, legDirs3: { left: [[-0.05, -0.55, 0.83], [0, -0.95, -0.3]] } },
+  },
+  // The Kick as it lands, from Left Lead (the right leg): Right Lead, as if spun round on the left foot, the right leg stretched out straight at
+  // the target, a little below hip height. (From Right Lead, the left leg's kick is this, mirrored.) The hips face 40 degrees to their left, so the
+  // leg points 40 degrees to their right to reach straight ahead. The upper body leans back, away from the target (`toward3`).
+  "p3-kick": {
+    ...RIGHT_LEAD,
+    for3d: { ...RIGHT_LEAD.for3d, toward3: -20, legDirs3: { right: [[0.64, -0.15, 0.77], [0.63, -0.25, 0.75]] } },
   },
   // The player's Lowered stance in 3D: centred, square to what it faces, neither leg leading (the feet set apart either side), the knees bent into a
   // crouch, the back straight over them; the arms lowered at its sides, the weapon pointing down ahead.

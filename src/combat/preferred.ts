@@ -17,7 +17,7 @@ const read = (): Partial<Record<AlternativeAction, SubSlot>> => {
 /** The alternative you last used for this action (the main one, the first time). */
 export function preferredAlternative(action: AlternativeAction): SubSlot {
   const s = read()[action];
-  return s === "left" || s === "right" ? s : "right";
+  return s === "left" || s === "middle" || s === "right" ? s : "right";
 }
 
 /** Remember the alternative you just used. */

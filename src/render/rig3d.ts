@@ -444,6 +444,14 @@ function liftPoseNow(drawn: Skeleton, handGiven: Side, opts: LiftOptions): Rig3 
     for (const j of ["waist", "neck", "head", "shoulderR", "shoulderL", "elbowR", "handR", "elbowL", "handL"] as const) joints[j] = turn(joints[j]);
     if (prop) heldAt = { kind: prop.kind, at: turn(prop.at) };
   }
+  // The upper body leaned toward what the figure faces (or away), about the pelvis, after its turns: it leans at the target, wherever the chest points.
+  if (raw.toward3) {
+    const a = (raw.toward3 * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a), pv = joints.pelvis;
+    /** A point leaned about the pelvis: what is above it goes ahead. */
+    const lean = (p: P3): P3 => { const y = p[1] - pv[1], z = p[2] - pv[2]; return [p[0], pv[1] + y * c - z * s, pv[2] + z * c + y * s]; };
+    for (const j of ["waist", "neck", "head", "shoulderR", "shoulderL", "elbowR", "handR", "elbowL", "handL"] as const) joints[j] = lean(joints[j]);
+    if (heldAt) heldAt = { kind: heldAt.kind, at: lean(heldAt.at) };
+  }
   // Where the face points: at what is held, if the pose has it look at that.
   let gaze: P3 | undefined;
   if (raw.look3 === "prop" && heldAt) {

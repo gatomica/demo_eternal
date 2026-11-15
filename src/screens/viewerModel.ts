@@ -10,7 +10,7 @@ import type { ActionDef } from "../core/patterns";
 import { createCombat } from "../core/setup";
 import { mirrorStance, swingFor } from "../core/stance";
 import type { PoseName } from "../render/poses";
-import type { ArmorItem, ArmorTier, CombatState, HeadItem, Line, PlayerAction, Stance, Swing, WeaponTier } from "../core/types";
+import type { ArmorItem, ArmorTier, CombatState, HeadItem, Line, PlayerAction, Side, Stance, Swing, WeaponTier } from "../core/types";
 import { ITEMS } from "../explore/items";
 
 /** Kinds that are only a part of a multi-target enemy: the viewer shows the whole body instead. */
@@ -252,6 +252,8 @@ export interface PlayerScenario {
   foe: FoeDoes;
   /** The Punch: the empty left hand's blow (bare hands' weight), the mirror of the same blow with the right. */
   punch?: boolean;
+  /** The Kick, with this leg (in a fight the stance picks it: see `kickFor` in core/stance.ts). */
+  kick?: Side;
   /** The line the dummy stands on (default front): an attack at the back line always swings overhead. */
   foeLine?: Line;
 }
@@ -278,6 +280,11 @@ export function playerScenariosFrom(stance: PlayerViewStance): PlayerScenario[] 
     { id: "attack", label: attackName(stance, swingFor(stance, front), false), action: { type: "attack", target: "foe" }, foe: "rest" },
     { id: "punch", label: attackName(stance, swingFor(mirrorStance(stance), front), true), action: { type: "attack", target: "foe" }, foe: "rest", punch: true },
   ];
+  // The Kick: from a leading stance, the leg it decides (the right from Left Lead, the left from Right Lead); from any other, either (at random in a fight).
+  const legs: Side[] = stance === "lead-left" ? ["right"] : stance === "lead-right" ? ["left"] : ["right", "left"];
+  for (const leg of legs) {
+    attacks.push({ id: `kick-${leg}`, label: legs.length > 1 ? `Kick, ${leg} leg` : "Kick", action: { type: "attack", target: "foe" }, foe: "rest", kick: leg });
+  }
   if (stance !== "idle") {
     attacks.push(
       { id: "attack-back", label: "Mainhand Overhead, at the back line", action: { type: "attack", target: "foe" }, foe: "rest", foeLine: "back" },
@@ -301,6 +308,7 @@ const FOE_ID = "e0";
 
 export const playerActionOf = (sc: PlayerScenario): PlayerAction => ({
   type: sc.action.type, target: sc.action.target === "foe" ? FOE_ID : "self", ...(sc.punch ? { weight: "baseline" as const, hand: "left" as const } : {}),
+  ...(sc.kick ? { weight: "baseline" as const, kick: sc.kick } : {}),
 });
 
 /** The armor and head gear the viewer puts on you: the starting classes' own pieces, worn (none: plain armor of the picked tier, bare-headed). */
