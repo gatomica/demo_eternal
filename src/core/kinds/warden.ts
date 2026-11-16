@@ -91,17 +91,20 @@ export const WARDEN: EnemyKind = {
   armor: "normal",
   revives: 1,
   flags: { sealed: false, phase2: false, flaming: false, phase2Pending: false },
+  // (Her flail is her weapon, the Waxed Torch's stats, but the Jagged Chisel's while it is flaming: `blowLike`. Her other attacks are each like a
+  // weapon of their own: Wax Punch plain (no modifiers), Fan Flames the Chisel, Flame Blast the Axe; Usurp Flame deals nothing and costs nothing,
+  // but puts 0.25 Death on what it takes the flame of (0.25 Light, 0.25 Deadly). Her wax arm parries with 0.2 Defense (Wax Guard).)
   pattern: parsePattern("Penitent Warden", `
     actions:
-      Usurp Flame:   attack, light, *Sealed, *Usurpable   // its hit takes the flame: he is unsealed, a waxed sealed whole (dead)
-      Flail Swing:   attack, normal, #waxing, *Far or *Flaming
-      Rising Flail:  attack, normal, #waxing, *Close or *Flaming
-      Flail Slam:    attack, heavy, #waxing, #shockwave
-      Wax Punch:     attack, light, *Sealed
-      Fan Flames:    attack, light, ranged, *Unsealed, #fire
-      Flame Blast:   attack, heavy, ranged, *Unsealed, #shockwave, #fire
-      Spin Guard:    block, normal
-      Wax Guard:     block, light, *Sealed
+      Usurp Flame:   attack, light 0.25, deadly 0.25, *Sealed, *Usurpable   // its hit takes the flame: he is unsealed, a waxed sealed whole (dead)
+      Flail Swing:   attack, #waxing, *Far or *Flaming
+      Rising Flail:  attack, #waxing, *Close or *Flaming
+      Flail Slam:    attack, #waxing, #shockwave
+      Wax Punch:     attack, plain, *Sealed
+      Fan Flames:    attack, chisel, ranged, *Unsealed, #fire
+      Flame Blast:   attack, axe, ranged, *Unsealed, #shockwave, #fire
+      Spin Guard:    block
+      Wax Guard:     block, defense 0.2, *Sealed
       Turn Away:     maneuver, retreat, *Close
       Dash:          maneuver, advance
       Flail Wind Up: rest
@@ -180,6 +183,8 @@ export const WARDEN: EnemyKind = {
   },
   // His flaming slam and his flame blast send a shockwave through the whole fight: his waxed are hit too.
   shockwave: self => self.intent.action !== "Flail Slam" || !!self.flags.flaming,
+  // The flail (its #waxing attacks): the Waxed Torch's, her weapon's, but while it is flaming the Jagged Chisel's (Death on what it hits).
+  blowLike: self => (self.flags.flaming && self.intent.tags?.includes("waxing") ? "chisel" : undefined),
   // He picks after the waxed, to see which of them is about to Clutch Flame.
   decidesLast: true,
   // (Usurp Flame is a fixed rule: the Model viewer plays it with you resting.)

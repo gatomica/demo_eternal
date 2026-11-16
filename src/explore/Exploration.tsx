@@ -286,7 +286,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
     const look = loadoutOf(invRef.current);
     return {
       id: "player", stance: "idle", name: "You", maxHP: statsRef.current.maxHP, hp: statsRef.current.maxHP, fatigue: 0, death: 0,
-      weapon: look.weapon, armor: look.armor, waxed: false, staggered: false,
+      weapon: look.weapon, armor: look.armor, waxed: false, staggered: false, offhand: { weapon: look.offhand?.weapon ?? "baseline" }, worn: look.worn,
       charges: knotCharges(knotRef.current), reviving: false,
       maxEternity: statsRef.current.maxEternity, eternity: Math.min(statsRef.current.maxEternity, eternityRef.current ?? statsRef.current.maxEternity),
     };

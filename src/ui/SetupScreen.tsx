@@ -34,7 +34,8 @@ export function SetupScreen<S extends Picks & { encounterId?: string }>({ setup,
   type Row = { label: string; key: string; options: readonly string[]; labels?: Record<string, string>; value: string; set: (v: string) => S };
   const orNone = <T,>(v: string): T | undefined => (v === "none" ? undefined : (v as T));
   const allRows: Row[] = [
-    { label: "Weapon", key: "weapon", options: WEAPON_KEYS, labels: LABELS, value: setup.weaponItem ?? "none", set: v => ({ ...setup, weaponItem: orNone<WeaponItem>(v) }) },
+    { label: "Right hand", key: "weapon", options: WEAPON_KEYS, labels: LABELS, value: setup.weaponItem ?? "none", set: v => ({ ...setup, weaponItem: orNone<WeaponItem>(v) }) },
+    { label: "Left hand", key: "offhand", options: WEAPON_KEYS, labels: LABELS, value: setup.offItem ?? "none", set: v => ({ ...setup, offItem: orNone<WeaponItem>(v) }) },
     { label: "Armor", key: "armor", options: ARMOR_KEYS, labels: LABELS, value: setup.armorItem ?? "none", set: v => ({ ...setup, armorItem: orNone<ArmorItem>(v) }) },
     { label: "Head", key: "head", options: HEAD_KEYS, labels: LABELS, value: setup.headItem ?? "none", set: v => ({ ...setup, headItem: orNone<HeadItem>(v) }) },
     {
@@ -46,7 +47,7 @@ export function SetupScreen<S extends Picks & { encounterId?: string }>({ setup,
       set: v => ({ ...setup, encounterId: v }),
     },
   ];
-  const rows = setup.encounterId === undefined ? allRows.slice(0, 3) : allRows;
+  const rows = setup.encounterId === undefined ? allRows.slice(0, 4) : allRows;
   const [row, setRow] = useState(0);
 
   useKeys(key => {

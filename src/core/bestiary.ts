@@ -10,6 +10,7 @@
  */
 import { conditionOf } from "./conditions";
 import type { ActionDef, Pattern } from "./patterns";
+import type { WeaponLike } from "./rules";
 import { PATROL_WARDEN, SLEEPWALKER, SLEEPWALKER_BARE, SLEEPWALKER_HAMMER } from "./kinds/sleepwalker";
 import { WARDEN } from "./kinds/warden";
 import { GUIDE_KIND } from "./kinds/guide";
@@ -177,6 +178,11 @@ export interface EnemyKind {
   holdsTargetDown?: string[];
   /** What its direct hits do besides the damage (its action's tags say which rules apply). */
   onDirectHit?: (hit: DirectHit) => void;
+  /**
+   * The weapon its action this turn is like, when the action says none (`like` in the pattern) and it depends on how it stands: the Warden's
+   * flail, the Torch's but the Chisel's while it is flaming. Undefined: the weapon it holds (or its action's weight).
+   */
+  blowLike?: (self: Enemy) => WeaponLike | undefined;
   /** Its (melee) blow was blocked: what that still does (the Warden's flail still leaves its wax). */
   onBlocked?: (hit: Pick<DirectHit, "self" | "target" | "tags" | "wax">) => void;
   /** Its own rules at the end of each turn: statuses, phases, effects of its actions. */

@@ -5,19 +5,67 @@
  * Units: weights and costs are written in sixteenths of the fighter's max health, matching the
  * design doc. `sixteenths(n, maxHP)` turns them into real numbers.
  */
-import type { ArmorTier, Fighter, Player, Tier, WeaponTier } from "./types";
+import type { ArmorTier, Fighter, Player, Tier, WeaponItem, WeaponTier } from "./types";
 
 /* ============================================================
  * Tuning tables (sixteenths of max health)
  * ============================================================ */
 
-/** `name`: the weapon of that weight in this demo (its eternal version is "Eternal <name>"). */
-export const WEAPONS: Record<WeaponTier, { weight: number; cost: number; damage: number; block: number; label: string; name: string }> = {
-  baseline: { weight: 0, cost: 2, damage: 2, block: 0, label: "None", name: "Bare hands" },
-  light:  { weight: 0.5, cost: 1, damage: 2, block: 0.5, label: "Light", name: "Jagged Chisel" },
-  normal: { weight: 1, cost: 3, damage: 3, block: 1, label: "Normal", name: "Waxed Torch" },
-  heavy:  { weight: 1.5, cost: 5, damage: 4, block: 1.5, label: "Heavy", name: "Brick Hammer" },
+/**
+ * Every attack starts the same: it costs this share of its attacker's max health in Fatigue, and deals as much damage. A weapon's modifiers
+ * (`WeaponStats`) move it from there.
+ */
+export const ATTACK_BASE = 0.25;
+
+/**
+ * What a weapon does, besides the base every attack has (`ATTACK_BASE`), each a share of its attacker's max health, kept small so the weapons
+ * are much alike:
+ *  - `poise`: the attack costs that much more Fatigue, and puts as much Fatigue on its target, unless it is dodged (a hit or a Block alike).
+ *  - `deadly`: the attack costs that much more Fatigue, and puts as much Death on its target, unless it is dodged.
+ *  - `light`: the attack deals that much less damage, and costs twice that much less Fatigue.
+ *  - `defense`: the share of a blow a Block made with it stops (0 to 1; see `strike` in resolve/attacks.ts).
+ */
+export interface WeaponStats { poise: number; deadly: number; light: number; defense: number }
+
+/** By weight, the weapon of that weight in this demo (`name`; its eternal version is "Eternal <name>") and its stats. Bare hands are the Kick's too. */
+export const WEAPONS: Record<WeaponTier, WeaponStats & { weight: number; label: string; name: string }> = {
+  baseline: { weight: 0, poise: 0, deadly: 0, light: 0.1, defense: 0.2, label: "None", name: "Bare hands" },
+  light:  { weight: 0.5, poise: 0, deadly: 0.2, light: 0.1, defense: 0.25, label: "Light", name: "Jagged Chisel" },
+  normal: { weight: 1, poise: 0.2, deadly: 0, light: 0.1, defense: 0.25, label: "Normal", name: "Waxed Torch" },
+  heavy:  { weight: 1.5, poise: 0.1, deadly: 0, light: 0, defense: 0.5, label: "Heavy", name: "Brick Hammer" },
 };
+
+/** The starting classes' own weapons' stats (not their weight's). */
+export const ITEM_WEAPONS: Record<WeaponItem, WeaponStats> = {
+  shortsword: { poise: 0, deadly: 0, light: 0, defense: 0.5 },
+  axe: { poise: 0, deadly: 0.1, light: 0, defense: 0.25 },
+  sickle: { poise: 0, deadly: 0, light: 0.05, defense: 0.25 },
+};
+
+/**
+ * The weapons an action can be like, by name, for the enemies' actions that are no blow of what they hold (`like chisel` in a pattern: see
+ * patterns.ts): each weapon's stats, and `plain`, an attack with none of a weapon's modifiers (and no Defense).
+ */
+export const WEAPON_LIKE = {
+  bare: WEAPONS.baseline, chisel: WEAPONS.light, torch: WEAPONS.normal, hammer: WEAPONS.heavy,
+  shortsword: ITEM_WEAPONS.shortsword, axe: ITEM_WEAPONS.axe, sickle: ITEM_WEAPONS.sickle,
+  plain: { poise: 0, deadly: 0, light: 0, defense: 0 },
+} satisfies Record<string, WeaponStats>;
+export type WeaponLike = keyof typeof WEAPON_LIKE;
+
+/** A weapon's stats: the class's own weapon's, or its weight's. */
+export const weaponOf = (weight: WeaponTier, item?: WeaponItem): WeaponStats => (item !== undefined ? ITEM_WEAPONS[item] : WEAPONS[weight]);
+
+/** A weapon's Defense: the share of a blow a Block made with it stops. */
+export const defenseOf = (weight: WeaponTier, item?: WeaponItem): number => weaponOf(weight, item).defense;
+
+/** What an attack with this weapon costs, and what it deals: shares of the attacker's max health (`poise`, `deadly`: as in `WeaponStats`). */
+export function blowShares(w: WeaponStats): { cost: number; damage: number; poise: number; deadly: number } {
+  return { cost: Math.max(0, ATTACK_BASE + w.poise + w.deadly - 2 * w.light), damage: Math.max(0, ATTACK_BASE - w.light), poise: w.poise, deadly: w.deadly };
+}
+
+/** Whether the weapons' own effects work (the Chisel's, the Torch's, the class weapons'...). Off for now, while the weapons' stats are reworked. */
+export const WEAPON_EFFECTS = false;
 
 /**
  * What each eternal weapon does besides its blow. Chisel: more damage on a direct hit against
@@ -37,28 +85,31 @@ export const ITEM_SHARE = 1 / 2;
 export const ETERNITY_PRICE: Record<EternalEffect, number> = { chisel: 2, torch: 1, hammer: 1, shortsword: 1, axe: 2, sickle: 2 };
 
 /**
- * resist: Resistance, in sixteenths (none has none: only a Block gives a base, and gear adds a little to it).
- * weight: how much it burdens you, in sixteenths (the same as its resist). Together with your weapon's, it sets how
- * tiring a dodge is (see dodgeFatigue).
+ * weight: what a piece of armor or head gear of this class weighs, a share of a blow (0 to 1), unless the piece has a weight of its own
+ * (`ITEMS`, `GearSpec.weight`). What you wear adds up (body and head alike), and that total is both your Resistance (that share of every
+ * blow taken turns into Fatigue instead of damage) and what a dodge costs on top of its base (see `wornWeight`). Armor leans to looks:
+ * the weights are small.
  */
-export const ARMOR: Record<ArmorTier, { resist: number; weight: number; label: string }> = {
-  none:   { resist: 0, weight: 0, label: "None" },
-  light:  { resist: 0.5, weight: 0.5, label: "Light" },
-  normal: { resist: 1, weight: 1, label: "Normal" },
-  heavy:  { resist: 1.5, weight: 1.5, label: "Heavy" },
+export const ARMOR: Record<ArmorTier, { weight: number; label: string }> = {
+  none:   { weight: 0, label: "None" },
+  light:  { weight: 0.05, label: "Light" },
+  normal: { weight: 0.1, label: "Normal" },
+  heavy:  { weight: 0.15, label: "Heavy" },
 };
 
-/** Head gear counts for this share of the resistance and weight of armor of its tier (and adds to what the body armor gives). */
-export const HEAD_SHARE = 1 / 2;
 const headOf = (f: Fighter): ArmorTier => (f as Partial<Player>).head ?? "none";
-const headResist = (f: Fighter) => (headOf(f) === "none" ? 0 : ARMOR[headOf(f)].resist * HEAD_SHARE);
-const headWeight = (f: Fighter) => (headOf(f) === "none" ? 0 : ARMOR[headOf(f)].weight * HEAD_SHARE);
+
+/**
+ * What a fighter wears weighs, all its pieces together (a share of a blow): its own pieces' weights (`Fighter.worn`, yours), or else its armor's
+ * and head gear's classes'.
+ */
+export const wornWeight = (f: Fighter) => f.worn ?? ARMOR[f.armor].weight + ARMOR[headOf(f)].weight;
 
 /** Even unburdened, a dodge turns half the damage dodged into Fatigue (8 sixteenths). */
 export const DODGE_BASE = 8;
 
-/** A Block adds this much Resistance (half the damage) on top of armor and weapon. */
-export const BLOCK_BASE = 8;
+/** A blocked melee blow tires its attacker by this many times the damage that came through the Block. */
+export const BLOCK_SENDS_BACK = 2;
 
 
 /** Rest clears this much Fatigue. */
@@ -70,10 +121,11 @@ export const REST_CLEARS = 8;
 
 export const sixteenths = (n: number, maxHP: number) => (n / 16) * maxHP;
 
-/** Attacks and Blocks use the weight of the action when it has one, otherwise the fighter's weapon. */
-export const attackCost = (f: Fighter, weight: WeaponTier = f.weapon) => sixteenths(WEAPONS[weight].cost, f.maxHP);
+/** What an attack with this weapon (its weight, and which class's own it is) costs its attacker in Fatigue. */
+export const attackCost = (f: Fighter, weight: WeaponTier = f.weapon, item?: WeaponItem) => blowShares(weaponOf(weight, item)).cost * f.maxHP;
 
-export const attackDamage = (f: Fighter, weight: WeaponTier = f.weapon) => sixteenths(WEAPONS[weight].damage, f.maxHP);
+/** What an attack with this weapon deals in damage. */
+export const attackDamage = (f: Fighter, weight: WeaponTier = f.weapon, item?: WeaponItem) => blowShares(weaponOf(weight, item)).damage * f.maxHP;
 
 export const restAmount = (f: Fighter) => sixteenths(REST_CLEARS, f.maxHP);
 
@@ -91,20 +143,18 @@ export function restRecovery(f: Fighter): { fatigue: number; heal: number; healt
 }
 
 /**
- * Share of incoming damage turned into Fatigue (0..1). Armor alone when not blocking; a Block
- * adds the baseline and its weight's bonus.
+ * Share of incoming damage turned into Fatigue (0..1): what you wear weighs (`wornWeight`). A Block has nothing to do with it: its weapon
+ * stops a share of the blow first (`defenseOf`), and Resistance meets what comes through.
  */
-export const resistance = (f: Fighter, blockWeight: WeaponTier | null) =>
-  Math.min(1, (ARMOR[f.armor].resist + headResist(f) + (blockWeight ? BLOCK_BASE + WEAPONS[blockWeight].block : 0)) / 16);
+export const resistance = (f: Fighter) => Math.min(1, wornWeight(f));
 
 /**
- * The Fatigue a dodged attack of this much damage turns into: (base + armor weight + weapon
- * weight) sixteenths of it. True weight: what you carry, whatever the action. A Maneuver that
- * dodges nothing costs nothing at all.
+ * The share of a dodged attack's damage that turns into Fatigue: half (the base) plus what you wear weighs (a 0.1 chestplate: 0.6). Only what
+ * you wear weighs on a dodge: the weapons in your hands do not. A Maneuver that dodges nothing costs nothing at all.
  */
-export const dodgeWeight = (f: Fighter) => DODGE_BASE + ARMOR[f.armor].weight + headWeight(f) + WEAPONS[f.weapon].weight;
+export const dodgeShare = (f: Fighter) => DODGE_BASE / 16 + wornWeight(f);
 
-export const dodgeFatigue = (f: Fighter, damage: number) => (damage * dodgeWeight(f)) / 16;
+export const dodgeFatigue = (f: Fighter, damage: number) => damage * dodgeShare(f);
 
 /** Healing clears Death first, then restores health. */
 export function heal(f: Fighter, amount: number) {
@@ -133,9 +183,12 @@ export function reviveHealth(f: Fighter) {
   f.staggered = false;
 }
 
-/** Pays an eternal effect from your Eternity; whatever it can't pay becomes Death on you. An ordinary weapon's effect can't use Eternity: it is all Death. */
-export function spendEternity(p: Player, amount: number): { spent: number; death: number } {
-  const spent = p.mortalWeapon ? 0 : Math.min(Math.max(0, p.eternity), amount);
+/**
+ * Pays an eternal effect from your Eternity; whatever it can't pay becomes Death on you. An ordinary weapon's effect can't use Eternity: it
+ * is all Death (`mortal`: the weapon that carried it is an ordinary one).
+ */
+export function spendEternity(p: Player, amount: number, mortal: boolean): { spent: number; death: number } {
+  const spent = mortal ? 0 : Math.min(Math.max(0, p.eternity), amount);
   p.eternity -= spent;
   const death = amount - spent;
   addDeath(p, death);

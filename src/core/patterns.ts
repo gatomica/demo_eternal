@@ -21,7 +21,8 @@
  *     Flail Swing / Wind Up Flail > Flail Spinning Behind > Stride, Wax Guard, Rising Flail
  *
  * - An action line is `Name: kind, modifiers…`. Kinds: attack, block, maneuver, rest.
- *   Modifiers: a weight (baseline, light, normal, heavy), `damage N` and `cost N` (its own, in sixteenths, in place of its weight's), `ranged`, a Maneuver direction
+ *   Modifiers: a weight (baseline, light, normal, heavy: a blow of that weight's weapon), a weapon it is like (`chisel`, `torch`, `plain`...),
+ *   weapon modifiers of its own (`poise N`, `deadly N`, `light N`, `defense N`, shares of max health: over its `like` weapon, or over none), `ranged`, a Maneuver direction
  *   (`advance` closes in on you, `retreat` backs off, `by-line` does whichever its line calls
  *   for), `*Condition` (only available while that condition holds; `*!Condition` while it
  *   doesn't; several must all hold; `*A or *B` holds while either does), and `#tag` (a rule it triggers, e.g. `#waxing`: a direct
@@ -55,6 +56,7 @@
  * 3. Safety net: if none of those stances has an action available, the enemy acts as if it just
  *    Recovered and picks again from the Recover stances.
  */
+import { WEAPON_LIKE, type WeaponLike, type WeaponStats } from "./rules";
 import type { ActionType, WeaponTier } from "./types";
 
 export const ACTION_KINDS: ActionType[] = ["attack", "block", "maneuver", "rest"];
@@ -67,9 +69,16 @@ export interface ActionDef {
   /** Its own weight, for an Attack or Block. Otherwise the fighter's weapon. */
   weight?: WeaponTier;
   ranged: boolean;
-  /** Its own damage and Fatigue cost, in sixteenths of the fighter's max health, instead of its weight's (`damage 2`, `cost 2`). */
-  damage?: number;
-  cost?: number;
+  /**
+   * The weapon it is like (`chisel`, `torch`, `hammer`, `bare`, `shortsword`, `axe`, `sickle`, or `plain`: none of a weapon's modifiers), for an
+   * action that is no blow of what the fighter holds: its stats (cost, damage, Poise, Deadly, Defense) are that weapon's.
+   */
+  like?: WeaponLike;
+  /**
+   * Weapon modifiers of its own (`poise 0.2`, `deadly 0.25`, `light 0.25`, a Block's `defense 0.2`), over the weapon it is like, or over none
+   * (`plain`) if it names none: every attack still starts at the same base (`ATTACK_BASE` in rules.ts).
+   */
+  mods?: Partial<WeaponStats>;
   /** For a Maneuver: closes in on you, backs off, or whichever its current line calls for. */
   dir?: "advance" | "retreat" | "by-line";
   /**
@@ -133,8 +142,11 @@ export function parsePattern(label: string, src: string, { events = [] }: { even
       for (const w of words) {
         if ((WEIGHTS as string[]).includes(w)) def.weight = w as WeaponTier;
         else if (w === "ranged") def.ranged = true;
-        else if (/^damage\s+\d+$/.test(w)) def.damage = Number(w.split(/\s+/)[1]);
-        else if (/^cost\s+\d+$/.test(w)) def.cost = Number(w.split(/\s+/)[1]);
+        else if (w in WEAPON_LIKE) def.like = w as WeaponLike;
+        else if (/^(poise|deadly|light|defense)\s+\d*\.?\d+$/.test(w)) {
+          const [stat, n] = w.split(/\s+/) as [keyof WeaponStats, string];
+          def.mods = { ...def.mods, [stat]: Number(n) };
+        }
         else if (w === "advance" || w === "retreat" || w === "by-line") def.dir = w;
         else if (w.startsWith("*")) def.needs.push(needOf(w));
         else if (w.startsWith("#")) def.tags.push(w.slice(1));

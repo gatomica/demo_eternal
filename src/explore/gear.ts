@@ -1,8 +1,10 @@
 /**
  * gear.ts — what you carry on the map: you set out with nothing, enemies drop the weapon and
  * armor they carry (all of it, every time), and falling takes it all away again, except the
- * eternal gear. Three slots: weapon (the right hand), armor and head; the rest waits in the bag. Eternal gear piles up;
- * ordinary gear is two weapons, one armor and one head piece at a time (`CARRY`): past that, the inventory has you drop one.
+ * eternal gear. Four places to wear it: the two hands (`weapon`, the right hand, and `left`), armor and head; the rest waits in the bag.
+ * Eternal gear piles up; ordinary gear is two weapons, one armor and one head piece at a time (`CARRY`): past that, the inventory has you
+ * drop one. The two hands share the ordinary weapons (each is held in one hand at a time); an eternal weapon is set in one hand's eternal
+ * place, and only that hand can wield it.
  *
  * Eternal gear comes as a "Memory of ...": the guide must read its dreams (at a safe spot) before it
  * can be set in its slot's eternal place, which is also only done at a safe spot (`setEternal`).
@@ -13,7 +15,17 @@ import { type ItemId, ITEMS } from "./items";
 import type { ArmorItem, ArmorTier, EnemySetup, HeadItem, WeaponItem, WeaponTier } from "../core/types";
 import type { Loadout } from "../combat/fight";
 
+/** What kind of gear a piece is (a weapon goes in either hand). */
 export type Slot = "weapon" | "armor" | "head";
+
+/** Where a piece is worn: the right hand (`weapon`, so older saves keep it), the left hand, armor or head. */
+export type Place = Slot | "left";
+
+/** The kind of gear a place takes. */
+export const slotOf = (place: Place): Slot => (place === "left" ? "weapon" : place);
+
+/** The other hand. */
+export const otherHand = (hand: "weapon" | "left"): "weapon" | "left" => (hand === "left" ? "weapon" : "left");
 
 /** What a piece of gear is. */
 export type GearSpec = {
@@ -24,6 +36,8 @@ export type GearSpec = {
   name?: string;
   /** One of the starting classes' own pieces (its name, lore, look and effect come from `ITEMS`). */
   item?: ItemId;
+  /** Armor or head gear: what it weighs, if it has a weight of its own (else its item's, or its class's: see `pieceWeight`). */
+  weight?: number;
   /**
    * The remains it dropped from (a key of the journey's corpses). Remains that stay for good (enemies that don't
    * get up again) get it back when you reawaken, if you no longer have it.
@@ -41,16 +55,17 @@ export type Gear = GearSpec & { id: string };
 export interface Inventory {
   /** Everything you own, worn or not. */
   bag: Gear[];
-  /** The ids of what you wear in each slot (null: bare hands, no armor). */
+  /** The ids of what you wear in each place (null: bare hands, no armor): `weapon` is the right hand. */
   weapon: string | null;
+  left?: string | null;
   armor: string | null;
   head?: string | null;
   /** For making ids. */
   made: number;
-  /** Which eternal piece sits in each slot's eternal place (the first one you own, if unset). */
-  shelf?: Partial<Record<Slot, string>>;
+  /** Which eternal piece sits in each place's eternal place (each hand has its own). */
+  shelf?: Partial<Record<Place, string>>;
   /** Which empty place counts as the one you wield, when you wield nothing (the normal one, if unset). */
-  bare?: Partial<Record<Slot, Side>>;
+  bare?: Partial<Record<Place, Side>>;
 }
 
 /** Each slot has two places: one for eternal gear and one for ordinary gear. */
@@ -69,22 +84,39 @@ export function gearName(g: GearSpec): string {
   return g.eternal && !g.read ? `Memory of ${base}` : base;
 }
 
+/**
+ * What a piece of armor or head gear weighs (a share of a blow: the Resistance it adds, and what it adds to a dodge's cost): its own, its item's,
+ * or its class's (`ARMOR`). A weapon weighs nothing here.
+ */
+export function pieceWeight(g: GearSpec): number {
+  if (g.slot === "weapon") return 0;
+  const info = g.item ? ITEMS[g.item] : undefined;
+  return g.weight ?? (info && info.slot !== "weapon" ? info.weight : undefined) ?? ARMOR[g.tier].weight;
+}
+
+/** What everything you wear weighs together: your Resistance (a share of a blow). */
+export const wornWeightOf = (inv: Inventory): number => (["armor", "head"] as const).reduce((n, place) => {
+  const g = wornIn(inv, place);
+  return n + (g ? pieceWeight(g) : 0);
+}, 0);
+
 /** "Lightweight" or "Heavyweight", for gear of those weights (nothing for normal ones, or none). */
 export function weightLabel(g: GearSpec): string | null {
   return g.tier === "light" ? "Lightweight" : g.tier === "heavy" ? "Heavyweight" : null;
 }
 
-/** The piece you wear in a slot, if it is where you wield from (an eternal piece only counts once set in its place). */
-export function wornIn(inv: Inventory, slot: Slot): Gear | undefined {
-  const worn = inv.bag.find(g => g.id === inv[slot]);
+/** The piece you wear in a place, if it is where you wield from (an eternal piece only counts once set in its place, in that very hand). */
+export function wornIn(inv: Inventory, place: Place): Gear | undefined {
+  const worn = inv.bag.find(g => g.id === inv[place] && g.slot === slotOf(place));
   if (!worn || !worn.eternal) return worn;
-  return pieceAt(inv, slot, "eternal")?.id === worn.id ? worn : undefined;
+  return pieceAt(inv, place, "eternal")?.id === worn.id ? worn : undefined;
 }
 
 /** What you wear, as a fight wants it: bare hands and no armor in an empty slot. */
 export function loadoutOf(inv: Inventory): Loadout {
-  const weapon = wornIn(inv, "weapon"), armor = wornIn(inv, "armor"), head = wornIn(inv, "head");
+  const weapon = wornIn(inv, "weapon"), left = wornIn(inv, "left"), armor = wornIn(inv, "armor"), head = wornIn(inv, "head");
   return {
+    ...(left?.slot === "weapon" ? { offhand: { weapon: left.tier, weaponItem: left.item as WeaponItem | undefined, eternal: !!left.eternal && !!left.read } } : {}),
     weapon: weapon?.slot === "weapon" ? weapon.tier : "baseline",
     armor: armor?.slot === "armor" ? armor.tier : "none",
     eternal: weapon?.slot === "weapon" && !!weapon.eternal && !!weapon.read,
@@ -92,6 +124,7 @@ export function loadoutOf(inv: Inventory): Loadout {
     armorItem: armor?.slot === "armor" ? (armor.item as ArmorItem | undefined) : undefined,
     head: head?.slot === "head" ? head.tier : "none",
     headItem: head?.slot === "head" ? (head.item as HeadItem | undefined) : undefined,
+    worn: wornWeightOf(inv),
   };
 }
 
@@ -134,57 +167,64 @@ export function take(inv: Inventory, found: GearSpec): { inventory: Inventory; g
   return { inventory: { ...inv, bag: [...inv.bag, gear], made: inv.made + 1 }, gear };
 }
 
-/** Lets go of a piece you own (never an eternal one): it leaves the bag, and if you wore it, that slot is left empty. */
+/** Every place gear is worn in. */
+const PLACES: Place[] = ["weapon", "left", "armor", "head"];
+
+/** Lets go of a piece you own (never an eternal one): it leaves the bag, and whatever place wore it is left empty. */
 export function drop(inv: Inventory, id: string): Inventory {
   const piece = inv.bag.find(g => g.id === id);
   if (!piece || piece.eternal) return inv;
-  return { ...inv, bag: inv.bag.filter(g => g.id !== id), [piece.slot]: inv[piece.slot] === id ? null : inv[piece.slot] ?? null };
+  const next: Inventory = { ...inv, bag: inv.bag.filter(g => g.id !== id) };
+  for (const place of PLACES) if (inv[place] === id) next[place] = null;
+  return next;
 }
 
 /**
- * Wears this piece in its slot (an eternal one only if it is the one set in the slot's eternal place), or, with `null`, nothing: bare hands,
- * no armor, bare-headed.
+ * Wears this piece in this place (an eternal one only if it is the one set in that place's eternal place), or, with `null`, nothing: bare
+ * hands, no armor, bare-headed. A weapon the other hand holds moves to this one, leaving that hand empty.
  */
-export function wield(inv: Inventory, slot: Slot, id: string | null): Inventory {
-  if (id === null) return unequip(inv, slot, equippedSide(inv, slot) ?? "normal");
-  const piece = inv.bag.find(g => g.id === id && g.slot === slot);
-  if (!piece || (piece.eternal && pieceAt(inv, slot, "eternal")?.id !== id)) return inv;
-  return { ...inv, [slot]: id };
+export function wield(inv: Inventory, place: Place, id: string | null): Inventory {
+  if (id === null) return unequip(inv, place, equippedSide(inv, place) ?? "normal");
+  const piece = inv.bag.find(g => g.id === id && g.slot === slotOf(place));
+  if (!piece || (piece.eternal && pieceAt(inv, place, "eternal")?.id !== id)) return inv;
+  const next: Inventory = { ...inv, [place]: id };
+  if (place === "weapon" || place === "left") {
+    const other = otherHand(place);
+    if (inv[other] === id) next[other] = null;
+  }
+  return next;
 }
 
 
 /** Falling: everything is lost but the eternal gear (and you wear it again if you wore it). */
 export function lose(inv: Inventory): Inventory {
   const bag = inv.bag.filter(g => g.eternal);
-  const keeps = (id: string | null) => (bag.some(g => g.id === id) ? id : null);
-  return { ...inv, bag, weapon: keeps(inv.weapon), armor: keeps(inv.armor), head: keeps(inv.head ?? null) };
+  const keeps = (id: string | null | undefined) => (id && bag.some(g => g.id === id) ? id : null);
+  return { ...inv, bag, weapon: keeps(inv.weapon), left: keeps(inv.left), armor: keeps(inv.armor), head: keeps(inv.head) };
 }
 
-/** What lies in a slot's eternal or normal place, or null if it is empty (the eternal place: the read piece set there at a safe spot). */
-export function pieceAt(inv: Inventory, slot: Slot, side: Side): Gear | null {
+/**
+ * What lies in a place's eternal or normal place, or null if it is empty (the eternal place: the read piece set there at a safe spot; each
+ * hand has its own).
+ */
+export function pieceAt(inv: Inventory, place: Place, side: Side): Gear | null {
+  const slot = slotOf(place);
   if (side === "normal") return inv.bag.find(g => g.slot === slot && !g.eternal) ?? null;
-  return inv.bag.find(g => g.slot === slot && g.eternal && g.read && g.id === inv.shelf?.[slot]) ?? null;
+  return inv.bag.find(g => g.slot === slot && g.eternal && g.read && g.id === inv.shelf?.[place]) ?? null;
 }
 
 /** Which place of a slot you wield from: the place of the piece you wear, or else an empty one (nothing worn). */
-export function equippedSide(inv: Inventory, slot: Slot): Side | null {
-  const worn = wornIn(inv, slot);
+export function equippedSide(inv: Inventory, place: Place): Side | null {
+  const worn = wornIn(inv, place);
   if (worn) return worn.eternal ? "eternal" : "normal";
-  const empty = (side: Side) => !pieceAt(inv, slot, side);
-  const chosen = inv.bare?.[slot];
+  const empty = (side: Side) => !pieceAt(inv, place, side);
+  const chosen = inv.bare?.[place];
   if (chosen && empty(chosen)) return chosen;
   return empty("normal") ? "normal" : empty("eternal") ? "eternal" : null;
 }
 
-/** Wields what lies in this place (or nothing, if it is empty). */
-export function equipSide(inv: Inventory, slot: Slot, side: Side): Inventory {
-  const piece = pieceAt(inv, slot, side);
-  if (!piece) return unequip(inv, slot, side);
-  return { ...inv, [slot]: piece.id, shelf: piece.eternal ? { ...inv.shelf, [slot]: piece.id } : inv.shelf };
-}
-
-/** Wields nothing in this slot (bare hands, no armor), counting this place as the one you wield from. */
-export const unequip = (inv: Inventory, slot: Slot, side: Side): Inventory => ({ ...inv, [slot]: null, bare: { ...inv.bare, [slot]: side } });
+/** Wields nothing in this place (bare hands, no armor), counting this place as the one you wield from. */
+export const unequip = (inv: Inventory, place: Place, side: Side): Inventory => ({ ...inv, [place]: null, bare: { ...inv.bare, [place]: side } });
 
 /** Your memories whose dreams the guide has not read yet. */
 export const unreadMemories = (inv: Inventory): Gear[] => inv.bag.filter(g => g.eternal && !g.read);
@@ -199,11 +239,20 @@ export const hasUnread = (inv: Inventory): boolean => inv.bag.some(g => g.eterna
 export const readDreams = (inv: Inventory, id: string): Inventory => ({ ...inv, bag: inv.bag.map(g => (g.id === id ? { ...g, read: true } : g)) });
 
 /**
- * Sets a read eternal piece in its slot's eternal place (only at a safe spot, with the guide). If you
- * were wielding from the eternal place, you wield the new piece.
+ * Sets a read eternal piece in a place's eternal place (only at a safe spot, with the guide). If you were wielding from the eternal place,
+ * you wield the new piece. An eternal weapon sits in one hand at a time: set in this hand, it leaves the other (which, if it wielded it,
+ * is left empty).
  */
-export function setEternal(inv: Inventory, slot: Slot, id: string): Inventory {
-  const wieldingEternal = equippedSide(inv, slot) === "eternal";
-  const next = { ...inv, shelf: { ...inv.shelf, [slot]: id } };
-  return wieldingEternal ? { ...next, [slot]: id } : next;
+export function setEternal(inv: Inventory, place: Place, id: string): Inventory {
+  const wieldingEternal = equippedSide(inv, place) === "eternal";
+  let next: Inventory = { ...inv, shelf: { ...inv.shelf, [place]: id } };
+  if (place === "weapon" || place === "left") {
+    const other = otherHand(place);
+    if (inv.shelf?.[other] === id) {
+      const shelf = { ...next.shelf };
+      delete shelf[other];
+      next = { ...next, shelf, ...(inv[other] === id ? { [other]: null } : {}) };
+    }
+  }
+  return wieldingEternal ? { ...next, [place]: id } : next;
 }

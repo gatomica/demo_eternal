@@ -9,6 +9,7 @@ import { describeAction } from "../core/intents";
 import type { ActionDef } from "../core/patterns";
 import { createCombat } from "../core/setup";
 import { mirrorStance, swingFor } from "../core/stance";
+import { ARMOR } from "../core/rules";
 import type { PoseName } from "../render/poses";
 import type { ArmorItem, ArmorTier, CombatState, HeadItem, Line, PlayerAction, Side, Stance, Swing, WeaponTier } from "../core/types";
 import { ITEMS } from "../explore/items";
@@ -250,7 +251,7 @@ export interface PlayerScenario {
   /** What it shows: its target is filled in with the dummy's id (or "self"). */
   action: { type: PlayerAction["type"]; target: "foe" | "self" };
   foe: FoeDoes;
-  /** The Punch: the empty left hand's blow (bare hands' weight), the mirror of the same blow with the right. */
+  /** Made with the left hand (its Attack or Block, with what it holds): the mirror of the same action with the right. */
   punch?: boolean;
   /** The Kick, with this leg (in a fight the stance picks it: see `kickFor` in core/stance.ts). */
   kick?: Side;
@@ -269,8 +270,9 @@ function attackName(stance: Stance, swing: Swing, punch: boolean): string {
 
 /**
  * The actions you can play from a stance: the attacks it swings (core/stance.ts `swingFor`: overhead from Idle, otherwise to the side the stance
- * swings to; the back line is always overhead, so it is only listed where it differs), each with the main hand and as a Punch (the left hand's,
- * swung as the right would from the mirrored stance: from a leading stance, the other of the Openhand and Backhand), then every other action.
+ * swings to; the back line is always overhead, so it is only listed where it differs), each with the main hand and with the left (swung as the
+ * right would from the mirrored stance: from a leading stance, the other of the Openhand and Backhand), then every other action (a Block with
+ * either hand).
  * Staggered, only the recovery.
  */
 export function playerScenariosFrom(stance: PlayerViewStance): PlayerScenario[] {
@@ -293,7 +295,8 @@ export function playerScenariosFrom(stance: PlayerViewStance): PlayerScenario[] 
   }
   return [
     ...attacks,
-    { id: "block", label: "Block", action: { type: "block", target: "foe" }, foe: "strike" },
+    { id: "block", label: "Block, right hand", action: { type: "block", target: "foe" }, foe: "strike" },
+    { id: "block-left", label: "Block, left hand", action: { type: "block", target: "foe" }, foe: "strike", punch: true },
     { id: "dodge-fwd", label: "Dodge forward", action: { type: "maneuver", target: "foe" }, foe: "strike" },
     { id: "dodge-back", label: "Dodge back", action: { type: "maneuver", target: "self" }, foe: "strike" },
     { id: "advance", label: "Advance", action: { type: "maneuver", target: "foe" }, foe: "rest" },
@@ -307,7 +310,7 @@ export function playerScenariosFrom(stance: PlayerViewStance): PlayerScenario[] 
 const FOE_ID = "e0";
 
 export const playerActionOf = (sc: PlayerScenario): PlayerAction => ({
-  type: sc.action.type, target: sc.action.target === "foe" ? FOE_ID : "self", ...(sc.punch ? { weight: "baseline" as const, hand: "left" as const } : {}),
+  type: sc.action.type, target: sc.action.target === "foe" ? FOE_ID : "self", ...(sc.punch ? { hand: "left" as const } : {}),
   ...(sc.kick ? { weight: "baseline" as const, kick: sc.kick } : {}),
 });
 
@@ -331,14 +334,18 @@ export function playerViewerFight(weapon: WeaponTier, armor: ArmorTier): CombatS
  * the recovery), the dummy in front of you, whole, doing what the scenario needs. Always the same start, so every play of an action
  * begins from the same spot.
  */
-export function applyPlayerShow(s: CombatState, weapon: WeaponTier, armor: ArmorTier, stance: PlayerViewStance, scenario?: PlayerScenario, wear: Wear = {}): CombatState {
+export function applyPlayerShow(s: CombatState, weapon: WeaponTier, armor: ArmorTier, stance: PlayerViewStance, scenario?: PlayerScenario, wear: Wear = {}, offWeapon: WeaponTier = "baseline"): CombatState {
   const v = structuredClone(s);
   v.player.weapon = weapon;
+  v.player.offhand = { weapon: offWeapon };
   // What you wear: a class's own armor (its tier is the item's) or plain armor of a tier, and its head gear (or none).
   v.player.armorItem = wear.armor;
   v.player.armor = wear.armor ? (ITEMS[wear.armor].tier as ArmorTier) : armor;
   v.player.headItem = wear.head;
   v.player.head = wear.head ? (ITEMS[wear.head].tier as ArmorTier) : "none";
+  // (what they weigh: the pieces' own weights, or plain armor's class's)
+  const own = (id?: ArmorItem | HeadItem) => { const info = id && ITEMS[id]; return info && info.slot !== "weapon" ? info.weight : undefined; };
+  v.player.worn = (own(wear.armor) ?? ARMOR[v.player.armor].weight) + (own(wear.head) ?? 0);
   v.player.staggered = stance === "staggered";
   v.player.stance = stance === "staggered" ? "idle" : stance;
   v.player.fatigue = stance === "staggered" ? v.player.hp : 0;

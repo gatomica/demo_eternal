@@ -3,12 +3,16 @@
  * when its wheel is not opened up, and the part highlighted when it is. It lives in the browser (localStorage), so quitting, resting
  * and leaving a fight keep it.
  */
+import type { PlayerAction } from "../core/types";
 import type { SubSlot } from "./selection";
 
 const KEY = "demo-eternal-preferred-alternatives";
 
-/** The actions that have alternatives. */
-export type AlternativeAction = "attack";
+/** The actions that have alternatives: Attack (left hand, Kick, right hand) and Block (left hand, right hand). */
+export type AlternativeAction = "attack" | "block";
+
+/** Which action with alternatives an action is one of. */
+export const alternativeOf = (action: PlayerAction): AlternativeAction => (action.type === "block" ? "block" : "attack");
 
 const read = (): Partial<Record<AlternativeAction, SubSlot>> => {
   try { return JSON.parse(localStorage.getItem(KEY) ?? "{}") ?? {}; } catch { return {}; }
@@ -17,7 +21,9 @@ const read = (): Partial<Record<AlternativeAction, SubSlot>> => {
 /** The alternative you last used for this action (the main one, the first time). */
 export function preferredAlternative(action: AlternativeAction): SubSlot {
   const s = read()[action];
-  return s === "left" || s === "middle" || s === "right" ? s : "right";
+  // (The Kick was the middle part before the parts took the whole wheel: it is now the bottom one.)
+  const was = s as string | undefined;
+  return was === "middle" ? "down" : was === "left" || was === "right" || was === "up" || was === "down" ? was : "right";
 }
 
 /** Remember the alternative you just used. */

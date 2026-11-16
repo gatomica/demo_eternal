@@ -25,6 +25,9 @@ export interface Look {
   armor?: ArmorTier;
   /** The starting classes' own weapon and armor you carry (their look, instead of the tier's). */
   weaponItem?: WeaponItem;
+  /** What you hold in your left hand (its weight, and which class's own weapon it is). */
+  offWeapon?: WeaponTier;
+  offItem?: WeaponItem;
   armorItem?: ArmorItem;
   headItem?: HeadItem;
   /** The Penitent Warden's pointed hood (a patrol warden): its point hangs behind, the face in shadow. */
@@ -40,7 +43,8 @@ export interface Look {
 const PLAYER_LOOK: Look = { ink: COLORS.ink, eye: COLORS.eye };
 
 /** You on the map, wearing what you have equipped. */
-export const playerLook = (gear: { weapon: WeaponTier; armor: ArmorTier; weaponItem?: WeaponItem; armorItem?: ArmorItem; headItem?: HeadItem }): Look => ({ ...PLAYER_LOOK, ...gear });
+export const playerLook = ({ offhand, ...gear }: { weapon: WeaponTier; armor: ArmorTier; weaponItem?: WeaponItem; armorItem?: ArmorItem; headItem?: HeadItem; offhand?: { weapon: WeaponTier; weaponItem?: WeaponItem } }): Look =>
+  ({ ...PLAYER_LOOK, ...gear, ...(offhand && offhand.weapon !== "baseline" ? { offWeapon: offhand.weapon, offItem: offhand.weaponItem } : {}) });
 
 /** Gear colors, the same as in a fight (index.css: --metal, --grip, --armor). */
 const GRIP = "#8a6b4a", ARMOR_INK = "#6f7489";

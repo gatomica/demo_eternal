@@ -1,6 +1,7 @@
 /**
- * items.ts — the starting classes' own weapons and armor, and the classes themselves. Each item is of a tier like any other gear (its
- * weight, damage and resistance come from the tier), but has a name, lore, look and (a weapon) effect of its own. Every one is eternal from
+ * items.ts — the starting classes' own weapons and armor, and the classes themselves. Each item is of a tier like any other gear (a weapon's
+ * damage and cost come from it), but has a name, lore, look and (a weapon) effect of its own; armor and head gear have a weight of their own
+ * (`weight`: a share of a blow, see `ARMOR` in core/rules.ts), for now each its class's. Every one is eternal from
  * the start: read and set, so its effect works at once, paid for with Eternity (see `eternalEffect` in core/resolve/attacks.ts).
  */
 import type { ArmorItem, ArmorTier, HeadItem, WeaponItem, WeaponTier } from "../core/types";
@@ -11,8 +12,8 @@ export type ItemId = WeaponItem | ArmorItem | HeadItem;
 
 export type ItemInfo =
   | { slot: "weapon"; tier: WeaponTier; name: string; lore: string; effect: string }
-  | { slot: "armor"; tier: ArmorTier; name: string; lore: string }
-  | { slot: "head"; tier: ArmorTier; name: string; lore: string };
+  | { slot: "armor"; tier: ArmorTier; name: string; weight: number; lore: string }
+  | { slot: "head"; tier: ArmorTier; name: string; weight: number; lore: string };
 
 export const ITEMS: Record<ItemId, ItemInfo> = {
   shortsword: {
@@ -21,7 +22,7 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
     effect: "Empowers consecutive attacks, tiring you less on the second.",
   },
   "bronze-chestplate": {
-    slot: "armor", tier: "heavy", name: "Bronze Chestplate",
+    slot: "armor", tier: "heavy", name: "Bronze Chestplate", weight: 0.15,
     lore: "Bronze armor of the empire. It is said the muscled physique was modeled after the founding emperor's firstborn.",
   },
   axe: {
@@ -30,7 +31,7 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
     effect: "Empowers the first direct hit after a rest.",
   },
   garb: {
-    slot: "armor", tier: "normal", name: "Nighthunter's Garb",
+    slot: "armor", tier: "normal", name: "Nighthunter's Garb", weight: 0.1,
     lore: "Padded black leather armor of the nighthunters. Even the creatures of the night found trouble finding a hunter clad in pitch black.",
   },
   sickle: {
@@ -39,24 +40,24 @@ export const ITEMS: Record<ItemId, ItemInfo> = {
     effect: "Empowers direct hits against staggered enemies.",
   },
   robe: {
-    slot: "armor", tier: "light", name: "Nomad's Robe",
+    slot: "armor", tier: "light", name: "Nomad's Robe", weight: 0.05,
     lore: "Lightweight travelling clothes. Unlike customary attire for a keeper, these white robes are devoid of color, a vestige of the empire's cleansing of the demonic.",
   },
   // (Placeholder lore for the head gear, to be rewritten.)
   helm: {
-    slot: "head", tier: "heavy", name: "Legionnaire's Helm",
+    slot: "head", tier: "heavy", name: "Legionnaire's Helm", weight: 0.15,
     lore: "A bronze helm of the imperial legions, its crest dyed red. Few who wore it ever saw the face of what struck them down.",
   },
   hood: {
-    slot: "head", tier: "normal", name: "Nighthunter's Hood",
+    slot: "head", tier: "normal", name: "Nighthunter's Hood", weight: 0.1,
     lore: "A black hood of the nighthunters, cut deep to hide the face and the breath on cold nights.",
   },
   wardenhood: {
-    slot: "head", tier: "light", name: "Patrol Warden's Hood",
+    slot: "head", tier: "light", name: "Patrol Warden's Hood", weight: 0.05,
     lore: "The pointed hood the wardens wore on their rounds, long after there was anything left to guard. It is still warm, as if its wearer had only just left it.",
   },
   mask: {
-    slot: "head", tier: "light", name: "Desert Mask",
+    slot: "head", tier: "light", name: "Desert Mask", weight: 0.05,
     lore: "A mask of the nomads, worn against the sand and, it is said, against the eyes of the dead.",
   },
 };
@@ -97,15 +98,21 @@ export function lookOfClass(id: ClassId) {
   };
 }
 
-/** The pieces of a loadout picked by item (Test combat): what a fight takes in, every piece eternal (the weapon's effect works, paid with Eternity). */
-export interface Picks { weaponItem?: WeaponItem; armorItem?: ArmorItem; headItem?: HeadItem }
+/**
+ * The pieces of a loadout picked by item (Test combat): what a fight takes in, every piece eternal (the weapon's effect works, paid with Eternity).
+ * `offItem`: the left hand's weapon.
+ */
+export interface Picks { weaponItem?: WeaponItem; offItem?: WeaponItem; armorItem?: ArmorItem; headItem?: HeadItem }
 export function loadoutOfItems(p: Picks): Loadout {
   const w = p.weaponItem && ITEMS[p.weaponItem], a = p.armorItem && ITEMS[p.armorItem], h = p.headItem && ITEMS[p.headItem];
+  const off = p.offItem && ITEMS[p.offItem];
   return {
+    ...(off ? { offhand: { weapon: off.tier as WeaponTier, weaponItem: p.offItem, eternal: true } } : {}),
     weapon: w ? w.tier as WeaponTier : "baseline",
     armor: a ? a.tier as ArmorTier : "none",
     head: h ? h.tier as ArmorTier : "none",
     weaponItem: p.weaponItem, armorItem: p.armorItem, headItem: p.headItem,
+    worn: (a && a.slot !== "weapon" ? a.weight : 0) + (h && h.slot !== "weapon" ? h.weight : 0),
     eternal: !!w,
   };
 }

@@ -10,12 +10,13 @@ import { LessonBox } from "./LessonBox";
 import { prepareWalk, speak } from "../audio/walk";
 import { useDev } from "../ui/dev";
 import { DETOUR, isWanted, type Beat, lessonAllows, lessonMet, typeDelay } from "./lesson";
-import { preferredAlternative, rememberAlternative } from "./preferred";
-import { defaultSelection, moveSelection, rowsOf, sameSel, subKey, type Selection, type SubSlot, type Wheel, type WheelOption } from "./selection";
+import { alternativeOf, preferredAlternative, rememberAlternative } from "./preferred";
+import { defaultSelection, moveSelection, rowsOf, sameSel, type Selection, type SubSlot, type Wheel, type WheelOption } from "./selection";
 import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveSkip, resolveTurn, snapshotOf } from "../core/resolve";
-import { attackCost, restRecovery } from "../core/rules";
-import type { CombatEvent, CombatState, Enemy, Opening, Player, PlayerAction, Stance, Swing } from "../core/types";
+import { attackCost, restRecovery, WEAPONS } from "../core/rules";
+import type { CombatEvent, CombatState, Enemy, Opening, Player, PlayerAction, Side, Stance, Swing, WeaponItem, WeaponTier } from "../core/types";
+import { ITEMS } from "../explore/items";
 import { behind, right as rightOf, bodiesOfEnemies, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, SCENE_TILT, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
 import type { Projectile } from "../render/effects";
 import { type BarValues, HealthBar, PlayerBars } from "../render/HealthBar";
@@ -46,8 +47,12 @@ const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 
 /** The player is drawn in 3D in a fight, on the Sleepwalker's body (`player3dPose`, Sleepwalker3D's `gear`). */
 const PLAYER_3D = true;
-/** The poses a Punch is drawn mirrored in: its wind-ups and strikes (the stances around it are held as they are). */
-const PUNCH_POSES = new Set<PoseName>(["attack", "punch", "strike", "swing-left-up", "swing-left", "swing-right-up", "swing-right"]);
+/** The poses the left hand's Attack or Block is drawn mirrored in: its wind-ups, strikes and the Block itself (the stances around them are held as they are). */
+const PUNCH_POSES = new Set<PoseName>(["attack", "punch", "strike", "swing-left-up", "swing-left", "swing-right-up", "swing-right", "block"]);
+
+/** What the wheel calls a hand's Attack or Block: the weapon it holds ("Brick Hammer", "Bronze Shortsword"), or the hand itself when it is empty. */
+const handName = (weapon: WeaponTier, item: WeaponItem | undefined, side: Side): string =>
+  weapon === "baseline" ? (side === "left" ? "Left hand" : "Right hand") : item ? ITEMS[item].name : WEAPONS[weapon].name;
 /** Whether the game itself (fights, not the Model viewer) draws the Warden from the 3D rig. Off while it is built. */
 const WARDEN_3D_IN_GAME = true;
 
@@ -125,7 +130,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const [selection, setSelection] = useState<Selection>(() => defaultSelection(initial));
   const [wheelOpen, setWheelOpen] = useState(false);
   const [highlight, setHighlight] = useState<Dir | null>(null);
-  // The highlighted action opened up into its alternatives (Attack: Punch, nothing yet, the weapon's blow), and the part on.
+  // The highlighted action opened up into its alternatives (Attack: the left hand's, the Kick, the right hand's), and the part on.
   const [expanded, setExpanded] = useState(false);
   const [subSlot, setSubSlot] = useState<SubSlot>("right");
 
@@ -319,7 +324,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
 
   /* ---------- the wheel for the current selection ---------- */
   const wheelOf = (sel: Selection): Wheel => {
-    const opt = (label: string, action: PlayerAction): WheelOption => ({ label, action });
+    const opt = (label: string, action: PlayerAction, look?: WheelOption["look"]): WheelOption => ({ label, action, ...(look ? { look } : {}) });
     if (sel.kind === "player") {
       return {
         up: null,
@@ -328,21 +333,40 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         right: null,
       };
     }
+    // Each hand's Attack and Block is named for what it holds (the hand itself, empty).
+    const p = fight.player, rightName = handName(p.weapon, p.weaponItem, "right"), leftName = handName(p.offhand.weapon, p.offhand.weaponItem, "left");
+    // (and drawn as what it holds: its sprite, or the empty hand's mitten)
+    const rightLook = { kind: "weapon", tier: p.weapon, item: p.weaponItem, side: "right" } as const;
+    const leftLook = { kind: "weapon", tier: p.offhand.weapon, item: p.offhand.weaponItem, side: "left" } as const;
     return {
       up: (() => {
-        // Opened up: the weapon's blow on the right, the empty left hand's Punch on the left and the Kick in the middle (both with bare hands' cost and damage).
+        // Opened up: the right hand's blow on the right, the left hand's on the left (bare hands' cost and damage while it is empty), and below the Kick,
+        // made with neither hand (bare hands' cost and damage, whatever the hands hold).
         const alternatives: NonNullable<WheelOption["alternatives"]> = {
-          left: opt("Punch", { type: "attack", target: sel.id, weight: "baseline", hand: "left" }),
-          middle: opt("Kick", { type: "attack", target: sel.id, weight: "baseline", kick: true }),
-          right: opt("Attack", { type: "attack", target: sel.id }),
+          up: null,
+          left: opt(leftName, { type: "attack", target: sel.id, hand: "left" }, leftLook),
+          down: opt("Kick", { type: "attack", target: sel.id, weight: "baseline", kick: true }, { kind: "kick" }),
+          right: opt(rightName, { type: "attack", target: sel.id }, rightLook),
         };
-        // Closed, the attack is the alternative you used last (the lesson always teaches the plain one).
+        // Closed, the attack is the alternative you used last (the lesson always teaches the plain one): its picture, with "Attack" over it.
         const preferred = alternatives[current ? "right" : preferredAlternative("attack")] ?? alternatives.right!;
-        return { ...preferred, alternatives };
+        return { ...preferred, label: "Attack", alternatives };
       })(),
       left: opt("Dodge", { type: "maneuver", target: sel.id }),
       down: null,
-      right: opt("Block", { type: "block", target: sel.id }),
+      right: (() => {
+        // Opened up: the right hand's Block on the right, the left hand's on the left (each with that hand's weight); nothing below yet (the
+        // weaponless Block, to come).
+        const alternatives: NonNullable<WheelOption["alternatives"]> = {
+          up: null,
+          left: opt(leftName, { type: "block", target: sel.id, hand: "left" }, leftLook),
+          down: null,
+          right: opt(rightName, { type: "block", target: sel.id }, rightLook),
+        };
+        // Closed, it is the Block you made last (the right hand's to begin with, and in the lesson): its picture, with "Block" over it.
+        const preferred = alternatives[current ? "right" : preferredAlternative("block")] ?? alternatives.right!;
+        return { ...preferred, label: "Block", alternatives };
+      })(),
     };
   };
   const wheel: Wheel = wheelOf(sel);
@@ -398,8 +422,14 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return { dirs, parts, select: on ? { fast: !!onKey && !tried.includes(onKey) } : undefined };
   })();
   const chosen = wheelOpen && highlight ? (expanded ? wheel[highlight]?.alternatives?.[subSlot] ?? null : wheel[highlight]) : null;
-  // Hovering an Attack (before you commit to it): the Fatigue it would cost flickers on your bar.
-  const previewCost = !busy && chosen?.action.type === "attack" ? attackCost(p, chosen.action.weight) : 0;
+  // Hovering an Attack (before you commit to it): the Fatigue it would cost flickers on your bar (its own weight, else the weapon in the hand it uses).
+  const previewCost = !busy && chosen?.action.type === "attack"
+    ? (() => {
+      // (a Kick's own weight, else the weapon in the hand it uses, and which class's own it is)
+      const a = chosen.action, left = a.hand === "left", weapon = left ? p.offhand.weapon : p.weapon, item = left ? p.offhand.weaponItem : p.weaponItem;
+      return attackCost(p, a.weight ?? weapon, (a.weight ?? weapon) === weapon ? item : undefined);
+    })()
+    : 0;
   // Hovering a Rest: the Fatigue it would clear and the Health it would return flicker on your bar.
   const previewRecover = !busy && chosen?.action.type === "rest" ? restRecovery(p) : undefined;
   const wheelCenter = sel.kind === "player" ? "You" : selectedEnemy?.name ?? "";
@@ -873,8 +903,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     if (current && (typing || current.goal?.until !== "commit" || !current.goal.want || !isWanted(option.action, current.goal.want) || !lessonStand?.onTarget)) return;
     if (current) nextBeat();
     // An alternative you used becomes what its action does from now on.
-    const used = (["left", "middle", "right"] as const).find(slot => wheel.up?.alternatives?.[slot]?.action === option.action);
-    if (used && !current) rememberAlternative("attack", used);
+    for (const d of ["up", "right"] as const) {
+      const used = (["up", "left", "down", "right"] as const).find(slot => wheel[d]?.alternatives?.[slot]?.action === option.action);
+      if (used && !current) rememberAlternative(alternativeOf(option.action), used);
+    }
     if (showHints) { const key = triedKeyOf(option); if (key) triedAction(key); }
     play(option.action);
   };
@@ -1105,19 +1137,21 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       return;
     }
     if (expanded && highlight) {
-      // An action opened up: Q or the opposite direction closes it up again (Q again closes the wheel); its own direction and the
-      // ones beside it pick the middle, right and left parts; E commits the part (the empty one does nothing).
+      // An action opened up: only Q closes it up again (Q again closes the wheel); each direction picks the part on its quarter; E commits the part
+      // (an empty one does nothing).
       if (key === "back") { menuSound(key); setExpanded(false); return; }
       if (key === "select") { if (chosen) menuSound(key); commit(chosen); return; }
       if (key === "pause") return;
-      const at = subKey(highlight, key);
-      if (at === "collapse") { menuSound(key); setExpanded(false); }
-      else if (at !== subSlot) { menuSound(key); setSubSlot(at); }
+      if (key !== subSlot) { menuSound(key); setSubSlot(key); }
       return;
     }
     if (key === "back") closeWheel();
     else if (key === "select") { if (chosen) menuSound(key); commit(chosen); }
-    else if (key !== "pause" && key === highlight && !current && wheel[key]?.alternatives) { menuSound(key); setSubSlot(current ? "right" : preferredAlternative("attack")); setExpanded(true); } // (not in the lesson)
+    else if (key !== "pause" && key === highlight && !current && wheel[key]?.alternatives) {
+      // (on the part you used last, if this action has it)
+      const o = wheel[key]!, last = preferredAlternative(alternativeOf(o.action));
+      menuSound(key); setSubSlot(o.alternatives![last] ? last : "right"); setExpanded(true);
+    } // (not in the lesson)
     else if (key !== "pause" && wheel[key]) { if (key !== highlight) menuSound(key); setHighlight(key); }
   });
 
@@ -1364,9 +1398,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     }
     return poses.telegraph;
   };
-  const punching = p.weapon === "baseline";
-  // A Punch (the empty left hand's blow, mirrored): drawn mirrored through its wind-up and its strike, not in the stances before and after it.
-  const leftPunch = playback?.action?.type === "attack" && playback.action.hand === "left";
+  // The left hand at work (its Attack or Block, mirrored): drawn mirrored through its wind-up and its strike (or its Block), not in the stances before
+  // and after it.
+  const leftPunch = (playback?.action?.type === "attack" || playback?.action?.type === "block") && playback.action.hand === "left";
+  /** The blow is a bare-handed one in both hands (an overhead lands as a punch); a bare left hand's blow beside a weapon in the right mirrors the weapon's. */
+  const punching = (leftPunch ? p.offhand.weapon : p.weapon) === "baseline" && p.weapon === "baseline";
   /** Your forced Rest (or revive) has landed this turn: you're back on your feet. */
   const playerBackUp = reached(stepOf("backUp", "player"));
   // You hold your stance (see core/stance.ts) between turns, whatever you hover; each action takes you out of it and, as it ends, into the next.
@@ -1779,6 +1815,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // Your weapon flashes as its eternal effect takes hold (dark red, if it was paid in Death).
       eternalFlash: auraOf("player"),
       weapon: p.weapon,
+      offWeapon: p.offhand.weapon,
+      offItem: p.offhand.weaponItem,
       armor: p.armor,
       weaponItem: p.weaponItem,
       armorItem: p.armorItem,
@@ -1975,6 +2013,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           anchor={anchor}
           hints={wheelHints}
           onHighlight={d => { if (!lesson) { if (d !== highlight) menuSound(d); setHighlight(d); } }}
+          onSub={s => { if (s !== subSlot) menuSound(s); setSubSlot(s); }}
           onCommit={o => { menuSound("select"); commit(o); }}
         />
       )}

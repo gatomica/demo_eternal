@@ -8,8 +8,9 @@ import { parsePattern } from "../patterns";
 
 /**
  * The Waxed's pattern, as text. Its two clawing attacks are blows of whatever it holds in its free hand
- * (Hurl Wax still tears the wax off with the other): barehanded, they are its own baseline blow
- * (damage 2, cost 2, as its old Scratch); armed, the weapon's weight, numbers and effect.
+ * (Hurl Wax still tears the wax off with the other): barehanded, bare hands' blows (the weapon table's, `WEAPONS.baseline`); armed, its
+ * weapon's. Hurl Wax is like the Waxed Torch (its Poise and all), whatever it holds. Flame Immolation is no weapon's blow: the base, with 0.25
+ * Deadly.
  *
  * Stances lead by what just happened: a Brace that stopped an attack (`Brace`) takes it to
  * Crawling or Reared Back, one that stopped nothing (`!Brace`) to Wax on Hand or Cradle Flame.
@@ -17,15 +18,15 @@ import { parsePattern } from "../patterns";
  */
 export const waxedPatternText = (armed: boolean, flame = true) => [
   "    actions:",
-  `      Low Attack:      attack${armed ? "" : ", baseline, damage 2, cost 2"}   // a low blow, from the crawl`,
-  `      Overhead Attack: attack${armed ? "" : ", baseline, damage 2, cost 2"}, *Close   // only within reach`,
-  "      Hurl Wax:     attack, light, ranged",
+  `      Low Attack:      attack${armed ? "" : ", baseline"}   // a low blow, from the crawl`,
+  `      Overhead Attack: attack${armed ? "" : ", baseline"}, *Close   // only within reach`,
+  "      Hurl Wax:     attack, torch, ranged   // like the Waxed Torch",
   "      Brace:        block, baseline",
   "      Drag Forward: maneuver, advance, *Far   // crawls in only when far away",
   "      Slither Back: maneuver, retreat, *Close // backs off only when close",
   ...(flame ? [
     "      Clutch Flame: rest",
-    "      Flame Immolation: attack, heavy, ranged, *Lit, #fire, #shockwave   // a lit waxed bursts: it dies, and its fire hits everyone",
+    "      Flame Immolation: attack, deadly 0.25, ranged, *Lit, #fire, #shockwave   // a lit waxed bursts: it dies, and its fire hits everyone",
   ] : []),
   "    stances:",
   `      Recover${flame ? ", Clutch Flame" : ""}                > Idle        > Drag Forward, Slither Back`,

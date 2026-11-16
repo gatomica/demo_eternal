@@ -34,10 +34,28 @@ function FlatHand() {
   );
 }
 
-/** The flat icon of an empty place: a mitten for a hand (`mirrored`: the left one), a chestplate or a helmet, faded. */
-export function GearIcon({ slot, mirrored }: { slot: Slot; mirrored?: boolean }) {
+/** A flat boot in a 48 × 48 square, its toe to the right: a shaft with a cuff at the top, the foot, and a sole under it (the Kick's picture on the wheel). */
+function FlatBoot() {
   return (
-    <svg viewBox="0 0 48 48" className="gear-icon is-faded" aria-hidden="true">
+    <g className="flat">
+      <path d="M16 12 L29 12 L29 27 Q29 29.5 31.5 30 L37 31 Q41.5 32 41.5 36.5 L41.5 38 L14 38 L14 31 Q16 29 16 26 Z" />
+      <rect x={14.5} y={7} width={16} height={5} rx={1.5} />
+      <rect x={13} y={39} width={29.5} height={3.5} rx={1.5} />
+    </g>
+  );
+}
+
+/** The Kick's picture: a flat boot, in the empty icons' style but not faded. */
+export function BootIcon() {
+  return (
+    <svg viewBox="0 0 48 48" className="gear-icon" aria-hidden="true"><FlatBoot /></svg>
+  );
+}
+
+/** The flat icon of an empty place: a mitten for a hand (`mirrored`: the left one), a chestplate or a helmet, faded (unless `faded` is false). */
+export function GearIcon({ slot, mirrored, faded = true }: { slot: Slot; mirrored?: boolean; faded?: boolean }) {
+  return (
+    <svg viewBox="0 0 48 48" className={`gear-icon ${faded ? "is-faded" : ""}`} aria-hidden="true">
       {slot === "weapon" ? <g transform={mirrored ? "translate(48 0) scale(-1 1)" : undefined}><FlatHand /></g> : slot === "head" ? <FlatHead /> : <FlatArmor tier="normal" />}
     </svg>
   );

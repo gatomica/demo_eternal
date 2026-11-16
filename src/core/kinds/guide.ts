@@ -19,7 +19,7 @@ export const GUIDE_KIND: EnemyKind = {
   pattern: parsePattern("The Guide", `
     actions:
       Swing Orb:    attack, baseline
-      Halo Blast:   attack, light, ranged
+      Halo Blast:   attack, plain, ranged
       Cloak Tight:  block, baseline
       Shuffle In:   maneuver, advance, *Far
       Shuffle Back: maneuver, retreat, *Close

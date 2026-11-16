@@ -2,36 +2,41 @@
  * InventoryScreen.tsx — the inventory, opened on the map with E and closed with Q: the fight's
  * letterbox, your bars where they sit in a fight, your figure seen 3/4 from the front (wearing what
  * you wield, so a change shows at once), your gear in two columns, and the card of the piece under the
- * cursor in the middle.
+ * cursor in the middle. To drop an ordinary piece, hold No for a second (`DROP_HOLD_MS`; its picture shrinking away as you hold): inside a slot's options, on the piece under the
+ * cursor; in the pickup view, on the card hovered. A tap of No inside the options closes them.
  *
  * What you wear (head and armor) is in a column at the left edge, between it and your figure; your hands are on the right, the Right hand
  * above the Left. Each slot shows only what it holds (its faded icon if nothing). W/S move within a column, A/D switch between the two. E on a
  * slot opens its options beside it (to the right of the worn gear, to the left of the hands, toward the middle): every piece it could take but
  * the one it holds (its eternal piece, once one is set there at a safe spot; the ordinary gear you carry), and last, at the far end, Unequip.
- * The two hands share the ordinary weapons; an eternal weapon is locked to the hand it was set to. For now the Left hand holds only itself
- * (the empty hand). A/D run through the options (round and round); W/S leave them for the slot above or below (Esc closes them too), and Q drops
- * the ordinary piece under the cursor (never an eternal one; on the slots themselves Q closes the inventory). E on an
- * option wields it, on Unequip takes off what you wear, and on what you already wear does nothing; any of them closes the options.
+ * The two hands share the ordinary weapons (the one the other hand holds is listed with the "equipped" background, and picking it moves it
+ * over); an eternal weapon is locked to the hand it was set to in Dreams. A/D run through the options (round and round); W/S leave them for the
+ * slot above or below, and Q (or Esc) closes them; holding Q drops the ordinary piece under the cursor (never an eternal one; on the slots
+ * themselves Q closes the inventory). E on an option equips it, on Unequip takes off what you wear, and on what you already wear does nothing;
+ * any of them closes the options.
  *
- * Picking something up (`pickup`) opens it on that piece instead: its card in the middle, E OK and Q Drop below it (a memory: OK only). Past
- * what you may carry of that kind (`CARRY` in gear.ts), the ones you carry stand beside it (the weapons by the hand that holds them, the left
- * hand's on the left and the right hand's on the right; armor and head gear on its right), A/D hover each, and there is no OK: you drop one.
+ * Picking something up (`pickup`) opens it on that piece instead: its card in the middle, E OK and hold Q Drop below it (a memory: OK only).
+ * Past what you may carry of that kind (`CARRY` in gear.ts), the ones you carry stand beside it (the weapons by the hand that holds them, the
+ * left hand's on the left and the right hand's on the right; armor and head gear on its right), A/D hover each, and there is no OK: you drop one.
  * Either way (OK or a drop) the inventory closes, back to the map.
  */
 import { type CSSProperties, useState } from "react";
 import { attackCost } from "../core/rules";
-import type { Player } from "../core/types";
+import type { Player, WeaponItem } from "../core/types";
 import { PlayerBars } from "../render/HealthBar";
 import { PlayerFigure3D } from "../render/PlayerFigure3D";
-import { useKeys, menuSound } from "../ui/input";
+import { useKeyHold, useKeys, menuSound } from "../ui/input";
 import { Kbd } from "../ui/Kbd";
-import { carried, type Gear, gearName, type Inventory as Bag, loadoutOf, overLimit, pieceAt, type Slot, wornIn } from "./gear";
+import { carried, type Gear, gearName, type Inventory as Bag, loadoutOf, otherHand, overLimit, pieceAt, pieceWeight, type Place, slotOf, wornIn, wornWeightOf } from "./gear";
 import { GearIcon, GearSprite } from "./GearIcons";
-import { cardOfGear, ItemCard } from "./ItemCard";
+import { cardOfGear, ItemCard, ResistMeasure } from "./ItemCard";
 import type { Knot } from "./tutorial";
 
-/** A row of the inventory: a gear slot, or the Left hand (which, for now, holds only the empty hand). The Right hand is the weapon slot. */
-export type Row = Slot | "left";
+/** How long No is held to drop a piece (ms). */
+const DROP_HOLD_MS = 1000;
+
+/** A row of the inventory: a place gear is worn in (the Right hand is `weapon`). */
+export type Row = Place;
 
 /** An option of an opened slot: a piece you own (by id), or taking off what you wear. */
 type Option = string | "unequip";
@@ -61,24 +66,25 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, pick
   knot?: Knot;
   /** The piece you just picked up (its id in the bag): the screen opens on it, to keep it or drop it (or, past the limit, to drop one). */
   pickup?: string;
-  /** Wields this piece in its slot, or nothing (`null`). */
-  onUse: (slot: Slot, id: string | null) => void;
+  /** Wields this piece in this place, or nothing (`null`). */
+  onUse: (place: Place, id: string | null) => void;
   /** Lets go of this piece: it is left on the ground where you stand. */
   onDrop: (id: string) => void;
   /** The pickup is settled (kept with OK, or a piece dropped): the inventory closes. */
   onPickupDone: () => void;
   onClose: () => void;
 }) {
-  /** The piece a row holds, if any (the Left hand holds nothing yet). */
-  const wornOf = (r: Row): Gear | undefined => (r === "left" ? undefined : wornIn(inv, r));
+  /** The piece a row holds, if any. */
+  const wornOf = (r: Row): Gear | undefined => wornIn(inv, r);
+  /** The weapon the other hand holds, for a hand's row (listed with the "equipped" background: picking it moves it over). */
+  const heldByOther = (r: Row): Gear | undefined => (r === "weapon" || r === "left" ? wornIn(inv, otherHand(r)) : undefined);
   /**
    * A row's other options, in order out from it: its eternal piece and the ordinary gear you carry (but the one it holds, which is the slot
-   * itself), then Unequip (while it holds something). The Left hand has none: its only option is the empty hand it already is.
+   * itself), then Unequip (while it holds something). The hands share the ordinary weapons; each lists only its own eternal one.
    */
   const optionsOf = (r: Row): Option[] => {
-    if (r === "left") return [];
     const worn = wornOf(r);
-    const pieces = [pieceAt(inv, r, "eternal"), ...carried(inv, r)].filter((g): g is Gear => !!g && g.id !== worn?.id);
+    const pieces = [pieceAt(inv, r, "eternal"), ...carried(inv, slotOf(r))].filter((g): g is Gear => !!g && g.id !== worn?.id);
     return [...pieces.map(g => g.id), ...(worn ? ["unequip" as const] : [])];
   };
   // (`at`, while a slot's options are open: 0 is the slot itself, what it holds; 1 on, its options in order.)
@@ -104,30 +110,35 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, pick
     if (!over) return [found];
     const others = carried(inv, found.slot).filter(g => g.id !== found.id);
     if (found.slot !== "weapon") return [found, ...others];
-    // Weapons stand by the hand that holds them: the right hand's on the right (the left hand holds none yet); one held in neither fills the free side.
-    const right = others.find(g => g.id === inv.weapon), rest = others.filter(g => g !== right);
-    return [rest[0], found, right ?? rest[1]].filter((g): g is Gear => !!g);
+    // Weapons stand by the hand that holds them: the left hand's on the left, the right hand's on the right; one held in neither fills the free side.
+    const right = others.find(g => g.id === inv.weapon), left = others.find(g => g.id === inv.left);
+    const rest = others.filter(g => g !== right && g !== left);
+    return [left ?? rest.shift(), found, right ?? rest.shift()].filter((g): g is Gear => !!g);
   })();
   const [hover, setHover] = useState<string | null>(null);
   const hovered = pickupCards.find(g => g.id === hover) ?? found;
 
+  // Dropping a piece is holding No: the card hovered in the pickup (never a memory), or the ordinary piece under the cursor in a slot's options (an
+  // eternal one, Unequip or an empty hand: nothing to drop). Tapped inside the options, No only closes them; in the pickup it does nothing.
+  const holdable = found ? !!hovered && !hovered.eternal : !!droppable;
+  const dropping = useKeyHold("back", DROP_HOLD_MS, holdable, () => {
+    if (found) { if (hovered && !hovered.eternal) { onDrop(hovered.id); setHover(null); onPickupDone(); } }
+    else if (droppable) onDrop(droppable.id);
+  }, () => { if (!found) close(); });
+
   useKeys(key => {
     menuSound(key);
+    // (No, while a piece could be dropped, is the hold's: see `dropping`.)
+    if (key === "back" && holdable) return;
     if (found) {
-      // The pickup: OK keeps it (not past the limit), Drop lets go of the piece hovered; nothing else leaves it.
+      // The pickup: OK keeps it (not past the limit), holding Drop lets go of the piece hovered; nothing else leaves it.
       if (key === "left" || key === "right") {
         const i = pickupCards.findIndex(g => g.id === hovered?.id), j = Math.max(0, Math.min(pickupCards.length - 1, i + (key === "left" ? -1 : 1)));
         setHover(pickupCards[j].id);
       } else if (key === "select" && !over) { setHover(null); onPickupDone(); }
-      else if (key === "back" && hovered && !hovered.eternal) { onDrop(hovered.id); setHover(null); onPickupDone(); }
       return;
     }
-    // Inside a slot's options, Q drops the ordinary piece under the cursor (an eternal one, Unequip or an empty hand: nothing), and the options stay
-    // open; only W/S (or Esc) close them. On the slots themselves Q closes the inventory.
-    if (key === "back" && at !== null) {
-      if (droppable) onDrop(droppable.id);
-      return;
-    }
+    // Inside a slot's options, Q (or Esc) closes them; on the slots themselves Q closes the inventory.
     if (key === "back" || key === "pause") {
       if (at !== null) close();
       else onClose();
@@ -156,10 +167,8 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, pick
     // Opened on the slot itself: what it holds.
     if (at === null) { setCursor({ ...cursor, at: 0 }); return; }
     const option = at === 0 ? null : options[at - 1];
-    if (row !== "left") {
-      if (option === "unequip") onUse(row, null);
-      else if (option) onUse(row, option);
-    }
+    if (option === "unequip") onUse(row, null);
+    else if (option) onUse(row, option);
     close();
   });
 
@@ -170,7 +179,12 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, pick
   const shown = shownOption ? pieceOf(shownOption) : wornOf(row) ?? null;
   // A weapon under the cursor: what an attack with it would cost flickers on your health bar, as when Attack is lit in a fight.
   const card = found ? hovered : shown;
-  const preview = card?.slot === "weapon" ? attackCost(player, card.tier) : 0;
+  const preview = card?.slot === "weapon" ? attackCost(player, card.tier, card.item as WeaponItem | undefined) : 0;
+  // Your Resistance, all you wear together; on an armor or head gear option, what it would be with that one on (or with nothing, on Unequip).
+  const resist = wornWeightOf(inv);
+  const resistTo = (row === "armor" || row === "head") && at
+    ? resist - (wornOf(row) ? pieceWeight(wornOf(row)!) : 0) + (shownOption === "unequip" || !shown ? 0 : pieceWeight(shown))
+    : undefined;
   /** The icon a row shows when it is empty: the hands are mittens (the left one mirrored). */
   const emptyIcon = (r: Row) => <GearIcon slot={r === "left" ? "weapon" : r} mirrored={r === "left"} />;
 
@@ -182,12 +196,13 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, pick
     return (
       <div
         key={o}
-        className={`inv-place is-${kind} ${o === "slot" ? "is-slot" : "is-option"} ${o === "slot" && worn ? "is-equipped" : ""} ${focused ? "is-focused" : ""}`}
+        className={`inv-place is-${kind} ${o === "slot" ? "is-slot" : "is-option"} ${(o === "slot" && worn) || (o !== "slot" && piece && piece.id === heldByOther(r)?.id) ? "is-equipped" : ""} ${focused ? "is-focused" : ""}`}
         style={i ? ({ "--i": i } as CSSProperties) : undefined}
         role="menuitem"
-        aria-label={o === "unequip" ? `${ROW_LABEL[r]}: unequip` : `${ROW_LABEL[r]}: ${piece ? gearName(piece) : "empty"}${o === "slot" && worn ? " (worn)" : ""}`}
+        aria-label={o === "unequip" ? `${ROW_LABEL[r]}: unequip` : `${ROW_LABEL[r]}: ${piece ? gearName(piece) : "empty"}${o === "slot" && worn ? " (worn)" : o !== "slot" && piece && piece.id === heldByOther(r)?.id ? " (in the other hand)" : ""}`}
       >
-        <span className="inv-place-icon">
+        {/* (the piece being dropped, as No is held: shrinking away to nothing) */}
+        <span className="inv-place-icon" style={focused && piece && piece.id === droppable?.id && dropping > 0 ? { transform: `scale(${1 - dropping})` } : undefined}>
           {o === "unequip" ? <UnequipIcon /> : piece ? <GearSprite slot={piece.slot} tier={piece.tier} item={piece.item} tilted /> : emptyIcon(r)}
         </span>
       </div>
@@ -222,16 +237,20 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, pick
         <PlayerFigure3D look={look} title="You" swayId="inventory" />
       </div>
       <PlayerBars player={player} preview={preview} string={string} eternalString={eternalString} knot={!!knot} />
+      {/* Your Resistance, at the bottom left just above the strip (a change about to be made flickering on it). */}
+      <div className="inv-resist">
+        <ResistMeasure share={resist} to={resistTo} />
+      </div>
       {found ? (
         // What you just picked up, and past the limit the ones you carry of its kind beside it; the keys under the one hovered.
         <div className={`inv-pickup ${pickupCards.length > 1 ? "is-over" : ""}`} role="group" aria-label="Picked up">
           {pickupCards.map(g => (
             <div key={g.id} className={`inv-pickup-card ${g.id === hovered?.id ? "is-focused" : ""} ${g.id === found.id ? "is-found" : ""}`}>
-              <ItemCard slot={g.slot} info={cardOfGear(g)} />
+              <ItemCard slot={g.slot} info={cardOfGear(g)} vanish={g.id === hovered?.id ? dropping : 0} />
               <div className="inv-pickup-keys" aria-hidden={g.id !== hovered?.id}>
                 {!over && <><Kbd k="yes" /> OK</>}
                 {!over && !g.eternal && " · "}
-                {!g.eternal && <><Kbd k="no" /> Drop</>}
+                {!g.eternal && <>hold <Kbd k="no" /> Drop<HoldMeter progress={g.id === hovered?.id ? dropping : 0} /></>}
               </div>
             </div>
           ))}
@@ -240,7 +259,7 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, pick
         // The piece under the cursor, between you and your hands.
         <div className="class-middle">
           {/* (An empty hand is named for the hand, with the bare hands' cost and damage under it.) */}
-          <ItemCard key={`${row}-${shownOption ?? "none"}`} slot={row === "left" ? "weapon" : row} info={shown ? cardOfGear(shown) : undefined}
+          <ItemCard key={`${row}-${shownOption ?? "none"}`} slot={slotOf(row)} info={shown ? cardOfGear(shown) : undefined} vanish={shown && shown.id === droppable?.id ? dropping : 0}
             mirrored={row === "left"} measure={shownOption !== "unequip" && (row === "left" || row === "weapon") ? "baseline" : undefined}
             empty={shownOption === "unequip" ? "Unequip" : ROW_LABEL[row] === "Armor" || ROW_LABEL[row] === "Head" ? "Empty" : ROW_LABEL[row]} />
         </div>
@@ -254,10 +273,15 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, pick
           ? over ? <><Kbd k="left" /><Kbd k="right" /> choose · drop one to carry on</> : null
           : at === null
             ? <><Kbd k="up" /><Kbd k="down" /> slot · <Kbd k="left" /><Kbd k="right" /> side · <Kbd k="yes" /> open · <Kbd k="no" /> close</>
-            : <><Kbd k="left" /><Kbd k="right" /> choose · <Kbd k="yes" /> {!at ? "keep" : options[at - 1] === "unequip" ? "unequip" : "wield"}{droppable && <> · <Kbd k="no" /> drop</>}</>}
+            : <><Kbd k="left" /><Kbd k="right" /> choose · <Kbd k="yes" /> {!at ? "keep" : options[at - 1] === "unequip" ? "unequip" : "Equip"} · <Kbd k="no" /> back{droppable && <> · hold <Kbd k="no" /> drop<HoldMeter progress={dropping} /></>}</>}
       </div>
     </div>
   );
+}
+
+/** How far a hold to drop has gone: a small bar filling beside its key's words (nothing until it starts). */
+function HoldMeter({ progress }: { progress: number }) {
+  return <span className={`hold-meter ${progress > 0 ? "is-holding" : ""}`} aria-hidden="true"><i style={{ width: `${progress * 100}%` }} /></span>;
 }
 
 /** The Unequip place: a faded circle crossed through. */

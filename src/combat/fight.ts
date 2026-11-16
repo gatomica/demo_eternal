@@ -17,6 +17,10 @@ export interface Loadout {
   headItem?: HeadItem;
   /** The weapon is eternal: its effect is paid with Eternity (an ordinary weapon's effect is paid in Death). */
   eternal?: boolean;
+  /** What the armor and head gear weigh together (see `Fighter.worn`; left out, their classes'). */
+  worn?: number;
+  /** What the left hand holds (nothing, if left out): its weapon, which class's own it is, and whether it is eternal. */
+  offhand?: { weapon: WeaponTier; weaponItem?: WeaponItem; eternal?: boolean };
 }
 
 /** Your starting health (the tutorial's). */
@@ -27,6 +31,6 @@ const REVIVE_CHARGES = 2;
 
 /** A fight against these enemies, with its opening scene if it has one. `eternity`: what you bring of it (default: full); `stats`: your max health and max Eternity as you have raised them. */
 export function newFight(enemies: EnemySetup[], loadout: Loadout, charges = REVIVE_CHARGES, config: CombatConfig = {}, eternity?: number, stats?: { maxHP: number; maxEternity: number }): { state: CombatState; opening?: Opening } {
-  const state = createCombat({ maxHP: stats?.maxHP ?? PLAYER_MAX_HP, maxEternity: stats?.maxEternity, weapon: loadout.weapon, armor: loadout.armor, weaponItem: loadout.weaponItem, armorItem: loadout.armorItem, head: loadout.head, headItem: loadout.headItem, eternal: loadout.eternal, eternity, charges }, enemies, config);
+  const state = createCombat({ maxHP: stats?.maxHP ?? PLAYER_MAX_HP, maxEternity: stats?.maxEternity, weapon: loadout.weapon, armor: loadout.armor, weaponItem: loadout.weaponItem, armorItem: loadout.armorItem, head: loadout.head, headItem: loadout.headItem, eternal: loadout.eternal, offhand: loadout.offhand, worn: loadout.worn, eternity, charges }, enemies, config);
   return openingOf(state, enemies);
 }

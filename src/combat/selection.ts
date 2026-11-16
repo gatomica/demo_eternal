@@ -1,33 +1,32 @@
 /**
  * selection.ts — what the cursor is on during planning, and the action wheel's options.
  */
-import type { CombatState, PlayerAction } from "../core/types";
+import type { CombatState, PlayerAction, Side, WeaponItem, WeaponTier } from "../core/types";
 import type { Dir } from "../ui/input";
 
 /** What the cursor is on: you, or an enemy. */
 export type Selection = { kind: "player" } | { kind: "enemy"; id: string };
 
-/** The three parts an action with alternatives opens into, as they lie on the wheel (left, middle, right of the action's own direction). */
-export type SubSlot = "left" | "middle" | "right";
+/**
+ * The parts an action with alternatives opens into: the whole wheel's four quarters, by their directions (`left` the left hand's, `right` the right
+ * hand's, `down` the one made with neither hand; `up`, for later).
+ */
+export type SubSlot = Dir;
+
+/**
+ * What an option is made with, for the wheel to draw instead of its name: a hand's weapon (its inventory sprite; an empty hand, its mitten), or the
+ * Kick (a boot). Its cost and damage bar runs along the part's inner edge (`tier`'s; the Kick's, bare hands').
+ */
+export type WheelLook = { kind: "weapon"; tier: WeaponTier; item?: WeaponItem; side: Side } | { kind: "kick" };
 
 /** An option on the action wheel. */
 export interface WheelOption {
   label: string;
   action: PlayerAction;
-  /** Alternative actions: pressing the option's own direction again opens it into these three parts (an empty part is for later). Without them it cannot be opened. */
+  /** Drawn as this picture instead of its name (`label` stays its name for readers of the screen). */
+  look?: WheelLook;
+  /** Alternative actions: pressing the option's own direction again opens it into these parts (an empty one is for later). Without them it cannot be opened. */
   alternatives?: Record<SubSlot, WheelOption | null>;
-}
-
-/** The clockwise order of the wheel's directions. */
-const CLOCKWISE: Dir[] = ["up", "right", "down", "left"];
-
-/**
- * What a key does on an opened-up action (`open` is its direction): its own direction picks the middle part, the
- * directions beside it the left and right parts (as they lie on the wheel), and the opposite direction closes it up again.
- */
-export function subKey(open: Dir, key: Dir): SubSlot | "collapse" {
-  const d = (CLOCKWISE.indexOf(key) - CLOCKWISE.indexOf(open) + 4) % 4;
-  return d === 0 ? "middle" : d === 1 ? "right" : d === 3 ? "left" : "collapse";
 }
 
 export type Wheel = Record<Dir, WheelOption | null>;

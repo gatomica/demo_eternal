@@ -402,6 +402,8 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
   const [armorItem, setArmorItem] = useState<ArmorItem | "none">(wearing.armor ?? "none");
   const [headItem, setHeadItem] = useState<HeadItem | "none">(wearing.head ?? "none");
   const [weapon, setWeapon] = useState<WeaponTier>("normal");
+  // (the left hand's weapon: none to start with)
+  const [offWeapon, setOffWeapon] = useState<WeaponTier>("baseline");
   // (Plain: no armor, as you look in the game without any; the Body row picks a class's armor instead.)
   const armor: ArmorTier = "none";
   /** The stance you stand in (and play your actions from), or "dead", or "model" for the T-pose. */
@@ -417,8 +419,8 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
   const scenario = scenarios.find(sc => sc.id === scenarioId);
   const initial = useMemo(() => playerViewerFight("normal", "light"), []);
   const override = useCallback(
-    (s: CombatState) => applyPlayerShow(s, weapon, armor, stance, scenario, { armor: armorItem === "none" ? undefined : armorItem, head: headItem === "none" ? undefined : headItem }),
-    [weapon, armor, stance, scenario, armorItem, headItem],
+    (s: CombatState) => applyPlayerShow(s, weapon, armor, stance, scenario, { armor: armorItem === "none" ? undefined : armorItem, head: headItem === "none" ? undefined : headItem }, offWeapon),
+    [weapon, offWeapon, armor, stance, scenario, armorItem, headItem],
   );
   const model = held === "model";
   const play = (id: string) => {
@@ -448,7 +450,8 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
           <button className="chip viewer-toggle" aria-pressed={debug} onClick={() => setDebug(!debug)}>{debug ? DEBUG_TOGGLE.on : DEBUG_TOGGLE.off}</button>
         </div>
       </div>
-      {chips("Weapon", Object.keys(WEAPONS) as WeaponTier[], weapon, o => (o === "baseline" ? "None" : WEAPONS[o].name), setWeapon)}
+      {chips("Right hand", Object.keys(WEAPONS) as WeaponTier[], weapon, o => (o === "baseline" ? "None" : WEAPONS[o].name), setWeapon)}
+      {chips("Left hand", Object.keys(WEAPONS) as WeaponTier[], offWeapon, o => (o === "baseline" ? "None" : WEAPONS[o].name), setOffWeapon)}
       {chips("Body", ["none" as const, ...WEARABLES.filter(id => ITEMS[id].slot === "armor") as ArmorItem[]], armorItem, o => (o === "none" ? "Plain" : ITEMS[o].name), setArmorItem)}
       {chips("Head", ["none" as const, ...WEARABLES.filter(id => ITEMS[id].slot === "head") as HeadItem[]], headItem, o => (o === "none" ? "Bare" : ITEMS[o].name), setHeadItem)}
       {chips("Stance", [...PLAYER_STANCES.map(st => st.id), "dead" as const, "model" as const], held, o => (o === "model" ? MODEL : o === "dead" ? "Dead" : PLAYER_STANCES.find(st => st.id === o)!.label), o => { setHeld(o); setScenarioId(undefined); })}

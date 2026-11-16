@@ -14,9 +14,10 @@
  *    - Empower Self: there once the guide has brought it up (the first time you came with String enough to raise a stat: `STRING_TALK`,
  *      which opens right on it), affordable or not. String for one more point of max health or max Eternity; each costs the sum of 1 up to its present value.
  *    - Dreams: there once the guide has brought it up (the first time you came with a memory whose dreams were unread: `DREAMS_TALK`,
- *      which opens right on it). A row per slot of all your eternal gear; Up/Down the slot, Left/Right the piece. Yes on
- *      a memory whose dreams are unread: the guide reads them, and it is known for what it is ("Eternal ...");
- *      Yes on a read one: sets it in the slot's eternal place. The piece under the cursor shows in a box beside the slots.
+ *      which opens right on it). A row per place of all your eternal gear (Right hand, Left hand, Head, Armor: both hands' rows list
+ *      every eternal weapon); Up/Down the row, Left/Right the piece. Yes on a memory whose dreams are unread: the guide reads them, and
+ *      it is known for what it is ("Eternal ..."); Yes on a read one: sets it in that place's eternal place (a weapon set in one hand
+ *      leaves the other). The piece under the cursor shows in a box beside the slots.
  *  - A question: its answers stand between you like the menu; Up/Down choose, Yes answers (it must be answered), and the answer's own
  *    beats are played next. The question stays written above the strip meanwhile.
  *  - A gift: its pop-up (the map's) comes up, and the talk waits, keys and all, until it is closed (`blocked`).
@@ -35,12 +36,15 @@ import { typeDelay } from "../combat/lesson";
 import { empowerCost, payment, type Stats } from "./empower";
 import { useKeys, wrapIndex, menuSound } from "../ui/input";
 import { Kbd, keyText } from "../ui/Kbd";
-import { type Gear, gearName, type Inventory as Bag, loadoutOf, memoriesFor, pieceAt, type Slot, SLOTS } from "./gear";
+import { type Gear, gearName, type Inventory as Bag, loadoutOf, memoriesFor, pieceAt, type Place, slotOf } from "./gear";
 import { GearIcon, GearSprite } from "./GearIcons";
 import { cardOfGear, ItemCard } from "./ItemCard";
 import { type Beat, CHAT, type Conversation, OFFER } from "./dialogues";
 
 type Page = "main" | "unwind" | "empower";
+
+/** Dreams' rows, top to bottom: each hand's eternal place, then the head's and the armor's. */
+const DREAM_ROWS: Place[] = ["weapon", "left", "head", "armor"];
 
 /** What a piece is, in the box beside the slots: the item card (its lore and effect once read; armor has no effect yet). */
 function Lore({ piece }: { piece: Gear }) {
@@ -94,7 +98,7 @@ export function DialogueScene({ talk, instant = false, blocked = false, offer = 
   /** The guide reads this memory's dreams. */
   onRead: (id: string) => void;
   /** Sets this read piece in its slot's eternal place. */
-  onSet: (slot: Slot, id: string) => void;
+  onSet: (place: Place, id: string) => void;
   onClose: () => void;
 }) {
   // Where the talk is: its beats (an answer's own beats, or Talk's, are put in after the beat they come from), the beat, and the line
@@ -153,14 +157,14 @@ export function DialogueScene({ talk, instant = false, blocked = false, offer = 
   };
 
   /** The cursor starts on the first slot that has memories, on the piece set there (or the first). */
-  const startPicks = () => Object.fromEntries(SLOTS.map(s => [s, Math.max(0, memoriesFor(inv, s).findIndex(g => g.id === pieceAt(inv, s, "eternal")?.id))])) as Record<Slot, number>;
-  const firstRow = () => Math.max(0, SLOTS.findIndex(s => memoriesFor(inv, s).length > 0));
+  const startPicks = () => Object.fromEntries(DREAM_ROWS.map(s => [s, Math.max(0, memoriesFor(inv, slotOf(s)).findIndex(g => g.id === pieceAt(inv, s, "eternal")?.id))])) as Record<Place, number>;
+  const firstRow = () => Math.max(0, DREAM_ROWS.findIndex(s => memoriesFor(inv, slotOf(s)).length > 0));
   /** Empower Self's cursor starts on the first stat you can afford. */
   const empowerRow = () => (string + eternalString >= empowerCost(stats.maxHP) ? 0 : 1);
   const [page, setPage] = useState<Page>("main");
   const [at, setAt] = useState(0);
   // Which piece of each slot the cursor is on.
-  const [pick, setPick] = useState<Record<Slot, number>>(startPicks);
+  const [pick, setPick] = useState<Record<Place, number>>(startPicks);
   // What the guide says while you are in one of its pages: spoken as the page opens (and when it reads a memory), and there until you
   // leave the page. Only to be heard: it waits for no key.
   const [pageSays, setPageSays] = useState("");
@@ -181,7 +185,7 @@ export function DialogueScene({ talk, instant = false, blocked = false, offer = 
   ];
 
   /** Yes on a piece: read its dreams, or (read already) set it. */
-  const use = (slot: Slot, piece: Gear) => {
+  const use = (slot: Place, piece: Gear) => {
     if (!piece.read) { onRead(piece.id); setPageSays("It dreams still. Listen."); }
     else { onSet(slot, piece.id); }
   };
@@ -219,19 +223,19 @@ export function DialogueScene({ talk, instant = false, blocked = false, offer = 
       else if (key === "select") onEmpower(at === 0 ? "health" : "eternity");
       return;
     }
-    const slot = SLOTS[Math.min(at, SLOTS.length - 1)];
-    const pieces = memoriesFor(inv, slot);
-    if (key === "up" || key === "down") setAt(i => wrapIndex(i, key === "up" ? -1 : 1, SLOTS.length));
+    const slot = DREAM_ROWS[Math.min(at, DREAM_ROWS.length - 1)];
+    const pieces = memoriesFor(inv, slotOf(slot));
+    if (key === "up" || key === "down") setAt(i => wrapIndex(i, key === "up" ? -1 : 1, DREAM_ROWS.length));
     else if ((key === "left" || key === "right") && pieces.length) setPick(p => ({ ...p, [slot]: wrapIndex(Math.min(p[slot], pieces.length - 1), key === "left" ? -1 : 1, pieces.length) }));
     else if (key === "select" && pieces.length) use(slot, pieces[Math.min(pick[slot], pieces.length - 1)]);
   });
 
-  const row = Math.min(at, SLOTS.length - 1);
+  const row = Math.min(at, DREAM_ROWS.length - 1);
   // (Longer than the screen, its options scroll with the focus.)
   const optionsRef = useRef<HTMLDivElement>(null);
   useScrollFocus(optionsRef, `${page}:${at}:${inMenu}`);
-  const rowPieces = memoriesFor(inv, SLOTS[row]);
-  const hovered = page === "unwind" ? rowPieces[Math.min(pick[SLOTS[row]], rowPieces.length - 1)] : undefined;
+  const rowPieces = memoriesFor(inv, slotOf(DREAM_ROWS[row]));
+  const hovered = page === "unwind" ? rowPieces[Math.min(pick[DREAM_ROWS[row]], rowPieces.length - 1)] : undefined;
   const middle = page === "unwind" && hovered ? <Lore piece={hovered} /> : null;
   // The guide's words in a page, written out as it speaks them (a new line starts again from its first letter).
   const said = inMenu && page !== "main" ? pageSays : "";
@@ -297,12 +301,13 @@ export function DialogueScene({ talk, instant = false, blocked = false, offer = 
             {page === "unwind" && (
               <div className="guide-page">
                 <div className="guide-page-title">Dreams</div>
-                {SLOTS.map((slot, r) => {
-                  const pieces = memoriesFor(inv, slot);
+                {DREAM_ROWS.map((slot, r) => {
+                  const pieces = memoriesFor(inv, slotOf(slot));
                   const set = pieceAt(inv, slot, "eternal");
                   return (
                     <div key={slot} className={`guide-set-row ${r === row ? "is-focused" : ""}`} onMouseEnter={() => setAt(r)}>
-                      {pieces.length === 0 && <span className="inv-place is-eternal"><span className="inv-place-icon"><GearIcon slot={slot} /></span></span>}
+                      {/* (Empty, its faded icon; the hands always lead with their mitten, since both list the same weapons.) */}
+                      {(pieces.length === 0 || slotOf(slot) === "weapon") && <span className="inv-place is-eternal" aria-label={slot === "left" ? "Left hand" : slot === "weapon" ? "Right hand" : undefined}><span className="inv-place-icon"><GearIcon slot={slotOf(slot)} mirrored={slot === "left"} /></span></span>}
                       {pieces.map((g, i) => (
                         <button
                           key={g.id}
@@ -311,7 +316,7 @@ export function DialogueScene({ talk, instant = false, blocked = false, offer = 
                           onClick={() => use(slot, g)}
                           aria-label={`${gearName(g)}${g.id === set?.id ? " (set)" : ""}`}
                         >
-                          <span className="inv-place-icon"><GearSprite slot={slot} tier={g.tier} item={g.item} tilted /></span>
+                          <span className="inv-place-icon"><GearSprite slot={slotOf(slot)} tier={g.tier} item={g.item} tilted /></span>
                         </button>
                       ))}
                     </div>

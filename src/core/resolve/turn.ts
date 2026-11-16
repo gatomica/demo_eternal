@@ -5,7 +5,7 @@
  */
 import { bodyOf } from "../body";
 import { kickFor, mirrorStance, swingFor } from "../stance";
-import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Line, Player, PlayerAction, Step, Swing, WeaponTier } from "../types";
+import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Hand, Line, Player, PlayerAction, Step, Swing, WeaponTier } from "../types";
 
 /** The action the player is locked into this turn, if any. */
 export function forcedAction(state: CombatState): "rest" | "revive" | null {
@@ -81,8 +81,13 @@ export interface Turn {
   /** A staggered fighter's bar stays solid white, even as its health drops. */
   pinStaggered: () => void;
   isReviving: (f: Fighter) => boolean;
-  /** The weight of a fighter's Attack or Block this turn: the action's own, or its weapon's. */
+  /** The weight of a fighter's Attack or Block this turn: the action's own, or its weapon's (yours: the weapon in the hand you use). */
   weightOf: (f: Fighter) => WeaponTier;
+  /**
+   * The hand a fighter acts with this turn, as the rules see it (`Hand`): yours is the left one for a left-hand Attack or Block, the right
+   * one otherwise; an enemy's is its own weapon.
+   */
+  handOf: (f: Fighter) => Hand;
   isRanged: (f: Fighter) => boolean;
   isBlocking: (f: Fighter, attacker: Fighter) => boolean;
   isDodging: (f: Fighter, attacker: Fighter) => boolean;
@@ -131,7 +136,10 @@ export function beginTurn(prev: CombatState, action: PlayerAction, rng: () => nu
     },
     pinStaggered: () => { for (const f of fighters) if (f.staggered) f.fatigue = Math.max(0, f.hp); },
     isReviving: f => (f === p ? reviving : foeReviving.has(f.id)),
-    weightOf: f => (f === p ? (act?.type === "attack" && act.weight ? act.weight : p.weapon) : (f as Enemy).intent.weight ?? f.weapon),
+    weightOf: f => (f === p ? (act?.type === "attack" && act.weight ? act.weight : t.handOf(p).weapon) : (f as Enemy).intent.weight ?? f.weapon),
+    handOf: f => (f === p && act?.hand === "left" ? p.offhand
+      : f === p ? { weapon: p.weapon, weaponItem: p.weaponItem, eternal: p.eternal, mortal: p.mortalWeapon, lastTarget: p.lastTarget }
+      : { weapon: f.weapon, eternal: f.eternal, lastTarget: f.lastTarget }),
     isRanged: f => f !== p && !!(f as Enemy).intent.ranged,
     isBlocking: (f, attacker) => {
       if (t.out.has(f.id)) return false;

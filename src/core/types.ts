@@ -2,6 +2,7 @@
  * types.ts — combat's data: fighters, intents, events, steps and the fight's state.
  */
 import type { KindId } from "./bestiary";
+import type { WeaponLike, WeaponStats } from "./rules";
 
 export type Tier = "light" | "normal" | "heavy";
 
@@ -25,7 +26,10 @@ export interface PlayerAction {
   target?: string;
   /** An Attack with its own weight (for future weapon skills). Otherwise the weapon's. */
   weight?: WeaponTier;
-  /** An Attack thrown with the empty left hand (the Punch): the blow is the left hand's, whatever the weapon in the right. */
+  /**
+   * The hand an Attack or Block is made with (default the right): the left uses what the left hand holds (`Player.offhand`; bare hands if
+   * nothing), its weight, its effect and whether it is eternal, as the right uses the right hand's.
+   */
   hand?: Side;
   /**
    * An Attack that is a Kick (bare-handed numbers, no weapon's effect, both hands still holding what they hold). `true`: the stance decides the
@@ -78,9 +82,9 @@ export interface Intent {
   landSlide?: { far: number; ms: number; turn: number; settle: string };
   /** The weight of this Attack or Block, when the action has its own. Otherwise the fighter's weapon. */
   weight?: WeaponTier;
-  /** Its own damage and Fatigue cost in sixteenths of its max health, when the action sets them (otherwise its weight's). */
-  damage?: number;
-  cost?: number;
+  /** The weapon its action is like, and its own weapon modifiers (see patterns.ts `ActionDef.like`, `mods`). */
+  like?: WeaponLike;
+  mods?: Partial<WeaponStats>;
   /** A ranged attack: the attacker stays put, a Block sends nothing back, and it can always be dodged. */
   ranged?: boolean;
   /**
@@ -118,6 +122,11 @@ export interface Fighter {
   weapon: WeaponTier;
   armor: ArmorTier;
   /**
+   * What it wears weighs, all its pieces together (a share of a blow, 0 to 1: its Resistance, and what a dodge costs on top of its base):
+   * your pieces' own weights. Left out, its armor's and head gear's classes' (`ARMOR` in rules.ts).
+   */
+  worn?: number;
+  /**
    * Covered in wax by a direct hit from a waxing attack (the Warden's flail). No effect by itself:
    * another direct waxing hit adds 1/8 of its damage as Fatigue, and some enemies react to it.
    * Clears when Fatigue drops to 0.
@@ -149,9 +158,25 @@ export type HeadItem = "helm" | "hood" | "mask" | "wardenhood";
 export type Stance = "idle" | "low" | "lead-left" | "lead-right";
 export type Swing = "overhead" | "left" | "right" | "kick-right" | "kick-left";
 
+/**
+ * What a hand holds, as the rules see it: its weapon's weight ("baseline": empty), which class's own weapon it is, whether its blows carry the
+ * weapon's effect (`eternal`, every weapon's) and whether that effect is paid all in Death (`mortal`: an ordinary weapon), and whom it attacked
+ * last turn (the Jagged Chisel). Your right hand is your own fields (`weapon`, `weaponItem`, `eternal`, `mortalWeapon`, `lastTarget`); your left
+ * hand is `Player.offhand`.
+ */
+export interface Hand {
+  weapon: WeaponTier;
+  weaponItem?: WeaponItem;
+  eternal?: boolean;
+  mortal?: boolean;
+  lastTarget?: string;
+}
+
 export interface Player extends Fighter {
   /** Your stance: it lasts from turn to turn, and decides how your next attack swings. */
   stance: Stance;
+  /** What your left hand holds (an Attack or Block with `hand: "left"` is made with it). */
+  offhand: Hand;
   /** The class's own weapon and armor you carry, if any (their effect, their look). */
   weaponItem?: WeaponItem;
   armorItem?: ArmorItem;
@@ -171,7 +196,7 @@ export interface Player extends Fighter {
    */
   eternity: number;
   maxEternity: number;
-  /** Your weapon is not eternal: its effect still works, but it can't draw on Eternity, and every bit of it is paid in Death. */
+  /** Your right hand's weapon is not eternal: its effect still works, but it can't draw on Eternity, and every bit of it is paid in Death. */
   mortalWeapon?: boolean;
 }
 
@@ -232,8 +257,8 @@ export type CombatEvent =
       /** Health lost by the target. */
       damage: number;
       /**
-       * Fatigue added: to the target on a hit or a dodge, to the attacker on a Block (none for a
-       * ranged attack).
+       * Fatigue added: to the target on a hit or a dodge; on a Block, what is sent back to the attacker (none for a ranged attack;
+       * the blocker's own, from its Resistance, is not in it).
        */
       fatigue: number;
       /** A ranged attack: the attacker didn't close in. */
@@ -352,6 +377,8 @@ export interface PlayerSetup {
   charges: number;
   /** Your weapon is eternal (its effect is paid with Eternity; otherwise all in Death). */
   eternal?: boolean;
+  /** What your left hand holds (default: nothing): its weapon, which class's own it is, and whether it is eternal. */
+  offhand?: { weapon: WeaponTier; weaponItem?: WeaponItem; eternal?: boolean };
   /** Your Eternity as the fight starts (default: full). */
   eternity?: number;
   /** The most Eternity you can hold (default: as much as your max health). */
@@ -362,6 +389,8 @@ export interface PlayerSetup {
   /** Your head gear (see `Player.head`). */
   head?: ArmorTier;
   headItem?: HeadItem;
+  /** What your armor and head gear weigh together (see `Fighter.worn`; left out: their classes'). */
+  worn?: number;
 }
 
 export interface EnemySetup {

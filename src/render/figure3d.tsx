@@ -236,9 +236,11 @@ export function weaponParts(c: Canvas3D, o: {
   wielder?: P3;
   /** Where the wielder stands on the floor, the yaw it faces, and the camera and screen it is seen on (as its rig was placed). */
   at: Vec; yaw: number; cam: Cam; w: number; h: number; scale: number; box: Box; eternalFlash?: string;
+  /** What its parts are keyed by (default "weapon"): a second weapon on the same figure (the player's left hand's) needs keys of its own. */
+  key?: string;
 }): Part[] {
   const { see, X, Y, ux, uy, origin, scaleAt } = c;
-  const { model, held, slide = 0, at, yaw, cam, w, h, scale, box, eternalFlash } = o;
+  const { model, held, slide = 0, at, yaw, cam, w, h, scale, box, eternalFlash, key: k = "weapon" } = o;
   const out: Part[] = [];
   if (model) {
     // The model is drawn in its own space (x along the weapon from the grip, y across its broad face, z its thickness) turned to the hand.
@@ -260,19 +262,20 @@ export function weaponParts(c: Canvas3D, o: {
     const project = (v: V3): readonly [number, number] => { const l = lens(v); return [+((l.sx - box.x) / ux).toFixed(2), +((l.sy - box.y) / uy).toFixed(2)]; };
     // (a figure unit is a box unit at the figure's feet, and smaller the farther it is)
     const drawn = drawGear(model.prims, { view, project, scale: v => (origin.depth / Math.max(v[2] * U, 0.05)) * scale });
-    const shapes = drawn.map((d, i) => <GearShape key={i} d={d} />);
+    // (Keyed by the weapon's own prefix: the parts are drawn side by side with everything else the figure has, a second weapon's shapes too.)
+    const shapes = drawn.map((d, i) => <GearShape key={`${k}-${i}`} d={d} />);
     const nearest = (drawn.length ? Math.min(...drawn.map(d => d.depth)) * U : origin.depth);
-    drawn.forEach((d, i) => out.push({ key: `weapon-${i}`, depth: d.depth * U - 0.005, node: shapes[i] }));
+    drawn.forEach((d, i) => out.push({ key: `${k}-${i}`, depth: d.depth * U - 0.005, node: shapes[i] }));
     if (eternalFlash) {
-      out.push({ key: "weapon-flash", depth: nearest - 0.02, node: <g key={eternalFlash} className={`fig-eternal-flash ${eternalFlash.startsWith("death|") ? "is-death" : ""}`} aria-hidden="true">{shapes}</g> });
+      out.push({ key: `${k}-flash`, depth: nearest - 0.02, node: <g key={eternalFlash} className={`fig-eternal-flash ${eternalFlash.startsWith("death|") ? "is-death" : ""}`} aria-hidden="true">{shapes}</g> });
     }
   } else {
     const grip = see(held.hand), tip = see(held.tip);
     const dx = X(tip) - X(grip), dy = Y(tip) - Y(grip);
     out.push({
-      key: "weapon", depth: grip.depth - 0.02,
+      key: k, depth: grip.depth - 0.02,
       node: (
-        <g key="weapon" transform={`translate(${X(grip)} ${Y(grip)}) rotate(${(Math.atan2(dy, dx) * 180) / Math.PI}) scale(${Math.hypot(dx, dy) / o.reach} ${scaleAt(grip)})`}>
+        <g key={k} transform={`translate(${X(grip)} ${Y(grip)}) rotate(${(Math.atan2(dy, dx) * 180) / Math.PI}) scale(${Math.hypot(dx, dy) / o.reach} ${scaleAt(grip)})`}>
           <HeldWeapon tier={o.weapon} flash={eternalFlash} />
         </g>
       ),

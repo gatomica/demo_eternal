@@ -3,7 +3,7 @@
  * are the player's bindings (`ui/settings.ts`: WASD, E for Yes and Q for No unless changed);
  * the arrow keys, Enter, Space and Escape always work too, unless one of them is bound to something else.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { play } from "../audio/sfx";
 import { getSettings } from "./settings";
 
@@ -56,6 +56,45 @@ export function useKeys(handler: (key: Key) => void) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+}
+
+/**
+ * A key held down (the inventory's No, to drop a piece): while `enabled`, pressing `key` starts a hold, and `progress` (returned, 0 to 1) fills
+ * over `ms`; once full, `onHeld` runs (once). Let go before that and `onTap` runs instead. While it is enabled, its key's press is the hold's:
+ * the `useKeys` handler beside it should leave that key alone.
+ */
+export function useKeyHold(key: Key, ms: number, enabled: boolean, onHeld: () => void, onTap: () => void): number {
+  const [progress, setProgress] = useState(0);
+  const calls = useRef({ onHeld, onTap });
+  calls.current = { onHeld, onTap };
+  useEffect(() => {
+    if (!enabled) { setProgress(0); return; }
+    let start: number | null = null, done = false, raf = 0;
+    const tick = () => {
+      if (start === null) return;
+      const p = Math.min(1, (performance.now() - start) / ms);
+      setProgress(p);
+      if (p >= 1) { done = true; start = null; setProgress(0); calls.current.onHeld(); return; }
+      raf = requestAnimationFrame(tick);
+    };
+    const down = (e: KeyboardEvent) => {
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || readKey(e) !== key) return;
+      e.preventDefault();
+      start = performance.now(); done = false;
+      raf = requestAnimationFrame(tick);
+    };
+    const up = (e: KeyboardEvent) => {
+      if (readKey(e) !== key) return;
+      if (start !== null && !done) calls.current.onTap();
+      start = null; done = false;
+      cancelAnimationFrame(raf);
+      setProgress(0);
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); cancelAnimationFrame(raf); };
+  }, [key, ms, enabled]);
+  return progress;
 }
 
 /** The menus' sounds for a key: a faint tic for changing option (WASD), a tac for choosing (E). Call it from a menu's key handler. */

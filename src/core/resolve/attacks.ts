@@ -8,7 +8,7 @@
  * they hadn't done yet: their attack, a Block for later attacks, a Rest, a move.
  */
 import { kindOf } from "../bestiary";
-import { attackCost, attackDamage, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, ITEM_SHARE, resistance, sixteenths, spendEternity } from "../rules";
+import { addDeath, BLOCK_SENDS_BACK, blowShares, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, ITEM_SHARE, resistance, spendEternity, WEAPON_EFFECTS, WEAPON_LIKE, weaponOf } from "../rules";
 import type { CombatEvent, Enemy, Fighter, Player, Rng, WeaponTier } from "../types";
 import { bodyOf } from "../body";
 import { waxOn } from "./statuses";
@@ -70,15 +70,33 @@ export function resolveAttacks(t: Turn, rng: Rng) {
   });
 }
 
-/** What an attack costs its attacker in Fatigue, and how much it deals: its action's own numbers when it sets them, otherwise its weight's. */
-const costOf = (f: Fighter, weight: WeaponTier) => {
-  const own = (f as Partial<Enemy>).intent?.cost;
-  return own !== undefined ? sixteenths(own, f.maxHP) : attackCost(f, weight);
-};
-const damageOf = (f: Fighter, weight: WeaponTier) => {
-  const own = (f as Partial<Enemy>).intent?.damage;
-  return own !== undefined ? sixteenths(own, f.maxHP) : attackDamage(f, weight);
-};
+/**
+ * The weapon a fighter acts with this turn, its stats: yours, the one in the hand it is made with (a Kick, or an action with a weight of its own:
+ * that weight's); an enemy's, the weapon its action is like (its pattern's `like`, or its kind's `blowLike`), else its action's weight or its
+ * weapon's.
+ */
+function weaponNow(t: Turn, f: Fighter) {
+  if (f !== t.p) {
+    // (Modifiers of its own go over the weapon it is like, or over none.)
+    const e = f as Enemy, like = e.intent.like ?? kindOf(e).blowLike?.(e), mods = e.intent.mods;
+    if (like || mods) return { ...WEAPON_LIKE[like ?? "plain"], ...mods };
+  }
+  const weight = t.weightOf(f), hand = t.handOf(f);
+  return weaponOf(weight, weight === hand.weapon ? hand.weaponItem : undefined);
+}
+
+/** The Defense of the weapon a fighter blocks with this turn (an enemy's Block may have its own: `defense` in its pattern). */
+const blockDefense = (t: Turn, f: Fighter): number => weaponNow(t, f).defense;
+
+/**
+ * What an attack costs its attacker in Fatigue, and what it deals (damage; and the Fatigue and Death it puts on its target unless dodged): its
+ * weapon's (`blowShares`), shares of its attacker's max health. Every attack is built so, from the same base.
+ */
+function blowOf(t: Turn, f: Fighter): { cost: number; damage: number; poise: number; deadly: number } {
+  const w = blowShares(weaponNow(t, f));
+  return { cost: w.cost * f.maxHP, damage: w.damage * f.maxHP, poise: w.poise * f.maxHP, deadly: w.deadly * f.maxHP };
+}
+const damageOf = (t: Turn, f: Fighter) => blowOf(t, f).damage;
 
 /** Took health damage this turn, which breaks a Rest (a multi-target enemy's whole body shares the damage). */
 function hurt(t: Turn, f: Fighter) {
@@ -96,6 +114,13 @@ function loseHealth(t: Turn, target: Fighter, amount: number) {
   else if (target === t.p) target.hp = Math.max(1, target.hp - amount);
 }
 
+/** Death put on a fighter by a blow (a Deadly weapon's): none in the model viewer, nor on enemies in the guide's training. A body's parts share it. */
+function deathOn(t: Turn, target: Fighter, amount: number) {
+  const { dummy, sparring } = t.s.config;
+  if (dummy || amount <= 0 || (sparring && target !== t.p)) return;
+  for (const mate of bodyOf(t.s.enemies, target)) addDeath(mate, amount);
+}
+
 /**
  * A shockwave (`#shockwave`: the Warden's flaming slam, his flame blast) sweeping through the fight
  * after the blow: the attacker's allies take it as a direct hit, with no Block or dodge to answer it.
@@ -104,10 +129,10 @@ function shockwave(t: Turn, attacker: Fighter) {
   if (attacker === t.p || t.cancelled.has(attacker.id)) return;
   const self = attacker as Enemy;
   if (!self.intent.tags?.includes("shockwave") || kindOf(self).shockwave?.(self) === false) return;
-  const dmg = damageOf(self, t.weightOf(self));
+  const dmg = damageOf(t, self);
   for (const ally of t.alive) {
     if (ally === self || !ally.alive || t.out.has(ally.id) || t.isReviving(ally)) continue;
-    const resisted = dmg * resistance(ally, null);
+    const resisted = dmg * resistance(ally);
     t.tire(ally, resisted);
     const through = dmg - resisted;
     if (through > 0) hurt(t, ally);
@@ -133,17 +158,19 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   const swing = attacker === p ? t.swing : undefined;
   const weight = t.weightOf(attacker);
   const ranged = t.isRanged(attacker);
-  const dmg = damageOf(attacker, weight);
-  let cost = costOf(attacker, weight);
+  const blow = blowOf(t, attacker);
+  const dmg = blow.damage;
+  let cost = blow.cost;
   // The Bronze Shortsword: attacking again right after an attack costs you less Fatigue, for Eternity.
-  if (attacker === p && p.weaponItem === "shortsword" && p.eternal && !t.s.config.dummy && p.lastAction === "attack" && isWeaponBlow(attacker, weight)) {
+  const hand = t.handOf(attacker);
+  if (WEAPON_EFFECTS && attacker === p && hand.weaponItem === "shortsword" && hand.eternal && !t.s.config.dummy && p.lastAction === "attack" && isWeaponBlow(t, attacker, weight)) {
     const saved = Math.min(cost, dmg * ITEM_SHARE);
     // Only the Fatigue it really spares counts: what would have gone past a full bar anyway (into the stagger) is no saving, and costs no Eternity.
     const room = fatigueRoom(attacker);
     const spared = Math.min(cost, room) - Math.min(cost - saved, room);
     if (spared > 1e-9) {
       cost -= saved;
-      const paid = spendEternity(p, spared * ETERNITY_PRICE.shortsword);
+      const paid = spendEternity(p, spared * ETERNITY_PRICE.shortsword, !!hand.mortal);
       t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: "shortsword", damage: 0, fatigue: spared, ...paid });
     }
   }
@@ -154,7 +181,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   else if (target !== p) { if (!ranged && (target as Enemy).line !== (attacker as Enemy).line) t.shifts.set(attacker.id, (target as Enemy).line); }
   else if (!ranged) t.pulls.set(attacker.id, attacker.id);
   // Whom it attacked with its weapon this turn, however the blow goes (for the Jagged Chisel, next turn; not a Hurl Wax).
-  if (isWeaponBlow(attacker, weight)) t.attacked.set(attacker.id, target.id);
+  if (isWeaponBlow(t, attacker, weight)) t.attacked.set(attacker.id, target.id);
 
   if (t.isReviving(target)) {
     // The blow passes through someone reviving.
@@ -170,17 +197,22 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   }
   const blocking = t.isBlocking(target, attacker);
   if (blocking) t.blocked.add(target.id);
-  const resisted = dmg * resistance(target, blocking ? t.weightOf(target) : null);
-  // On a Block, everything resisted goes back to the attacker; unless the attack is ranged,
-  // when it simply stops there.
-  if (!blocking) t.tire(target, resisted);
-  else if (!ranged) t.tire(attacker, resisted);
-  const through = dmg - resisted;
+  // A Block: the weapon it is made with stops its Defense's share of the blow, and what comes through is met by Resistance like any blow (that
+  // share of it turns into Fatigue on the blocker, the rest is damage). A blocked melee blow tires its attacker by twice what came through; a
+  // ranged one, made from afar, by nothing.
+  const comes = blocking ? dmg * (1 - blockDefense(t, target)) : dmg;
+  const resisted = comes * resistance(target);
+  t.tire(target, resisted);
+  const sentBack = blocking && !ranged ? comes * BLOCK_SENDS_BACK : 0;
+  t.tire(attacker, sentBack);
+  const through = comes - resisted;
   if (through > 0) hurt(t, target);
   loseHealth(t, target, through);
-  const sentBack = blocking && ranged ? 0 : resisted;
+  // Its weapon's Poise and Deadly land whether the blow is blocked or not (only a dodge escapes them): that much Fatigue, and that much Death.
+  t.tire(target, blow.poise);
+  deathOn(t, target, blow.deadly);
   const self = attacker !== p ? (attacker as Enemy) : undefined;
-  t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: sentBack, ranged, fire: !!self?.intent.tags?.includes("fire"), swing });
+  t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: blocking ? sentBack : resisted + blow.poise, ranged, fire: !!self?.intent.tags?.includes("fire"), swing });
   eternalEffect(t, attacker, target, blocking ? "blocked" : "hit", ranged, weight, dmg);
   // A blocked melee blow can still leave something (the Warden's flail leaves its wax).
   const onBlocked = self && blocking && !ranged ? kindOf(self).onBlocked : undefined;
@@ -233,13 +265,13 @@ const damageRoom = (t: Turn, f: Fighter) => {
 };
 
 /**
- * A blow of the fighter's weapon itself: not bare hands, and not an action with a weight or damage of
- * its own (an armed waxed's Hurl Wax, thrown with its other hand).
+ * A blow of the fighter's weapon itself (yours: of the weapon in the hand you strike with): not bare hands (nor a Kick), and not an action
+ * with a weight, a weapon it is like or modifiers of its own (an armed waxed's Hurl Wax, thrown with its other hand).
  */
-function isWeaponBlow(attacker: Fighter, weight: WeaponTier) {
-  if (weight !== attacker.weapon || weight === "baseline") return false;
+function isWeaponBlow(t: Turn, attacker: Fighter, weight: WeaponTier) {
+  if (weight !== t.handOf(attacker).weapon || weight === "baseline") return false;
   const own = (attacker as Partial<Enemy>).intent;
-  return !own || (own.damage === undefined && own.weight === undefined);
+  return !own || (own.weight === undefined && own.like === undefined && own.mods === undefined);
 }
 
 /**
@@ -251,9 +283,10 @@ function isWeaponBlow(attacker: Fighter, weight: WeaponTier) {
  * pay becomes Death on you. Enemies' effects are free.
  */
 function eternalEffect(t: Turn, attacker: Fighter, target: Fighter, result: "hit" | "blocked", ranged: boolean, weight: WeaponTier, dmg: number) {
-  if (!attacker.eternal || !isWeaponBlow(attacker, weight) || t.s.config.dummy) return;
+  const hand = t.handOf(attacker);
+  if (!WEAPON_EFFECTS || !hand.eternal || !isWeaponBlow(t, attacker, weight) || t.s.config.dummy) return;
   // Your class's weapon has an effect of its own (half the damage); every other weapon's follows its weight (a quarter).
-  const item = attacker === t.p ? t.p.weaponItem : undefined;
+  const item = attacker === t.p ? hand.weaponItem : undefined;
   const effect = item ?? ETERNAL_EFFECT[weight as keyof typeof ETERNAL_EFFECT];
   const amount = dmg * (item ? ITEM_SHARE : ETERNAL_SHARE);
   let damage = 0, fatigue = 0;
@@ -262,7 +295,7 @@ function eternalEffect(t: Turn, attacker: Fighter, target: Fighter, result: "hit
   // The effects that bite deeper (damage): which one applies here, if any.
   const bites = (effect === "axe" && result === "hit" && t.p.lastAction === "rest") // the Barbarian's Axe: a direct hit after a turn of rest
     || (effect === "sickle" && result === "hit" && t.wasStaggered.has(target.id)) // the Nomadic Sickle: a direct hit on a staggered enemy
-    || (effect === "chisel" && result === "hit" && attacker.lastTarget === target.id); // the Jagged Chisel: into whoever it also attacked last turn
+    || (effect === "chisel" && result === "hit" && hand.lastTarget === target.id); // the Jagged Chisel: into whoever this hand also attacked last turn
   if (bites) {
     // (Only the Health that is really left to take counts: what goes past it, or what the fight takes no Health for, is no effect, and costs nothing.)
     damage = Math.min(amount, damageRoom(t, target));
@@ -284,6 +317,6 @@ function eternalEffect(t: Turn, attacker: Fighter, target: Fighter, result: "hit
     if (fatigue <= 1e-9) return;
     t.tire(target, fatigue);
   } else return;
-  const paid = attacker === t.p ? spendEternity(attacker as Player, (waxedFor || damage || fatigue) * ETERNITY_PRICE[effect]) : { spent: 0, death: 0 };
+  const paid = attacker === t.p ? spendEternity(attacker as Player, (waxedFor || damage || fatigue) * ETERNITY_PRICE[effect], !!hand.mortal) : { spent: 0, death: 0 };
   t.emit({ kind: "eternal", attacker: attacker.id, target: target.id, effect, damage, fatigue, ...paid });
 }

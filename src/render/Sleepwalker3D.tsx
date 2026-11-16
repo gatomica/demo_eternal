@@ -95,10 +95,13 @@ export interface Sleepwalker3DProps {
   hand?: Side;
   weapon: WeaponTier;
   /**
-   * The player's Punch, thrown with the empty left hand: the pose is drawn mirrored (the body, its turn and its legs; never the gear, which stays on
-   * the side it is worn), the weapon stays in the right hand held back, and the blow is a bare-handed one (its arch from the hand).
+   * The player's left hand at work (its Attack or Block): the pose is drawn mirrored (the body, its turn and its legs; never the gear, which stays on
+   * the side it is worn), the right hand's weapon held back, out of the way. The left hand's weapon (`offWeapon`) is swung as the mirror of the right
+   * hand's in the same pose, with its own length; an empty left hand's blow is a bare-handed one (its arch from the fist).
    */
   punch?: boolean;
+  /** The player's left hand's weapon (bare, if left out): held low by the left hand, out of the way, unless the left hand is at work (`punch`). */
+  offWeapon?: WeaponTier;
   /**
    * The pose drawn mirrored, the gear not (as for a Punch), and the weapon still in the right hand, pointing as the mirrored pose points it: the
    * player's Left leg leading stance, the mirror of Right leg leading.
@@ -117,7 +120,7 @@ export interface Sleepwalker3DProps {
    * (as the flat figure's, `.armor-*`; the Soldier's gloves and boots), covers the ribcage (no ribs show on the player), and its head gear sits on
    * the head.
    */
-  gear?: { weaponItem?: WeaponItem; armor: ArmorTier; armorItem?: ArmorItem; headItem?: HeadItem };
+  gear?: { weaponItem?: WeaponItem; offItem?: WeaponItem; armor: ArmorTier; armorItem?: ArmorItem; headItem?: HeadItem };
   /**
    * Only the gear, without the body that wears it (the inventory's pictures of armor and head gear): the head, the eyes, the neck, a bare ribcage
    * and the bare limbs are left out. The limbs stay where they are the gear's own cloth (the Hunter's garb, the Nomad's robe).
@@ -159,6 +162,16 @@ function punched(rig: Rig3): Rig3 {
 
 /** In a Punch the weapon in the right hand points down and ahead, low, out of the blow's way. */
 const HELD_BACK_WAY: P3 = [0.08, -0.8, 0.6];
+/** The left hand's weapon, when the left hand is not at work: the mirror of that, down and ahead, low, out of the way. */
+const OFF_HELD_WAY: P3 = [-0.08, -0.8, 0.6];
+/** The left hand's weapon's broad face turns to the other side, as a mirror shows the right's. */
+const FACE_L: P3 = [-1, 0, 0];
+
+/** The weapon in the left hand as the left hand swings it: pointing as the mirror of the way the right hand would point it in the same pose. */
+const mirroredIn = (rig: Rig3, pose: PoseName, reach: number) => {
+  const a = poseWeaponAxis(ALL_POSES[pose]);
+  return heldAlong(rig.joints.handL, [-a[0], a[1], a[2]], reach);
+};
 
 /** The weapon in the hand that holds it, pointing as the pose's flat drawing points it, kept off the floor. */
 const weaponIn = (rig: Rig3, pose: PoseName, reach: number) =>
@@ -228,7 +241,7 @@ function hull(ps: [number, number][]): [number, number][] {
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
-function Sleepwalker3DView({ pose: shown, hand = "right", weapon, punch: punching, mirror, gearOnly, hooded: hoodedKind, encased, waxCaked, dead, gear, eternalFlash, title, swayId, cam, at, yaw, scale = 1, w, h, box }: Sleepwalker3DProps) {
+function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "baseline", punch: punching, mirror, gearOnly, hooded: hoodedKind, encased, waxCaked, dead, gear, eternalFlash, title, swayId, cam, at, yaw, scale = 1, w, h, box }: Sleepwalker3DProps) {
   const openingId = useId(); // (the clip that cuts the face to the black hood's opening)
   // The cloth that hangs from it (the tailcoat, the braid, the leather skirt) sways with its movement (sway.ts).
   const root = useRef<SVGSVGElement>(null);
@@ -240,15 +253,24 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, punch: punchin
   const debug = useContext(DebugLimbsContext);
   // Its weapon, modelled in 3D (gear3d.ts); the flat sprite only if there were none.
   const model = modelOfWeapon(weapon, gear?.weaponItem), reach = model?.reach ?? WEAPON_REACH[weapon];
-  // A Punch: the very pose you see in the same blow with the weapon, mirrored (lifted the same way, with the weapon's length, so the arms are where
-  // that pose has them), both arms included.
+  // (the left hand's, if it holds one)
+  const offModel = offWeapon !== "baseline" ? modelOfWeapon(offWeapon, gear?.offItem) : undefined;
+  const offReach = offWeapon !== "baseline" ? offModel?.reach ?? WEAPON_REACH[offWeapon] : 0;
+  // The left hand at work: the very pose you see in the same blow (or Block) with the weapon, mirrored (lifted the same way, with the length of the
+  // weapon it swings, the left hand's if it holds one, else the right's, so the arms are where that pose has them), both arms included.
   const punch = !!punching && !dead;
-  /** Drawn mirrored: a Punch, or a mirrored stance. */
+  /** The left hand swings a weapon of its own. */
+  const leftArmed = punch && offWeapon !== "baseline";
+  const liftReach = leftArmed ? offReach : reach;
+  /** Drawn mirrored: the left hand at work, or a mirrored stance. */
   const flipped = (punch || !!mirror) && !dead;
-  const liftFor = (p: PoseName) => (flipped ? punched(lift(p, "right", reach)) : lift(p, hand, reach));
-  const rig = useMemo(() => (dead ? fallen(lift(pose, hand, reach)) : liftFor(pose)), [pose, hand, reach, dead, flipped]); // eslint-disable-line react-hooks/exhaustive-deps
-  /** Nothing in the hand that swings: bare hands, or a Punch (the left hand's; the weapon is held back in the other). */
-  const bare = weapon === "baseline" || punch;
+  const liftFor = (p: PoseName) => (flipped ? punched(lift(p, "right", liftReach)) : lift(p, hand, reach));
+  const rig = useMemo(() => (dead ? fallen(lift(pose, hand, reach)) : liftFor(pose)), [pose, hand, reach, liftReach, dead, flipped]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** Nothing in the hand that swings: bare hands (the right's, or a Punch's left; the right hand's weapon is then held back). */
+  const bare = punch ? !leftArmed : weapon === "baseline";
+  /** The weapon that swings in this pose, where its hand points it: the left hand's (mirrored) when it is at work, else the right's. */
+  const swungIn = (r: Rig3, p: PoseName) => (leftArmed ? mirroredIn(r, p, offReach) : weaponIn(r, p, reach));
+  const swungModel = leftArmed ? offModel : model;
   const fist: Joint = punch ? "handL" : "handR", fistShoulder: Joint = punch ? "shoulderL" : "shoulderR";
   /** A way on the body as it stood, as it is now (tipped onto its back, if dead). */
   const way = (v: P3): P3 => (dead ? fall(v, 0, false) : v);
@@ -259,11 +281,11 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, punch: punchin
   const arc = useMemo(() => {
     if (!windUp) return undefined;
     const before = liftFor(windUp);
-    const [from, to] = bare ? [before.joints[fist], rig.joints[fist]] : [weaponIn(before, windUp, reach).tip, weaponIn(rig, pose, reach).tip];
-    const sh = rig.joints[fistShoulder], far = (RIG.upperArm + RIG.forearm + (bare ? 0 : reach)) * U;
+    const [from, to] = bare ? [before.joints[fist], rig.joints[fist]] : [swungIn(before, windUp).tip, swungIn(rig, pose).tip];
+    const sh = rig.joints[fistShoulder], far = (RIG.upperArm + RIG.forearm + (bare ? 0 : leftArmed ? offReach : reach)) * U;
     const mid: P3 | undefined = ACROSS.has(pose) ? [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, sh[2] + far] : undefined;
-    return swingArc(from, to, bare ? undefined : model && model.damage * U, mid);
-  }, [windUp, pose, hand, rig, weapon, reach, model, bare, fist, fistShoulder, flipped]); // eslint-disable-line react-hooks/exhaustive-deps
+    return swingArc(from, to, bare ? undefined : swungModel && swungModel.damage * U, mid);
+  }, [windUp, pose, hand, rig, weapon, reach, model, bare, fist, fistShoulder, flipped, leftArmed, offReach, swungModel]); // eslint-disable-line react-hooks/exhaustive-deps
   // A Kick as it lands leaves an arch from the kicking foot, like a bare-handed blow's from the fist: from where that foot was in the wind-up to where
   // it ends. Its wind-up is drawn mirrored the other way (the right leg's winds up as Left Lead and lands as Right Lead), and the foot is the right
   // one unless this kick is drawn mirrored (the left leg's).
@@ -278,9 +300,11 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, punch: punchin
     if (bare) return undefined;
     const strike = windUp ? pose : STRIKE_OF[pose], from = windUp ?? pose;
     if (!strike) return undefined;
-    const arch = strike === pose && arc ? arc : swingArc(weaponIn(lift(from, hand, reach), from, reach).tip, weaponIn(lift(strike, hand, reach), strike, reach).tip);
+    // (the left hand's swing is the mirrored one, as it is drawn)
+    const liftSwing = (p: PoseName) => (leftArmed ? liftFor(p) : lift(p, hand, reach));
+    const arch = strike === pose && arc ? arc : swingArc(swungIn(liftSwing(from), from).tip, swungIn(liftSwing(strike), strike).tip);
     return { arc: arch, at: (strike === pose ? 1 : 0) as 0 | 1 };
-  }, [windUp, pose, hand, reach, bare, arc]);
+  }, [windUp, pose, hand, reach, bare, arc, leftArmed, offReach]); // eslint-disable-line react-hooks/exhaustive-deps
   const c = canvas3d(placeRig(rig, at, yaw, cam, w, h, scale), box);
   const { seen, see, X, Y, scaleAt, parts, bones, ball, behind, meet } = c;
   const red = (side: "R" | "L") => (debug && side === "R" ? " dbg-red" : "");
@@ -862,24 +886,43 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, punch: punchin
       : weaponIn(rig, pose, reach);
     // (its middle, between the neck and the pelvis: out of a swing the weapon's edge side faces away from it)
     const wielder: P3 | undefined = dead ? undefined : [0, 1, 2].map(i => (rig.joints.neck[i] + rig.joints.pelvis[i]) / 2) as unknown as P3;
-    const gear = weaponParts(c, { weapon, model, reach, held, face: dead ? [0, 1, 0] : FACE, swing: dead ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash });
+    // (While the left hand is at work, the right's weapon is out of the swing, and of its flash.)
+    const gear = weaponParts(c, { weapon, model, reach, held, face: dead ? [0, 1, 0] : FACE, swing: dead || punch ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? undefined : eternalFlash });
     parts.push(...gear);
-    // The hand round the handle: a dot at the end of the arm, as thick as the arm and in its own colour (the arm's far shade, the wax if sealed),
-    // drawn over the weapon so the grip reads. Both hands, if the pose holds it in both.
-    if (!dead && gear.length) {
-      const over = Math.min(...gear.map(g => g.depth)) - 0.001;
-      const asDrawn = raw.for3d ? { ...raw, ...raw.for3d } : raw;
-      const holding = asDrawn.grip && !flipped ? (["R", "L"] as const) : ([rig.weaponHand === "right" ? "R" : "L"] as const);
-      for (const side of holding) {
-        bones(`grip${side}`, [`hand${side}`, `hand${side}`] as Joint[], encased ? "fig-wax-shell" : `fig-limb${red(side)}`, encased ? SHELL : LIMB);
-        const dot = parts[parts.length - 1];
-        dot.depth = Math.min(dot.depth, over);
-        // (in the arm's own tone, or its glove's: it is shaded as a whole, by where its middle is, not by where the hand is)
-        const arm = parts.find(x => x.key === `${encased ? "shell-arm" : shod || garbed ? "glove" : "arm"}${side}`);
-        const armCls: string | undefined = (arm?.node as { props?: { className?: string } } | undefined)?.props?.className;
-        const dotEl = dot.node as ReactElement<{ className?: string }>;
-        if (armCls) dot.node = cloneElement(dotEl, { className: armCls });
-      }
+    // (A pose that holds the weapon in both hands holds it in the right alone while the left holds a weapon of its own.)
+    const asDrawn = raw.for3d ? { ...raw, ...raw.for3d } : raw;
+    gripDots(gear, asDrawn.grip && !flipped && offWeapon === "baseline" ? ["R", "L"] : [rig.weaponHand === "right" ? "R" : "L"]);
+  }
+  // The left hand's weapon (the player's): held low and ahead, out of the way; swung as the mirror of the right hand's when the left hand is at work;
+  // dead, dropped by the left hand.
+  if (offWeapon !== "baseline") {
+    const handL = rig.joints.handL;
+    const held = dead
+      ? heldAlong([handL[0], 1.2 * U, handL[2]], way([-0.55, -0.83, 0]), offReach, 0.5)
+      : punch ? mirroredIn(rig, pose, offReach)
+      : heldAlong(handL, OFF_HELD_WAY, offReach);
+    const wielder: P3 | undefined = dead ? undefined : [0, 1, 2].map(i => (rig.joints.neck[i] + rig.joints.pelvis[i]) / 2) as unknown as P3;
+    const gear = weaponParts(c, { weapon: offWeapon, model: offModel, reach: offReach, held, face: dead ? [0, 1, 0] : FACE_L, swing: dead || !punch ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? eternalFlash : undefined, key: "weapon-left" });
+    parts.push(...gear);
+    gripDots(gear, ["L"]);
+  }
+
+  /**
+   * The hand round the handle: a dot at the end of the arm, as thick as the arm and in its own colour (the arm's far shade, the wax if sealed),
+   * drawn over the weapon so the grip reads. Both hands, if the pose holds it in both. (Not once it is dropped, dead.)
+   */
+  function gripDots(gear: typeof parts, holding: readonly ("R" | "L")[]) {
+    if (dead || !gear.length) return;
+    const over = Math.min(...gear.map(g => g.depth)) - 0.001;
+    for (const side of holding) {
+      bones(`grip${side}`, [`hand${side}`, `hand${side}`] as Joint[], encased ? "fig-wax-shell" : `fig-limb${red(side)}`, encased ? SHELL : LIMB);
+      const dot = parts[parts.length - 1];
+      dot.depth = Math.min(dot.depth, over);
+      // (in the arm's own tone, or its glove's: it is shaded as a whole, by where its middle is, not by where the hand is)
+      const arm = parts.find(x => x.key === `${encased ? "shell-arm" : shod || garbed ? "glove" : "arm"}${side}`);
+      const armCls: string | undefined = (arm?.node as { props?: { className?: string } } | undefined)?.props?.className;
+      const dotEl = dot.node as ReactElement<{ className?: string }>;
+      if (armCls) dot.node = cloneElement(dotEl, { className: armCls });
     }
   }
 

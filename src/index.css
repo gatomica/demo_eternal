@@ -343,6 +343,27 @@ kbd {
 }
 .wheel-overlay.is-open .wheel-piece-label { opacity: 1; transition: opacity 0.15s 0.1s; }
 .wheel-piece.is-highlighted .wheel-piece-label { fill: #14131a; stroke: none; }
+/* The kind of action of the opened-up part you are on, in the wheel's middle (white, edged as the names are). */
+.wheel-center-name {
+  fill: #fff; font-size: 13px; font-weight: 700; text-anchor: middle; dominant-baseline: central; pointer-events: none;
+  paint-order: stroke; stroke: rgb(0 0 0 / 0.55); stroke-width: 2.6px; stroke-linejoin: round;
+}
+/* An option's picture in place of its name (ActionWheel.tsx `Picture`): shown with the names; an empty hand's mitten and the Kick's boot drawn
+   as the names are, white with a dark edge (dark on the lit piece). */
+.wheel-picture { opacity: 0; transition: opacity 0.1s; pointer-events: none; overflow: visible; }
+.wheel-overlay.is-open .wheel-picture { opacity: 1; transition: opacity 0.15s 0.1s; }
+.wheel-picture-box { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+.wheel-picture-box .gear-icon .flat { fill: #fff; stroke: rgb(0 0 0 / 0.55); stroke-width: 2.5px; stroke-linejoin: round; paint-order: stroke; }
+.wheel-piece.is-highlighted .wheel-picture-box .gear-icon .flat { fill: #14131a; stroke: none; }
+/* An opened part's cost and damage bar, along its inner edge, as the item card's (`.item-card-measure`). */
+.wheel-measure path { fill: none; stroke-linecap: butt; pointer-events: none; }
+.wheel-overlay:not(.is-open) .wheel-measure { visibility: hidden; }
+.wheel-measure .wheel-measure-edge { stroke: var(--line); }
+.wheel-measure .wheel-measure-empty { stroke: rgb(21 20 27); } /* (empty between its ends: the cards' background) */
+.wheel-measure .wheel-measure-cost { stroke: var(--sleep); }
+.wheel-measure .wheel-measure-damage { stroke: var(--flesh-missing); }
+.wheel-measure .wheel-measure-death { stroke: var(--void); }
+.wheel-measure .wheel-measure-through { stroke: var(--flesh-missing); } /* (a Block's: the share of a blow that comes through) */
 /* The lines are drawn thick as the small mark and thin as the wheel (a stroke adds to their width). */
 .wheel-line { fill: #fff; stroke: #fff; stroke-width: 3; stroke-linejoin: round; pointer-events: none; transition: stroke-width 0.22s ease-out; }
 .wheel-overlay.is-open .wheel-line { stroke-width: 0; }
@@ -1067,10 +1088,35 @@ svg.wd-phase2 :is(.fig-neck-lining, .fig-skirt-inner) { stroke: url(#wd-p-wax88)
 .inv-place-icon.item-card-icon { width: 140px; height: 140px; }
 .item-card-name { font-size: 1.1rem; font-weight: 600; }
 /* A weapon's cost and damage: an empty bar (missing health's dark red), white Fatigue from the left for the cost, red health from the right for the damage. */
-.item-card-measure { position: relative; justify-self: stretch; height: 10px; margin: 2px 0; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: var(--flesh-missing); }
+/* A weapon's bar (ItemCard.tsx `WeaponMeasure`): thin and rounded as the Resistance bar, but empty between its ends (the card shows through),
+   white from the left for the Fatigue an attack costs; from the right, black for the Death it puts on its target, missing health's dark red
+   for its damage, and white just before that for the Fatigue it puts on its target. */
+.item-card-measure { position: relative; justify-self: stretch; height: 6px; margin: 2px 0; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: transparent; }
 .item-card-measure > i { position: absolute; top: 0; bottom: 0; }
 .measure-cost { left: 0; background: var(--sleep); }
-.measure-damage { right: 0; background: var(--flesh); }
+.measure-damage { background: var(--flesh-missing); }
+.measure-death { background: var(--void); }
+.measure-poise { background: var(--sleep); }
+/* A Resistance bar (ItemCard.tsx `ResistMeasure`): the dark red of missing health, but white at its left end for the share of a blow that turns
+   into Fatigue; a change about to be made flickers white (gained) or red (lost). Thinner than a weapon's bar, and at the very bottom of a card. */
+.resist-measure { position: relative; justify-self: stretch; height: 6px; margin: 4px 0 0; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: var(--flesh-missing); }
+.resist-measure > i { position: absolute; top: 0; bottom: 0; left: 0; }
+.resist-share { background: var(--sleep); }
+.resist-gain { background: var(--sleep); animation: bar-preview 0.8s ease-in-out infinite alternate; }
+.resist-loss { background: var(--flesh); animation: bar-preview 0.8s ease-in-out infinite alternate; }
+/* A weapon's Defense bar (ItemCard.tsx `DefenseMeasure`), at the very bottom of its card: the Resistance bar's shape, missing health's dark red from the left for the
+   share of a blow a Block with it lets through, empty (the card showing through) for the share it stops. */
+.defense-measure { position: relative; justify-self: stretch; height: 6px; margin: 4px 0 0; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: transparent; }
+.defense-measure > i { position: absolute; top: 0; bottom: 0; left: 0; }
+.defense-through { background: var(--flesh-missing); }
+/* Your Resistance in the inventory: at the bottom left, just above the bottom strip. */
+/* (as long as the bars on the card in the middle: the card's width, `.class-middle`, less its padding and border) */
+.inv-resist { position: absolute; z-index: 10; left: 3vw; bottom: calc(var(--strip-h) + 1.2vh); width: calc(min(340px, 27vw) - 34px); }
+.inv-resist .resist-measure { margin: 0; }
+/* Holding No to drop (InventoryScreen.tsx `HoldMeter`): a small bar beside the words, filling as the key is held; hidden until a hold starts. */
+.hold-meter { display: inline-block; vertical-align: middle; width: 2.4rem; height: 4px; margin-left: 6px; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; opacity: 0; }
+.hold-meter.is-holding { opacity: 1; }
+.hold-meter > i { display: block; height: 100%; background: var(--sleep); }
 .item-card-type { margin-top: -4px; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .item-card-lore { margin: 0; font-size: 0.92rem; line-height: 1.45; opacity: 0.9; }
 .item-card-effect { margin: 0; font-size: 0.85rem; line-height: 1.4; color: #dcf1ff; }

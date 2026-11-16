@@ -4,7 +4,7 @@
 import { ENEMY_KINDS, kindOf } from "./bestiary";
 import { chooseIntents, describeAction } from "./intents";
 import { snapshotOf } from "./resolve";
-import type { CombatConfig, CombatState, Enemy, EnemySetup, Opening, Player, PlayerSetup, Rng } from "./types";
+import type { CombatConfig, CombatState, Enemy, EnemySetup, Hand, Opening, Player, PlayerSetup, Rng } from "./types";
 
 /**
  * The fight's opening scene, if its setup has one (the Warden taking a waxed's flame): the first
@@ -17,6 +17,12 @@ export function openingOf(state: CombatState, setups: EnemySetup[], rng: Rng = M
   }
   return { state };
 }
+
+/** A hand as the rules hold it: every weapon carries its effect, and an ordinary (not eternal) one pays for it all in Death. */
+const handOf = (h: PlayerSetup["offhand"]): Hand => {
+  if (!h || h.weapon === "baseline") return { weapon: "baseline" };
+  return { weapon: h.weapon, ...(h.weaponItem ? { weaponItem: h.weaponItem } : {}), eternal: true, mortal: !h.eternal };
+};
 
 export function createCombat(
   player: PlayerSetup,
@@ -38,6 +44,7 @@ export function createCombat(
     death: 0,
     weapon: player.weapon,
     armor: player.armor,
+    ...(player.worn !== undefined ? { worn: player.worn } : {}),
     staggered: false,
     waxed: false,
     charges: player.charges,
@@ -45,6 +52,7 @@ export function createCombat(
     // Every weapon carries its effect; an ordinary (not eternal) one pays for it all in Death.
     eternal: player.weapon !== "baseline",
     mortalWeapon: !player.eternal,
+    offhand: handOf(player.offhand),
     maxEternity: player.maxEternity ?? player.maxHP,
     eternity: Math.min(player.maxEternity ?? player.maxHP, player.eternity ?? player.maxEternity ?? player.maxHP),
   };

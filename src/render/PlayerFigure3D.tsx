@@ -12,15 +12,15 @@ const BOX = orbitBox(CAM, AT, W, H);
 const YAW = Math.PI / 2 + 0.9;
 
 export function PlayerFigure3D({ look, title, swayId }: {
-  look: { weapon: WeaponTier; armor: ArmorTier; weaponItem?: WeaponItem; armorItem?: ArmorItem; headItem?: HeadItem };
+  look: { weapon: WeaponTier; armor: ArmorTier; weaponItem?: WeaponItem; armorItem?: ArmorItem; headItem?: HeadItem; offhand?: { weapon: WeaponTier; weaponItem?: WeaponItem } };
   title?: string;
   /** Which figure it is, for the sway of its cloth (see sway.ts). */
   swayId: string;
 }) {
   return (
     <Sleepwalker3D
-      pose="p3-idle" weapon={look.weapon} title={title} swayId={swayId}
-      gear={{ weaponItem: look.weaponItem, armor: look.armor, armorItem: look.armorItem, headItem: look.headItem }}
+      pose="p3-idle" weapon={look.weapon} offWeapon={look.offhand?.weapon} title={title} swayId={swayId}
+      gear={{ weaponItem: look.weaponItem, offItem: look.offhand?.weaponItem, armor: look.armor, armorItem: look.armorItem, headItem: look.headItem }}
       cam={CAM} at={AT} yaw={YAW} w={W} h={H} box={BOX}
     />
   );
