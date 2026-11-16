@@ -31,10 +31,10 @@ import { ROOM } from "./rooms";
 import { type Conversation, DOORWAY, DREAMS_TALK, FINAL, LET_GO, MENU, PERSIST, STRING_TALK, WAKE } from "./dialogues";
 import { blobWeapons, drawBlob, drawFoldedLadder, drawPickup, drawKeeper, drawRemains, drawStringAura, drawStringPile, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
 import { StringCounter, YarnBall } from "../render/StringCounter";
-import { equippedSide, equipSide, gearName, type GearSpec, hasUnread, type Inventory as Bag, loadoutOf, pieceAt, readDreams, receive, setEternal, SLOTS, type Slot, unequip } from "./gear";
+import { gearName, type GearSpec, hasUnread, type Inventory as Bag, loadoutOf, readDreams, setEternal, take, drop as dropGear, wield } from "./gear";
 import { GearSprite } from "./GearIcons";
 import { DialogueScene } from "./DialogueScene";
-import { type InvFocus, InventoryScreen, type Place } from "./InventoryScreen";
+import { InventoryScreen } from "./InventoryScreen";
 import { type GroundItem, PICKUP_REACH, PICKUPS } from "./pickups";
 import { ALERT_RADIUS, CHASE_MEMORY, HOWL_RADIUS, ladderPlan, type Corpse, ENCOUNTER_FADE_MS, type Foe, FOE_TUNING, GRACE_MS, inFightArea, livingDef, MAP_FOES, type MapFoe, MAX_IN_FIGHT, memberKey, nodeAt, spotsOf, stepsToNode, TOUCH, wakeEnemies, waypoint3, withCorpses } from "./foes";
 import { playMusic } from "../audio/music";
@@ -145,7 +145,7 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
    * What is open over the map, if anything (the map stands still meanwhile): the inventory (E; `start`:
    * where its cursor begins), a talk with the guide (`talk`, by the keeper `keeper`: E by a keeper opens its menu), or the pause menu (Esc).
    */
-  type Screen = { kind: "inventory"; start?: InvFocus } | { kind: "guide"; talk: Conversation; keeper: string; instant?: boolean } | { kind: "pause" };
+  type Screen = { kind: "inventory"; pickup?: string } | { kind: "guide"; talk: Conversation; keeper: string; instant?: boolean } | { kind: "pause" };
   // A new game opens already speaking with the guide, by the start room's keeper.
   const [screen, setScreen] = useState<Screen | null>(() => (journey.tutorial.greeted === false ? { kind: "guide", talk: WAKE, keeper: "start", instant: true } : null));
   // The keeper whose guide you are speaking with (it stays fully there meanwhile).
@@ -236,41 +236,11 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
     nearPickupRef.current = null;
     setNearPickup(null);
   };
-  /** What lies within reach on the ground, for each slot: the nearest (set by the map's loop). */
+  /** The ids of what lies within reach (set by the map's loop). */
   const reachRef = useRef<string[]>([]);
-  const groundNear = (): Partial<Record<Slot, GearSpec>> => {
-    const items = floorItems();
-    const out: Partial<Record<Slot, GearSpec>> = {};
-    for (const id of reachRef.current) {
-      const item = items.find(x => x.id === id);
-      if (item?.gear && !out[item.gear.slot]) out[item.gear.slot] = item.gear;
-    }
-    return out;
-  };
   /**
-   * Takes the item lying within reach for this slot: an eternal piece goes with your memories; an
-   * ordinary one into the slot's ordinary place, and if one was there already, that one is left on the
-   * ground where the new one lay (a swap). Neither is put on by this (but a swapped piece takes the place
-   * of the one you wielded, if you did).
-   */
-  const takeFromGround = (id: string) => {
-    const item = floorItems().find(x => x.id === id);
-    if (!item?.gear) return;
-    lift(item.id);
-    const { inventory, replaced } = receive(invRef.current, [item.gear], false);
-    for (const old of replaced) {
-      const { id: _id, ...left } = old;
-      groundRef.current = [...groundRef.current, { id: `left-${Date.now()}-${old.id}`, at: item.at, gear: left as GearSpec }];
-    }
-    reachRef.current = reachRef.current.filter(x => x !== id);
-    setInv(inventory);
-    // (Only eternal gear is announced: an ordinary piece goes to its place, and the inventory shows it.)
-    if (item.gear.eternal) setGot({ gear: item.gear, id: Date.now() });
-    latest.current.onSave(snapshot.current());
-  };
-  /**
-   * E by gear on the floor: a memory (eternal) is picked up at once; anything you could wield opens the
-   * inventory on that slot's ground place, to swap it for what is in your ordinary place (an empty one takes it at once, and the inventory opens on it).
+   * E by gear on the floor: it goes into your bag (never put on), and the inventory opens on it: its card, to keep it (OK) or drop it again; a
+   * memory (eternal) can only be kept. Past what you may carry of its kind (`CARRY` in gear.ts) the inventory has you drop one before going on.
    */
   const pickUp = () => {
     const item = floorItems().find(x => x.id === nearPickupRef.current);
@@ -293,26 +263,23 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       return;
     }
     if (!item.gear) return;
-    if (item.gear.eternal) { takeFromGround(item.id); return; }
-    const row = Math.max(0, SLOTS.indexOf(item.gear.slot));
-    // An empty ordinary place takes it at once (not wielded); the inventory opens on it, that slot's options open with it under the cursor, to wield it with E.
-    if (!pieceAt(invRef.current, item.gear.slot, "normal")) {
-      takeFromGround(item.id);
-      setScreen({ kind: "inventory", start: { row, place: "normal" } });
-      return;
-    }
-    setScreen({ kind: "inventory", start: { row, place: "ground" } });
+    lift(item.id);
+    reachRef.current = reachRef.current.filter(x => x !== item.id);
+    const { inventory, gear } = take(invRef.current, item.gear);
+    setInv(inventory);
+    setScreen({ kind: "inventory", pickup: gear.id });
+    latest.current.onSave(snapshot.current());
   };
-  /** E on a place of the inventory: wield it (or unequip it, if you already wield it), or take what lies on the ground. */
-  const useInventory = (slot: Slot, place: Place) => {
-    if (place === "ground") {
-      const items = floorItems();
-      const id = reachRef.current.find(x => items.find(i => i.id === x)?.gear?.slot === slot);
-      if (id) takeFromGround(id);
-      return;
-    }
-    const cur = invRef.current;
-    setInv(equippedSide(cur, slot) === place && (cur[slot] !== null) ? unequip(cur, slot, place) : equipSide(cur, slot, place));
+  /** Lets go of a piece from the inventory: it lies on the ground where you last stood on solid ground, to pick up again. */
+  const dropPiece = (id: string) => {
+    const piece = invRef.current.bag.find(g => g.id === id);
+    if (!piece || piece.eternal) return;
+    const { id: _id, ...spec } = piece;
+    const at = safeRef.current ?? snapshot.current().at;
+    if (!at) return;
+    groundRef.current = [...groundRef.current, { id: `left-${Date.now()}-${id}`, at: { x: at.x, y: at.y, z: at.alt }, gear: spec as GearSpec }];
+    setInv(dropGear(invRef.current, id));
+    latest.current.onSave(snapshot.current());
   };
   /** You, as your bars show you between fights: full health, the knot's revive and your Eternity. */
   const barsPlayer = (): Player => {
@@ -1371,7 +1338,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       {entering && <div className="explore-fade" />}
       {ending && <div className="explore-ending" style={{ animationDuration: `${ENDING_MS}ms` }} aria-hidden="true" />}
       {screen?.kind === "inventory" && (
-        <InventoryScreen inv={inv} player={barsPlayer()} string={stringRef.current} eternalString={eternalRef.current} knot={knotRef.current} ground={groundNear()} start={screen.start} onUse={useInventory} onClose={() => setScreen(null)} />
+        <InventoryScreen inv={inv} player={barsPlayer()} string={stringRef.current} eternalString={eternalRef.current} knot={knotRef.current} pickup={screen.pickup}
+          onUse={(slot, id) => setInv(wield(invRef.current, slot, id))} onDrop={dropPiece} onPickupDone={() => setScreen(null)} onClose={() => setScreen(null)} />
       )}
       {screen?.kind === "guide" && preparing === null && (
         <DialogueScene

@@ -1,6 +1,6 @@
 /**
  * GearIcons.tsx — the inventory's pictures of gear. An empty place shows a flat, simple, faded
- * icon (a sword, a chestplate). Gear shows its 3D model: the weapon as modelled (render/gear3d.ts), and the armor and head gear by
+ * icon (a mitten for a hand, a chestplate, a helmet). Gear shows its 3D model: the weapon as modelled (render/gear3d.ts), and the armor and head gear by
  * themselves, as they sit when worn on the 3D player (without the player).
  */
 import { type ReactNode, useMemo } from "react";
@@ -11,26 +11,6 @@ import { GearShape } from "../render/GearShape";
 import { Sleepwalker3D } from "../render/Sleepwalker3D";
 import type { Slot } from "./gear";
 import { Weapon } from "../render/StickFigure";
-
-/** A flat sword in a 48 × 48 square: one color, a straight blade and a bar for a guard. A dagger is shorter, a maul a hammer. */
-function FlatWeapon({ tier }: { tier: WeaponTier }) {
-  if (tier === "heavy") {
-    return (
-      <g className="flat">
-        <rect x={22} y={14} width={4} height={28} />
-        <rect x={12} y={6} width={24} height={11} rx={1} />
-      </g>
-    );
-  }
-  const top = tier === "light" ? 14 : 5;
-  return (
-    <g className="flat">
-      <rect x={22} y={top} width={4} height={30 - top} />
-      <rect x={14} y={30} width={20} height={4} />
-      <rect x={22} y={34} width={4} height={9} />
-    </g>
-  );
-}
 
 /** A flat chestplate in a 48 × 48 square: one shape, broader for heavier armor. */
 function FlatArmor({ tier }: { tier: ArmorTier }) {
@@ -43,11 +23,22 @@ function FlatHead() {
   return <path className="flat" d="M13 30 Q13 11 24 11 Q35 11 35 30 L35 36 L29 36 L29 30 L19 30 L19 36 L13 36 Z" />;
 }
 
-/** The flat icon of an empty place: its slot's sword or chestplate, faded. */
-export function GearIcon({ slot }: { slot: Slot }) {
+/** A flat mitten in a 48 × 48 square, fingers up, the thumb out to the left, a cuff at the wrist: an empty right hand (mirrored, the left). */
+function FlatHand() {
+  return (
+    <g className="flat">
+      <path d="M17 38 L17 21 Q17 9 25.5 9 Q34 9 34 20 L34 38 Z" />
+      <path d="M17.5 31 Q10 30 9.5 23.5 Q9.5 19 13 19 Q16.5 19 17.5 24 Z" />
+      <rect x={15.5} y={38} width={20} height={5} rx={1.5} />
+    </g>
+  );
+}
+
+/** The flat icon of an empty place: a mitten for a hand (`mirrored`: the left one), a chestplate or a helmet, faded. */
+export function GearIcon({ slot, mirrored }: { slot: Slot; mirrored?: boolean }) {
   return (
     <svg viewBox="0 0 48 48" className="gear-icon is-faded" aria-hidden="true">
-      {slot === "weapon" ? <FlatWeapon tier="normal" /> : slot === "head" ? <FlatHead /> : <FlatArmor tier="normal" />}
+      {slot === "weapon" ? <g transform={mirrored ? "translate(48 0) scale(-1 1)" : undefined}><FlatHand /></g> : slot === "head" ? <FlatHead /> : <FlatArmor tier="normal" />}
     </svg>
   );
 }

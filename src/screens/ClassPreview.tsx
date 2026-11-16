@@ -12,7 +12,7 @@ import { PlayerFigure3D } from "../render/PlayerFigure3D";
 import { useKeys, wrapIndex, menuSound } from "../ui/input";
 import { Kbd } from "../ui/Kbd";
 
-const LABEL: Record<Slot, string> = { weapon: "Weapon", armor: "Armor", head: "Head" };
+const LABEL: Record<Slot, string> = { weapon: "Right hand", armor: "Armor", head: "Head" };
 
 export function ClassPreview({ classId, onClose, onConfirm }: { classId: ClassId; onClose: () => void; onConfirm: () => void }) {
   const c = CLASSES.find(x => x.id === classId) ?? CLASSES[0];

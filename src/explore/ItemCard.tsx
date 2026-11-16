@@ -6,6 +6,7 @@ import { gearName, type GearSpec, type Slot, weightLabel } from "./gear";
 import { GearIcon, GearSprite } from "./GearIcons";
 import { type ItemId, ITEMS } from "./items";
 import { WEAPONS } from "../core/rules";
+import type { WeaponTier } from "../core/types";
 import { EFFECT, LORE } from "./lore";
 
 /** What the card shows. */
@@ -67,12 +68,19 @@ function WeaponMeasure({ tier }: { tier: CardInfo["tier"] }) {
 }
 
 /** The card: the item, and below it its name, type, lore and effects. Without `info`, nothing lies in the place: its faded icon and `empty` as the name. */
-export function ItemCard({ info, slot, empty, note }: { info?: CardInfo; slot?: Slot; empty?: string; /** Replaces the card's own note. */ note?: string }) {
+export function ItemCard({ info, slot, empty, note, mirrored, measure }: {
+  info?: CardInfo; slot?: Slot; empty?: string; /** Replaces the card's own note. */ note?: string;
+  /** An empty place: its icon mirrored (the left hand's mitten). */
+  mirrored?: boolean;
+  /** An empty place: the measure to show under its name (an empty hand's: the bare hands' cost and damage). */
+  measure?: WeaponTier;
+}) {
   if (!info) {
     return (
       <div className="item-card is-empty">
-        <span className="inv-place-icon item-card-icon">{slot && <GearIcon slot={slot} />}</span>
+        <span className="inv-place-icon item-card-icon">{slot && <GearIcon slot={slot} mirrored={mirrored} />}</span>
         <div className="item-card-name">{empty ?? "Empty"}</div>
+        {measure && <WeaponMeasure tier={measure} />}
       </div>
     );
   }

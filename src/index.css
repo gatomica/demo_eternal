@@ -1154,6 +1154,17 @@ svg.wd-phase2 :is(.fig-neck-lining, .fig-skirt-inner) { stroke: url(#wd-p-wax88)
 .class-name { font-size: 1.15rem; letter-spacing: 0.05em; }
 /* The preview's middle: what the slot under the cursor holds, between the character and the slots. */
 .class-middle { position: absolute; left: 50%; top: 50%; transform: translate(-52%, -50%); width: min(340px, 27vw); z-index: 2; }
+/* The inventory opened on what you just picked up: its card in the middle, the keys under it; past the limit, the ones you carry beside it, smaller,
+   the one hovered lit and the others dimmed. The slots dim meanwhile. */
+.inv-pickup { position: absolute; left: 50%; top: 50%; transform: translate(-52%, -50%); z-index: 4; display: flex; align-items: flex-start; gap: 18px; }
+.inv-pickup-card { width: min(340px, 27vw); display: grid; gap: 10px; justify-items: center; transition: opacity 0.15s ease-out; }
+.inv-pickup.is-over .inv-pickup-card { width: min(250px, 19vw); opacity: 0.45; }
+.inv-pickup.is-over .inv-pickup-card.is-focused { opacity: 1; }
+.inv-pickup.is-over .inv-pickup-card.is-focused .item-card { border-color: var(--text); }
+.inv-pickup-card .item-card { width: 100%; box-sizing: border-box; }
+.inv-pickup-keys { display: flex; align-items: center; gap: 4px; font-size: 0.85rem; white-space: pre; min-height: 1.6em; }
+.inv-pickup-keys[aria-hidden="true"] { visibility: hidden; }
+.inv-screen.is-pickup .inv-gear-col { opacity: 0.3; }
 /* The question before a new game begins: a box over the preview. */
 .class-confirm { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 30; display: grid; gap: 16px; justify-items: center; padding: 22px 28px; border: 1px solid var(--line); border-radius: 10px; background: rgb(21 20 27 / 0.96); color: var(--text); box-shadow: 0 0 40px rgb(0 0 0 / 0.6); }
 .class-confirm p { margin: 0; font-size: 1.05rem; }

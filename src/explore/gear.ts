@@ -1,8 +1,8 @@
 /**
  * gear.ts — what you carry on the map: you set out with nothing, enemies drop the weapon and
  * armor they carry (all of it, every time), and falling takes it all away again, except the
- * eternal gear. Two slots, weapon and armor; the rest waits in the bag. Eternal gear piles up;
- * ordinary gear is one weapon and one armor at a time.
+ * eternal gear. Three slots: weapon (the right hand), armor and head; the rest waits in the bag. Eternal gear piles up;
+ * ordinary gear is two weapons, one armor and one head piece at a time (`CARRY`): past that, the inventory has you drop one.
  *
  * Eternal gear comes as a "Memory of ...": the guide must read its dreams (at a safe spot) before it
  * can be set in its slot's eternal place, which is also only done at a safe spot (`setEternal`).
@@ -75,7 +75,7 @@ export function weightLabel(g: GearSpec): string | null {
 }
 
 /** The piece you wear in a slot, if it is where you wield from (an eternal piece only counts once set in its place). */
-function wornIn(inv: Inventory, slot: Slot): Gear | undefined {
+export function wornIn(inv: Inventory, slot: Slot): Gear | undefined {
   const worn = inv.bag.find(g => g.id === inv[slot]);
   if (!worn || !worn.eternal) return worn;
   return pieceAt(inv, slot, "eternal")?.id === worn.id ? worn : undefined;
@@ -114,29 +114,42 @@ export function dropsOf(enemies: EnemySetup[]): GearSpec[] {
 }
 
 /**
- * Picks up gear. You can carry any amount of eternal gear, but only one piece of ordinary
- * weapon and one of ordinary armor: a new one takes the place of the old (and is worn if the old
- * one was: it is in the place you wield from). Otherwise it goes on at once only with `wear` and its slot
- * empty. Eternal gear never goes on by itself: it comes as a memory, to be read and set at a safe spot.
- * `replaced` is what you had to let go of.
+ * How much ordinary gear of a slot you may carry: two weapons (one for each hand; one you don't hold is kept on your back), one armor
+ * and one head piece. Eternal gear has no limit. Picking up past it is allowed, but the inventory then asks you to drop one before you go on.
  */
-export function receive(inv: Inventory, found: GearSpec[], wear = true): { inventory: Inventory; replaced: Gear[] } {
-  const next = { ...inv, bag: [...inv.bag] };
-  const replaced: Gear[] = [];
-  for (const piece of found) {
-    const gear = { ...piece, id: `gear-${next.made++}` } as Gear;
-    let takesPlace = false;
-    if (!gear.eternal) {
-      for (const old of next.bag.filter(g => !g.eternal && g.slot === gear.slot)) {
-        replaced.push(old);
-        next.bag = next.bag.filter(g => g !== old);
-        if (next[gear.slot] === old.id) { next[gear.slot] = null; takesPlace = true; }
-      }
-    }
-    next.bag.push(gear);
-    if ((wear || takesPlace) && !gear.eternal && next[gear.slot] === null) next[gear.slot] = gear.id;
-  }
-  return { inventory: next, replaced };
+export const CARRY: Record<Slot, number> = { weapon: 2, armor: 1, head: 1 };
+
+/** The ordinary gear of a slot you carry, oldest first. */
+export const carried = (inv: Inventory, slot: Slot): Gear[] => inv.bag.filter(g => g.slot === slot && !g.eternal);
+
+/** Whether you carry more ordinary gear of this slot than you may (`CARRY`): one has to be dropped. */
+export const overLimit = (inv: Inventory, slot: Slot): boolean => carried(inv, slot).length > CARRY[slot];
+
+/**
+ * Picks up a piece of gear into the bag, never putting it on. Nothing is let go of here, even past the limit (`CARRY`): the inventory
+ * has you drop one. Eternal gear comes as a memory, to be read and set at a safe spot. `gear` is the piece as you now own it.
+ */
+export function take(inv: Inventory, found: GearSpec): { inventory: Inventory; gear: Gear } {
+  const gear = { ...found, id: `gear-${inv.made}` } as Gear;
+  return { inventory: { ...inv, bag: [...inv.bag, gear], made: inv.made + 1 }, gear };
+}
+
+/** Lets go of a piece you own (never an eternal one): it leaves the bag, and if you wore it, that slot is left empty. */
+export function drop(inv: Inventory, id: string): Inventory {
+  const piece = inv.bag.find(g => g.id === id);
+  if (!piece || piece.eternal) return inv;
+  return { ...inv, bag: inv.bag.filter(g => g.id !== id), [piece.slot]: inv[piece.slot] === id ? null : inv[piece.slot] ?? null };
+}
+
+/**
+ * Wears this piece in its slot (an eternal one only if it is the one set in the slot's eternal place), or, with `null`, nothing: bare hands,
+ * no armor, bare-headed.
+ */
+export function wield(inv: Inventory, slot: Slot, id: string | null): Inventory {
+  if (id === null) return unequip(inv, slot, equippedSide(inv, slot) ?? "normal");
+  const piece = inv.bag.find(g => g.id === id && g.slot === slot);
+  if (!piece || (piece.eternal && pieceAt(inv, slot, "eternal")?.id !== id)) return inv;
+  return { ...inv, [slot]: id };
 }
 
 
