@@ -9,9 +9,10 @@ import { describeAction } from "../core/intents";
 import type { ActionDef } from "../core/patterns";
 import { createCombat } from "../core/setup";
 import { mirrorStance, swingFor } from "../core/stance";
-import { ARMOR } from "../core/rules";
+import { ARMOR, WEAPONS } from "../core/rules";
+import { type SkillId, SKILLS, skillsOfWeapon } from "../core/skills";
 import type { PoseName } from "../render/poses";
-import type { ArmorItem, ArmorTier, CombatState, HeadItem, Line, PlayerAction, Side, Stance, Swing, WeaponTier } from "../core/types";
+import type { ArmorItem, ArmorTier, CombatState, HeadItem, Line, PlayerAction, Side, Stance, Swing, WeaponItem, WeaponTier } from "../core/types";
 import { ITEMS } from "../explore/items";
 
 /** Kinds that are only a part of a multi-target enemy: the viewer shows the whole body instead. */
@@ -257,7 +258,23 @@ export interface PlayerScenario {
   kick?: Side;
   /** The line the dummy stands on (default front): an attack at the back line always swings overhead. */
   foeLine?: Line;
+  /** A weapon skill (made with the hand `punch` says): only offered while that hand holds a weapon that has it. */
+  skill?: SkillId;
 }
+
+/** What a hand can hold in the viewer: a weapon of a weight (bare hands for "baseline"), or one of the starting classes' own weapons. */
+export type HeldPick = WeaponTier | WeaponItem;
+/** Every weapon a hand can hold: empty, the three of each weight, then the classes' own. */
+export const HELD_PICKS: HeldPick[] = [...(Object.keys(WEAPONS) as WeaponTier[]), ...(Object.keys(ITEMS) as (keyof typeof ITEMS)[]).filter(id => ITEMS[id].slot === "weapon") as WeaponItem[]];
+const isItem = (pick: HeldPick): pick is WeaponItem => !(pick in WEAPONS);
+/** A held weapon's name ("None" for bare hands). */
+export const heldName = (pick: HeldPick): string => (isItem(pick) ? ITEMS[pick].name : pick === "baseline" ? "None" : WEAPONS[pick].name);
+/** A held weapon as the rules see it: its weight, and which class's own it is. */
+export const heldOf = (pick: HeldPick): { weapon: WeaponTier; weaponItem?: WeaponItem } =>
+  isItem(pick) ? { weapon: ITEMS[pick].tier as WeaponTier, weaponItem: pick } : { weapon: pick };
+/** The skills the weapons in your hands give you, each with its hand (the right hand's first). */
+export const heldSkills = (right: HeldPick, left: HeldPick): { skill: SkillId; hand: Side }[] =>
+  ([["right", right], ["left", left]] as const).flatMap(([hand, pick]) => skillsOfWeapon(heldOf(pick).weaponItem).map(skill => ({ skill, hand })));
 
 /**
  * An attack's name in the viewer: a sideways swing from a leading stance is an Openhand Swing (a Swing Left, or the left hand's mirror of it) or a
@@ -275,7 +292,7 @@ function attackName(stance: Stance, swing: Swing, punch: boolean): string {
  * either hand).
  * Staggered, only the recovery.
  */
-export function playerScenariosFrom(stance: PlayerViewStance): PlayerScenario[] {
+export function playerScenariosFrom(stance: PlayerViewStance, skills: { skill: SkillId; hand: Side }[] = []): PlayerScenario[] {
   if (stance === "staggered") return [{ id: "recover", label: "Staggered recovery", action: { type: "rest", target: "self" }, foe: "rest" }];
   const front = { line: "front" as Line, staggered: false };
   const attacks: PlayerScenario[] = [
@@ -286,6 +303,11 @@ export function playerScenariosFrom(stance: PlayerViewStance): PlayerScenario[] 
   const legs: Side[] = stance === "lead-left" ? ["right"] : stance === "lead-right" ? ["left"] : ["right", "left"];
   for (const leg of legs) {
     attacks.push({ id: `kick-${leg}`, label: legs.length > 1 ? `Kick, ${leg} leg` : "Kick", action: { type: "attack", target: "foe" }, foe: "rest", kick: leg });
+  }
+  // The skills of the weapons you hold (Stab, while a hand holds the Bronze Shortsword), each with its hand.
+  for (const { skill, hand } of skills) {
+    // (one that reaches only Far, the Hookshot, at a dummy on the back line)
+    attacks.push({ id: `skill-${skill}-${hand}`, label: hand === "left" ? `${SKILLS[skill].name}, left hand` : SKILLS[skill].name, action: { type: "attack", target: "foe" }, foe: "rest", punch: hand === "left", skill, ...(SKILLS[skill].far ? { foeLine: "back" as Line } : {}) });
   }
   if (stance !== "idle") {
     attacks.push(
@@ -312,6 +334,7 @@ const FOE_ID = "e0";
 export const playerActionOf = (sc: PlayerScenario): PlayerAction => ({
   type: sc.action.type, target: sc.action.target === "foe" ? FOE_ID : "self", ...(sc.punch ? { hand: "left" as const } : {}),
   ...(sc.kick ? { weight: "baseline" as const, kick: sc.kick } : {}),
+  ...(sc.skill ? { skill: sc.skill } : {}),
 });
 
 /** The armor and head gear the viewer puts on you: the starting classes' own pieces, worn (none: plain armor of the picked tier, bare-headed). */
@@ -334,10 +357,12 @@ export function playerViewerFight(weapon: WeaponTier, armor: ArmorTier): CombatS
  * the recovery), the dummy in front of you, whole, doing what the scenario needs. Always the same start, so every play of an action
  * begins from the same spot.
  */
-export function applyPlayerShow(s: CombatState, weapon: WeaponTier, armor: ArmorTier, stance: PlayerViewStance, scenario?: PlayerScenario, wear: Wear = {}, offWeapon: WeaponTier = "baseline"): CombatState {
+export function applyPlayerShow(s: CombatState, weapon: HeldPick, armor: ArmorTier, stance: PlayerViewStance, scenario?: PlayerScenario, wear: Wear = {}, offWeapon: HeldPick = "baseline"): CombatState {
   const v = structuredClone(s);
-  v.player.weapon = weapon;
-  v.player.offhand = { weapon: offWeapon };
+  const right = heldOf(weapon);
+  v.player.weapon = right.weapon;
+  v.player.weaponItem = right.weaponItem;
+  v.player.offhand = heldOf(offWeapon);
   // What you wear: a class's own armor (its tier is the item's) or plain armor of a tier, and its head gear (or none).
   v.player.armorItem = wear.armor;
   v.player.armor = wear.armor ? (ITEMS[wear.armor].tier as ArmorTier) : armor;

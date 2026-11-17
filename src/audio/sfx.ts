@@ -506,7 +506,7 @@ export function sfxFor(ev: CombatEvent): { name: Sfx; delay: number } | null {
       return { name: "flame", delay: 0.05 };
     case "eternal":
       // An eternal weapon's effect, just after its blow: the chisel bites again, the torch's wax hisses, the hammer rings on the guard.
-      return { name: ev.effect === "chisel" || ev.effect === "axe" || ev.effect === "sickle" ? "hit" : ev.effect === "torch" ? "flame" : ev.effect === "shortsword" ? "dodge" : "clang", delay: 0.08 };
+      return { name: ev.effect === "chisel" || ev.effect === "axe" || ev.effect === "sickle" ? "hit" : ev.effect === "torch" ? "flame" : ev.effect === "shortsword" || ev.effect === "stab" || ev.effect === "hookshot" ? "dodge" : "clang", delay: 0.08 };
     case "splash":
       return { name: "flame", delay: 0 };
     case "rest":

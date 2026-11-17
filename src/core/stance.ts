@@ -51,7 +51,8 @@ export function stanceAfter(act: PlayerAction, swing: Swing | undefined): Stance
 function stanceAfterRight(act: PlayerAction, swing: Swing | undefined): Stance {
   switch (act.type) {
     case "attack":
-      return swing === "right" ? "lead-left" : swing === "left" ? "lead-right" : "low";
+      // (a Stab lunges in with the right shoulder and leg: it lands in Right Lead; a Hookshot's pull lands as the sideways swing it is)
+      return swing === "right" || swing === "hook-right" ? "lead-left" : swing === "left" || swing === "hook-left" || swing === "stab" ? "lead-right" : "low";
     case "block":
       return "low";
     case "maneuver":

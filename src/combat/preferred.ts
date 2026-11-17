@@ -8,11 +8,11 @@ import type { SubSlot } from "./selection";
 
 const KEY = "demo-eternal-preferred-alternatives";
 
-/** The actions that have alternatives: Attack (left hand, Kick, right hand) and Block (left hand, right hand). */
-export type AlternativeAction = "attack" | "block";
+/** The actions that have alternatives: Attack (left hand, Kick, right hand), Block (left hand, right hand) and Skill (your weapons' skills). */
+export type AlternativeAction = "attack" | "block" | "skill";
 
 /** Which action with alternatives an action is one of. */
-export const alternativeOf = (action: PlayerAction): AlternativeAction => (action.type === "block" ? "block" : "attack");
+export const alternativeOf = (action: PlayerAction): AlternativeAction => (action.skill ? "skill" : action.type === "block" ? "block" : "attack");
 
 const read = (): Partial<Record<AlternativeAction, SubSlot>> => {
   try { return JSON.parse(localStorage.getItem(KEY) ?? "{}") ?? {}; } catch { return {}; }

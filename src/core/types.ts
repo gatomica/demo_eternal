@@ -3,6 +3,7 @@
  */
 import type { KindId } from "./bestiary";
 import type { WeaponLike, WeaponStats } from "./rules";
+import type { SkillId } from "./skills";
 
 export type Tier = "light" | "normal" | "heavy";
 
@@ -36,6 +37,11 @@ export interface PlayerAction {
    * leg (`kickFor` in stance.ts), at random from a stance with no leg leading; a side: that leg (the Model viewer, to show each).
    */
   kick?: true | Side;
+  /**
+   * A weapon skill (see `core/skills.ts`), made with the weapon in `hand` that gives it: an Attack that is that skill, paid with Eternity as it is
+   * made.
+   */
+  skill?: SkillId;
 }
 
 /** What an enemy telegraphs during planning. */
@@ -156,7 +162,7 @@ export type HeadItem = "helm" | "hood" | "mask" | "wardenhood";
 
 /** What you hold between turns (see `stance.ts`), and how an attack of yours swings. */
 export type Stance = "idle" | "low" | "lead-left" | "lead-right";
-export type Swing = "overhead" | "left" | "right" | "kick-right" | "kick-left";
+export type Swing = "overhead" | "left" | "right" | "kick-right" | "kick-left" | "stab" | "hook-left" | "hook-right";
 
 /**
  * What a hand holds, as the rules see it: its weapon's weight ("baseline": empty), which class's own weapon it is, whether its blows carry the
@@ -296,10 +302,10 @@ export type CombatEvent =
   /** A status of an enemy's own changed, e.g. Sealed. */
   | { kind: "flag"; who: string; flag: string; on: boolean }
   /**
-   * An eternal weapon's effect, as its blow lands: `damage` more Health lost or `fatigue` more Fatigue for
+   * An eternal weapon's effect, as its blow lands (or a skill's, `effect` its id, paid as its action is made): `damage` more Health lost or `fatigue` more Fatigue for
    * `target`. `spent`: the attacker's Eternity it cost; `death`: what Eternity couldn't pay, become Death on it.
    */
-  | { kind: "eternal"; attacker: string; target: string; effect: "chisel" | "torch" | "hammer" | "shortsword" | "axe" | "sickle"; damage: number; fatigue: number; spent: number; death: number }
+  | { kind: "eternal"; attacker: string; target: string; effect: "chisel" | "torch" | "hammer" | "shortsword" | "axe" | "sickle" | SkillId; damage: number; fatigue: number; spent: number; death: number }
   /** A boss enters a new phase. */
   | { kind: "phase"; who: string; phase: number };
 

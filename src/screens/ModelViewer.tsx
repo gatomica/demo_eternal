@@ -12,10 +12,9 @@ import { ENEMY_KINDS, type StatusToggle } from "../core/bestiary";
 import { needText } from "../core/conditions";
 import { nextStances } from "../core/patterns";
 import type { CombatState } from "../core/types";
-import { WEAPONS } from "../core/rules";
-import type { ArmorItem, ArmorTier, HeadItem, WeaponTier } from "../core/types";
+import type { ArmorItem, ArmorTier, HeadItem } from "../core/types";
 import { ITEMS } from "../explore/items";
-import { actionPosesOf, applyPlayerShow, applyShow, DEAD, DEBUG_TOGGLE, variantToggles, type EnemySubject, LINE_TOGGLE, MODEL, MODEL_VIEW, partLabel, partsOf, PLAYER_STANCES, playerActionOf, playerScenariosFrom, type PlayerViewStance, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow, type Wear, WEARABLES, wearOf } from "./viewerModel";
+import { actionPosesOf, applyPlayerShow, applyShow, HELD_PICKS, type HeldPick, heldName, heldSkills, DEAD, DEBUG_TOGGLE, variantToggles, type EnemySubject, LINE_TOGGLE, MODEL, MODEL_VIEW, partLabel, partsOf, PLAYER_STANCES, playerActionOf, playerScenariosFrom, type PlayerViewStance, playerViewerFight, STAGGERED, subjectName, VIEWER_SUBJECTS, viewerActions, viewerFight, type ViewerShow, type Wear, WEARABLES, wearOf } from "./viewerModel";
 import { GearViewer } from "./GearViewer";
 import { WearViewer } from "./WearViewer";
 import { GEAR_WEAPONS, type GearId } from "../render/gear3d";
@@ -401,15 +400,16 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
   // What you wear: a class's armor (else plain armor of the Armor tier) and head gear; opened from the Wearing row, the piece picked there.
   const [armorItem, setArmorItem] = useState<ArmorItem | "none">(wearing.armor ?? "none");
   const [headItem, setHeadItem] = useState<HeadItem | "none">(wearing.head ?? "none");
-  const [weapon, setWeapon] = useState<WeaponTier>("normal");
+  const [weapon, setWeapon] = useState<HeldPick>("normal");
   // (the left hand's weapon: none to start with)
-  const [offWeapon, setOffWeapon] = useState<WeaponTier>("baseline");
+  const [offWeapon, setOffWeapon] = useState<HeldPick>("baseline");
   // (Plain: no armor, as you look in the game without any; the Body row picks a class's armor instead.)
   const armor: ArmorTier = "none";
   /** The stance you stand in (and play your actions from), or "dead", or "model" for the T-pose. */
   const [held, setHeld] = useState<PlayerViewStance | "model" | "dead">("idle");
   const stance: PlayerViewStance = held === "model" || held === "dead" ? "idle" : held;
-  const scenarios = playerScenariosFrom(stance);
+  // (the skills offered are those of the weapons in your hands)
+  const scenarios = playerScenariosFrom(stance, heldSkills(weapon, offWeapon));
   const { orbit, reset } = useOrbit("player");
   const [scenarioId, setScenarioId] = useState<string | undefined>();
   const [lit, setLit] = useState(true);
@@ -450,8 +450,8 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
           <button className="chip viewer-toggle" aria-pressed={debug} onClick={() => setDebug(!debug)}>{debug ? DEBUG_TOGGLE.on : DEBUG_TOGGLE.off}</button>
         </div>
       </div>
-      {chips("Right hand", Object.keys(WEAPONS) as WeaponTier[], weapon, o => (o === "baseline" ? "None" : WEAPONS[o].name), setWeapon)}
-      {chips("Left hand", Object.keys(WEAPONS) as WeaponTier[], offWeapon, o => (o === "baseline" ? "None" : WEAPONS[o].name), setOffWeapon)}
+      {chips("Right hand", HELD_PICKS, weapon, heldName, setWeapon)}
+      {chips("Left hand", HELD_PICKS, offWeapon, heldName, setOffWeapon)}
       {chips("Body", ["none" as const, ...WEARABLES.filter(id => ITEMS[id].slot === "armor") as ArmorItem[]], armorItem, o => (o === "none" ? "Plain" : ITEMS[o].name), setArmorItem)}
       {chips("Head", ["none" as const, ...WEARABLES.filter(id => ITEMS[id].slot === "head") as HeadItem[]], headItem, o => (o === "none" ? "Bare" : ITEMS[o].name), setHeadItem)}
       {chips("Stance", [...PLAYER_STANCES.map(st => st.id), "dead" as const, "model" as const], held, o => (o === "model" ? MODEL : o === "dead" ? "Dead" : PLAYER_STANCES.find(st => st.id === o)!.label), o => { setHeld(o); setScenarioId(undefined); })}

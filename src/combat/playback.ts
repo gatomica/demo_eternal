@@ -50,6 +50,13 @@ export const SETTLE_MS = 700;
 /** How long the planning camera takes to ease toward a new selection. */
 export const NUDGE_MS = 500;
 
+/**
+ * Your Hookshot (the Nomadic Sickle's skill): how long it winds up (overhead, before the throw), how long the sickle flies out to its target (both in the
+ * step's approach, so it lands as the blow does), how long it stays hooked there before the pull, and how long the pull takes (the target dragged to you,
+ * the sickle back in the hand).
+ */
+export const HOOK_WIND_MS = 300, HOOK_FLY_MS = 260, HOOK_HOLD_MS = 140, HOOK_PULL_MS = 380;
+
 /** How close an attacker gets to its target (meters), and how far a clean hit knocks it back. */
 export const STRIKE_GAP = 0.9;
 

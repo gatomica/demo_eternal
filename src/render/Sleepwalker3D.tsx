@@ -8,11 +8,11 @@
  * Waxed Torch) as its flat pose does: in the weapon hand, at the pose's angle, its broad face turned to the side. A pose held in both hands
  * reaches the other hand to it in space. FIRST PASS: the poses are the flat ones lifted as they are, to be tuned one by one.
  */
-import { cloneElement, memo, type ReactElement, type ReactNode, useContext, useId, useMemo, useRef } from "react";
+import { cloneElement, memo, type ReactElement, type ReactNode, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
-import { type Cam, METERS_PER_UNIT as U, type Vec } from "./camera";
+import { type Cam, FIGURE_HEIGHT, facingVec, METERS_PER_UNIT as U, right as rightOf, type Vec } from "./camera";
 import { DebugLimbsContext } from "./debugLimbs";
-import { arcPart, canvas3d, ellipsoidPart, Figure3DSvg, type Part, ribcagePart, sameDrawing, weaponParts } from "./figure3d";
+import { arcPart, canvas3d, ellipsoidPart, trailPart, Figure3DSvg, type Part, ribcagePart, sameDrawing, weaponParts } from "./figure3d";
 import { held as heldAlong, type Joint, JOINTS, liftPose, type P3, placeRig, poseWeaponAxis, type Rig3, ribcageOf, type Seen, swingArc } from "./rig3d";
 import { ALL_POSES, type PoseName } from "./poses";
 import { modelOfWeapon } from "./gear3d";
@@ -43,6 +43,10 @@ const PANTS_W = 6.8, PANTS_D = 5.2;
 const PUFF_R = 5.2, PUFF_UP = 4.5, PUFF_PAST = 1.2, KNEE_BAND_R = 2.9, KNEE_BAND_HALF = 0.9, WRAP_EVERY = 4.2;
 /** The Nomad's V collar: how far to each side of the breastbone it starts, and its height at the neck and at its point (shares of the ribcage's half height). */
 const COLLAR_SPREAD = 0.42, COLLAR_TOP = 0.82, COLLAR_APEX = 0.5;
+/** The Nomadic Sickle's braid: how far behind the grip the round end of its handle is (figure units), how many twists it hangs down in, how big it is beside the mask's. */
+const SICKLE_POMMEL = 6.5, SICKLE_BRAID_LUMPS = 26, SICKLE_BRAID_SIZE = 0.75;
+/** How high up a figure the Hookshot hooks it (meters off the floor): its chest. */
+const HOOK_HEIGHT = 0.55 * FIGURE_HEIGHT;
 const MASK_R = 8.6, MASK_HOLE_W = 0.62, MASK_HOLE_H = 0.3, BRAID_LUMPS = 16, BRAID_END_R = 1.5, BANANA_LEN = 6.5, BANANA_OUT = 2.6, BANANA_W = 1.6, BRAID_STEP = 0.9, BRAID_R = 2.2, BRAID_SPREAD = 0.3;
 const GARB_SPINE_W = 5.5, GARB_SPINE_D = 3.2, GARB_SPINE_FROM = -0.25;
 /** The Hunter's cloak: its hem hangs this far (figure units) below the pelvis (negative: above it), its edges drawn in this many steps, and how much wider it gets (a share of its width) for each figure unit it goes down. */
@@ -81,10 +85,14 @@ const EYE_APART = 0.42, EYE_R = 1.8;
 /** The swings that leave an arch behind: the strike, and the wind-up it swings from. */
 const SWINGS: Partial<Record<PoseName, PoseName>> = {
   "sw-chop": "sw-overhead", "sw-overhead-strike": "sw-overhead-leap", "p3-overhead-strike": "p3-overhead-leap", "sw-swing-l": "sw-swing-l-windup", "sw-swing-r": "sw-swing-r-windup",
+  // (the player's skills: Stab's thrust, the Hookshot's throw)
+  "p3-stab": "p3-stab-up", "p3-hook-throw": "p3-hook-up",
 };
+/** The strikes that are a thrust, not a swing: their trail is a straight streak (a circle bowed only a little), and the weapon is not turned to lead with its edge. */
+const THRUSTS = new Set<PoseName>(["p3-stab"]);
 /** Each wind-up's strike (Arms Overhead's is the Overhead Strike's): the swing it is about to make, which its weapon's edge side faces. */
 const STRIKE_OF: Partial<Record<PoseName, PoseName>> = Object.fromEntries(
-  Object.entries(SWINGS).filter(([strike]) => strike !== "sw-chop").map(([strike, windUp]) => [windUp, strike]),
+  Object.entries(SWINGS).filter(([strike]) => strike !== "sw-chop" && !THRUSTS.has(strike as PoseName)).map(([strike, windUp]) => [windUp, strike]),
 );
 
 /** The way its broad face turns: to its side, so the blade is seen flat from the side, as the flat figure shows it. */
@@ -107,6 +115,12 @@ export interface Sleepwalker3DProps {
    * player's Left leg leading stance, the mirror of Right leg leading.
    */
   mirror?: boolean;
+  /**
+   * The Hookshot as it plays (the player's): the sickle in the hand at work thrown out on its braid to `tx`, `tz` (where its target stands, on the floor,
+   * in the world) from `out` (a `performance.now()` time) over `fly` ms, held there, and pulled back in from `back` over `pull` ms, its target dragged
+   * from there to `ex`, `ez` as it comes. Its numbers only (no objects inside), so a figure drawn again with the same ones is the same drawing.
+   */
+  hook?: { tx: number; tz: number; ex: number; ez: number; out: number; fly: number; back: number; pull: number };
   /** A patrol warden: the Penitent Warden's pointed hood over its head (its face in shadow). */
   hooded?: boolean;
   /** Wax sealing the whole body. */
@@ -241,11 +255,23 @@ function hull(ps: [number, number][]): [number, number][] {
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
-function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "baseline", punch: punching, mirror, gearOnly, hooded: hoodedKind, encased, waxCaked, dead, gear, eternalFlash, title, swayId, cam, at, yaw, scale = 1, w, h, box }: Sleepwalker3DProps) {
+function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "baseline", punch: punching, mirror, hook, gearOnly, hooded: hoodedKind, encased, waxCaked, dead, gear, eternalFlash, title, swayId, cam, at, yaw, scale = 1, w, h, box }: Sleepwalker3DProps) {
   const openingId = useId(); // (the clip that cuts the face to the black hood's opening)
   // The cloth that hangs from it (the tailcoat, the braid, the leather skirt) sways with its movement (sway.ts).
   const root = useRef<SVGSVGElement>(null);
   useSway(root, swayId ?? openingId);
+  // (a Hookshot out: drawn again every frame until the sickle is back in the hand)
+  const [, setHookFrame] = useState(0);
+  useEffect(() => {
+    if (!hook) return;
+    let raf = 0;
+    const frame = () => {
+      setHookFrame(n => n + 1);
+      if (!hook.back || performance.now() < hook.back + hook.pull + 50) raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [hook?.out, hook?.back]); // eslint-disable-line react-hooks/exhaustive-deps
   // (the player's hoods are drawn as the patrol wardens' is: black for its own hood)
   const hooded = hoodedKind || gear?.headItem === "hood" || gear?.headItem === "wardenhood";
   const blackHood = gear?.headItem === "hood";
@@ -276,16 +302,22 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
   const way = (v: P3): P3 => (dead ? fall(v, 0, false) : v);
   // The arch of a strike: from where the weapon's far end was in the wind-up to where it ends (bare-handed, from the hand), as thick as the
   // weapon's damaging part (the blade, the brick, the bulb).
-  const windUp = SWINGS[pose];
-  // (A level swing across her front, left or right, reached furthest straight ahead halfway through, the arm fully stretched out: its arch passes there.)
+  // (The Hookshot's pull, a sideways swing's landing made from the throw: its arch runs from the hand as it threw to the hand as it pulls, as a bare
+  // hand's does, the sickle being out on its braid.)
+  const pulling = !!hook && ACROSS.has(pose);
+  const windUp = pulling ? "p3-hook-throw" : SWINGS[pose];
+  // (A level swing across her front, left or right, reached furthest straight ahead halfway through, the arm fully stretched out: its arch passes there.
+  // A thrust's runs nearly straight, bowed up only a little.)
   const arc = useMemo(() => {
     if (!windUp) return undefined;
-    const before = liftFor(windUp);
-    const [from, to] = bare ? [before.joints[fist], rig.joints[fist]] : [swungIn(before, windUp).tip, swungIn(rig, pose).tip];
+    const before = liftFor(windUp), byHand = bare || pulling;
+    const [from, to] = byHand ? [before.joints[fist], rig.joints[fist]] : [swungIn(before, windUp).tip, swungIn(rig, pose).tip];
     const sh = rig.joints[fistShoulder], far = (RIG.upperArm + RIG.forearm + (bare ? 0 : leftArmed ? offReach : reach)) * U;
-    const mid: P3 | undefined = ACROSS.has(pose) ? [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, sh[2] + far] : undefined;
-    return swingArc(from, to, bare ? undefined : swungModel && swungModel.damage * U, mid);
-  }, [windUp, pose, hand, rig, weapon, reach, model, bare, fist, fistShoulder, flipped, leftArmed, offReach, swungModel]); // eslint-disable-line react-hooks/exhaustive-deps
+    const length = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+    const mid: P3 | undefined = ACROSS.has(pose) && !pulling ? [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, sh[2] + far]
+      : THRUSTS.has(pose) ? [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2 + length * 0.04, (from[2] + to[2]) / 2] : undefined;
+    return swingArc(from, to, byHand ? undefined : swungModel && swungModel.damage * U, mid);
+  }, [windUp, pose, hand, rig, weapon, reach, model, bare, fist, fistShoulder, flipped, leftArmed, offReach, swungModel, pulling]); // eslint-disable-line react-hooks/exhaustive-deps
   // A Kick as it lands leaves an arch from the kicking foot, like a bare-handed blow's from the fist: from where that foot was in the wind-up to where
   // it ends. Its wind-up is drawn mirrored the other way (the right leg's winds up as Left Lead and lands as Right Lead), and the foot is the right
   // one unless this kick is drawn mirrored (the left leg's).
@@ -297,7 +329,7 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
   }, [pose, dead, hand, reach, flipped, rig]);
   // The swing this pose is part of, for the weapon's edge side to lead through: its own strike's arch, or (a wind-up) the one it is about to make.
   const swing = useMemo(() => {
-    if (bare) return undefined;
+    if (bare || THRUSTS.has(pose)) return undefined;
     const strike = windUp ? pose : STRIKE_OF[pose], from = windUp ?? pose;
     if (!strike) return undefined;
     // (the left hand's swing is the mirrored one, as it is drawn)
@@ -873,22 +905,119 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
     ball("wax-crown", plus(headAt, way([0, 5 * U, -1.5 * U])), 4.6, "fig-wax-head", 0.012);
   }
 
-  if (arc) parts.push(arcPart(c, arc));
+  // (the pull's arch is a trail of its own, drawn anew: the throw's, before it, keeps its place until then)
+  if (arc) parts.push(pulling ? trailPart(c, "swing-pull", arc.circle) : arcPart(c, arc));
   if (kickArc) parts.push(arcPart(c, kickArc));
+
+  // The Hookshot: the sickle in the hand at work thrown out on its braid to its target, spinning end over end, held there, then pulled back in to the
+  // hand as its target is dragged after it (see `hook`). Undefined while it is in the hand.
+  const gear0 = gear; // (what you wear and hold: in the blocks below, `gear` is a weapon's drawn parts)
+  const thrown = ((): { held: { hand: P3; axis: P3; tip: P3 }; holder: P3 } | undefined => {
+    if (!hook || dead || !hook.out) return undefined;
+    const now = performance.now();
+    if (now < hook.out) return undefined;
+    const fwd = facingVec(yaw), rgt = rightOf(yaw), s = scale || 1;
+    /** A spot on the floor of the world, in body space, at the height it hooks a figure (its chest). */
+    const body = (x: number, z: number): P3 => { const dx = x - at.x, dz = z - at.z; return [(dx * rgt.x + dz * rgt.z) / s, HOOK_HEIGHT / s, (dx * fwd.x + dz * fwd.z) / s]; };
+    const holder = leftArmed ? rig.joints.handL : rig.joints.handR, r = leftArmed ? offReach : reach;
+    const t0 = body(hook.tx, hook.tz), t1 = body(hook.ex, hook.ez);
+    const ease = (u: number) => 1 - (1 - u) * (1 - u), mix = (a: P3, b: P3, k: number): P3 => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+    let mid: P3, turns: number;
+    if (!hook.back) {
+      const k = Math.min(1, (now - hook.out) / hook.fly);
+      mid = mix(holder, t0, ease(k));
+      turns = k;
+    } else {
+      const k = Math.min(1, (now - hook.back) / hook.pull);
+      if (k >= 1) return undefined;
+      // (its target dragged from where it hooked it toward you, and the sickle coming back from it to the hand)
+      mid = mix(mix(t0, t1, ease(k)), holder, ease(k));
+      turns = 1 + k;
+    }
+    // (end over end, in the upright plane along its way: a turn and a half out, as much back)
+    const d0 = unit([t0[0] - holder[0], 0, t0[2] - holder[2]]), a = turns * Math.PI * 3;
+    const axis: P3 = [d0[0] * Math.cos(a), Math.sin(a), d0[2] * Math.cos(a)];
+    return { held: heldAlong(plus(mid, axis, -(r / 2) * U), axis, r), holder };
+  })();
+
+  /**
+   * The Nomadic Sickle's braid, the desert mask's (its twists, the ball it ends on and its two bananas), smaller, hanging from the round end of the
+   * handle. In the hand it hangs straight down from it (as long as `SICKLE_BRAID_LUMPS` twists, short of the floor), swaying; thrown (`holder`, the
+   * hand that keeps hold of its end), it is stretched from the sickle all the way back to that hand, its end hanging from the hand.
+   */
+  const sickleBraid = (key: string, held: { hand: P3; axis: P3 }, holder?: P3) => {
+    const base = plus(held.hand, held.axis, -SICKLE_POMMEL * U), down: P3 = [0, -1, 0];
+    /** The twists, from `from` along `dir` (each `BRAID_STEP` apart, the first `start` along), to its two sides along `side`, tapering. */
+    const twistsAlong = (from: P3, dir: P3, side: P3, n: number, start: number, swaying?: { pivot: [number, number]; angles: [number, number] }) => {
+      for (let k = 0; k < n; k++) {
+        const sgn = k % 2 ? 1 : -1, size = SICKLE_BRAID_SIZE * (1 - (0.55 * k) / Math.max(1, n));
+        const at3 = plus(plus(from, dir, (start + k * BRAID_STEP) * U), side, sgn * BRAID_SPREAD * (1 - (0.5 * k) / Math.max(1, n)) * U);
+        const here = see(at3), below = see(plus(at3, dir, U)), out = see(plus(at3, side, sgn * U));
+        const dx = X(below) - X(here) + 0.9 * (X(out) - X(here)), dy = Y(below) - Y(here) + 0.9 * (Y(out) - Y(here)), dl = Math.hypot(dx, dy) || 1;
+        const R = BRAID_R * size * scaleAt(here), off = R * 0.6, th = Math.atan2(dy, dx);
+        const alpha = Math.acos(-off / (2 * R)), psi = Math.atan2(R * Math.sin(alpha), R * Math.cos(alpha) + off);
+        const cx = X(here), cy = Y(here), ux = dx / dl, uy = dy / dl;
+        const outer = Array.from({ length: 13 }, (_, i) => { const f = th - alpha + (2 * alpha * i) / 12; return [cx + R * Math.cos(f), cy + R * Math.sin(f)]; });
+        const inner = Array.from({ length: 13 }, (_, i) => { const f = th + psi - (2 * psi * i) / 12; return [cx - off * ux + R * Math.cos(f), cy - off * uy + R * Math.sin(f)]; });
+        const node = <polygon points={[...outer, ...inner].map(q => q.join(",")).join(" ")} className="fig-mask-tail" />;
+        const k2 = `${key}-twist${k}`;
+        parts.push({ key: k2, depth: here.depth, node: swaying ? cloth("braid", swaying.pivot, 0.35 + (0.65 * k) / Math.max(1, n), k2, node, swaying.angles) : <g key={k2}>{node}</g> });
+      }
+    };
+    /** The end: a ball, and the two bananas hanging from it, curving out to each side. */
+    const tail = (end: P3, side: P3, swaying?: { pivot: [number, number]; angles: [number, number] }) => {
+      const endScreen = see(end);
+      const wrap = (k2: string, weight: number, node: ReactNode) => (swaying ? cloth("braid", swaying.pivot, weight, k2, node, swaying.angles) : <g key={k2}>{node}</g>);
+      parts.push({ key: `${key}-end`, depth: endScreen.depth, node: wrap(`${key}-end`, 1, <circle cx={X(endScreen)} cy={Y(endScreen)} r={BRAID_END_R * SICKLE_BRAID_SIZE * scaleAt(endScreen)} className="fig-mask-tail" />) });
+      [-1, 1].forEach((sgn, n) => {
+        const spine = Array.from({ length: 15 }, (_, i) => {
+          const t = i / 14, pt = see(plus(plus(end, down, BANANA_LEN * SICKLE_BRAID_SIZE * t * U), side, sgn * BANANA_OUT * SICKLE_BRAID_SIZE * Math.sin((Math.PI / 2) * t) * U));
+          return { x: X(pt), y: Y(pt), t };
+        });
+        const half = (BANANA_W * SICKLE_BRAID_SIZE * scaleAt(endScreen)) / 2;
+        const sides = spine.map((q, i) => {
+          const a = spine[Math.max(0, i - 1)], b = spine[Math.min(spine.length - 1, i + 1)], dx = b.x - a.x, dy = b.y - a.y, dl = Math.hypot(dx, dy) || 1, w2 = half * Math.sin(Math.PI * q.t) ** 0.8;
+          return { l: [q.x - (dy / dl) * w2, q.y + (dx / dl) * w2], r: [q.x + (dy / dl) * w2, q.y - (dx / dl) * w2] };
+        });
+        const outline = [...sides.map(q => q.l), ...sides.map(q => q.r).reverse()];
+        parts.push({ key: `${key}-banana${n}`, depth: endScreen.depth, node: wrap(`${key}-banana${n}`, 1.15, <polygon points={outline.map(q => q.join(",")).join(" ")} className="fig-mask-tail" />) });
+      });
+    };
+    if (holder) {
+      // (stretched taut from the sickle to the hand, as many twists as it takes)
+      const v: P3 = [holder[0] - base[0], holder[1] - base[1], holder[2] - base[2]], len = Math.hypot(...v) / U, dir = unit(v);
+      const across = Math.hypot(dir[0], dir[2]) > 0.2 ? unit([-dir[2], 0, dir[0]]) : ([1, 0, 0] as P3);
+      twistsAlong(base, dir, across, Math.max(0, Math.floor((len - 1) / BRAID_STEP)), 0.5);
+      tail(holder, [1, 0, 0]);
+      return;
+    }
+    // (hanging, swaying from the round end: as long as it is, but kept off the floor)
+    const room = base[1] / U - 1 - 2.4 - BANANA_LEN * SICKLE_BRAID_SIZE;
+    const n = Math.max(0, Math.min(SICKLE_BRAID_LUMPS, Math.floor(room / BRAID_STEP)));
+    const pivotAt = see(base), hangs = turned(pivotAt, see(plus(base, down, 0.2)));
+    const swaying = { pivot: [X(pivotAt), Y(pivotAt)] as [number, number], angles: [hangs, hangs] as [number, number] };
+    twistsAlong(base, down, [1, 0, 0], n, 1.2, swaying);
+    tail(plus(base, down, (1.2 + n * BRAID_STEP) * U), [1, 0, 0], swaying);
+  };
 
   // Its weapon, in the weapon hand, as the pose points it; dead, dropped by its hand, lying flat on the floor, pointing out from its side.
   if (weapon !== "baseline") {
     const hand3 = rig.weaponHand === "right" ? rig.joints.handR : rig.joints.handL;
+    // (Drawn mirrored (Left leg leading), the right hand is where the free hand is in the stance: with a weapon in the left hand, which is where the
+    // weapon hand is, the right holds its weapon as the left hand holds one there, the mirror of that: low, out of the way.)
     const held = dead
       ? heldAlong([hand3[0], 1.2 * U, hand3[2]], way([rig.weaponHand === "right" ? 0.55 : -0.55, -0.83, 0]), reach, 0.5)
+      : thrown && !leftArmed ? thrown.held
       : punch ? heldAlong(hand3, HELD_BACK_WAY, reach)
+      : flipped && offWeapon !== "baseline" ? heldAlong(hand3, HELD_BACK_WAY, reach)
       : flipped ? ((a: P3) => heldAlong(hand3, [-a[0], a[1], a[2]], reach))(poseWeaponAxis(ALL_POSES[pose]))
       : weaponIn(rig, pose, reach);
     // (its middle, between the neck and the pelvis: out of a swing the weapon's edge side faces away from it)
     const wielder: P3 | undefined = dead ? undefined : [0, 1, 2].map(i => (rig.joints.neck[i] + rig.joints.pelvis[i]) / 2) as unknown as P3;
     // (While the left hand is at work, the right's weapon is out of the swing, and of its flash.)
-    const gear = weaponParts(c, { weapon, model, reach, held, face: dead ? [0, 1, 0] : FACE, swing: dead || punch ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? undefined : eternalFlash });
+    const gear = weaponParts(c, { weapon, model, reach, held, face: dead ? [0, 1, 0] : FACE, swing: dead || punch || thrown ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? undefined : eternalFlash });
     parts.push(...gear);
+    if (gear0?.weaponItem === "sickle" && !dead) sickleBraid("braid-right", held, thrown && !leftArmed ? thrown.holder : undefined);
     // (A pose that holds the weapon in both hands holds it in the right alone while the left holds a weapon of its own.)
     const asDrawn = raw.for3d ? { ...raw, ...raw.for3d } : raw;
     gripDots(gear, asDrawn.grip && !flipped && offWeapon === "baseline" ? ["R", "L"] : [rig.weaponHand === "right" ? "R" : "L"]);
@@ -897,13 +1026,17 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
   // dead, dropped by the left hand.
   if (offWeapon !== "baseline") {
     const handL = rig.joints.handL;
+    // (Drawn mirrored (Left leg leading), the left hand is where the weapon hand is in the stance: it holds its weapon as the right hand holds one
+    // there, mirrored.)
     const held = dead
       ? heldAlong([handL[0], 1.2 * U, handL[2]], way([-0.55, -0.83, 0]), offReach, 0.5)
-      : punch ? mirroredIn(rig, pose, offReach)
+      : thrown && leftArmed ? thrown.held
+      : punch || flipped ? mirroredIn(rig, pose, offReach)
       : heldAlong(handL, OFF_HELD_WAY, offReach);
     const wielder: P3 | undefined = dead ? undefined : [0, 1, 2].map(i => (rig.joints.neck[i] + rig.joints.pelvis[i]) / 2) as unknown as P3;
-    const gear = weaponParts(c, { weapon: offWeapon, model: offModel, reach: offReach, held, face: dead ? [0, 1, 0] : FACE_L, swing: dead || !punch ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? eternalFlash : undefined, key: "weapon-left" });
+    const gear = weaponParts(c, { weapon: offWeapon, model: offModel, reach: offReach, held, face: dead ? [0, 1, 0] : FACE_L, swing: dead || !punch || thrown ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? eternalFlash : undefined, key: "weapon-left" });
     parts.push(...gear);
+    if (gear0?.offItem === "sickle" && !dead) sickleBraid("braid-left", held, thrown && leftArmed ? thrown.holder : undefined);
     gripDots(gear, ["L"]);
   }
 

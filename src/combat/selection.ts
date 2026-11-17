@@ -27,6 +27,14 @@ export interface WheelOption {
   look?: WheelLook;
   /** Alternative actions: pressing the option's own direction again opens it into these parts (an empty one is for later). Without them it cannot be opened. */
   alternatives?: Record<SubSlot, WheelOption | null>;
+  /** Shown, but it can't be chosen now (a skill with no enemy it can be aimed at). */
+  disabled?: boolean;
+  /**
+   * A weapon skill: drawn as its weapon's picture, with two bars along the inner edge: the attack's, from the skill's own numbers
+   * (`blow`, shares of your max health, its effect in: Stab's cost cut, the Hookshot's Poise grown), and just outside it the Eternity it spends
+   * (`eternity`, a share of your max Eternity), the part of it your Eternity can't pay (`death`, the same share) in black.
+   */
+  skill?: { blow: { cost: number; damage: number; poise: number; deadly: number }; eternity: number; death: number };
 }
 
 export type Wheel = Record<Dir, WheelOption | null>;

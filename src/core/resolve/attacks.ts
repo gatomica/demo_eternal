@@ -11,6 +11,7 @@ import { kindOf } from "../bestiary";
 import { addDeath, BLOCK_SENDS_BACK, blowShares, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, ITEM_SHARE, resistance, spendEternity, WEAPON_EFFECTS, WEAPON_LIKE, weaponOf } from "../rules";
 import type { CombatEvent, Enemy, Fighter, Player, Rng, WeaponTier } from "../types";
 import { bodyOf } from "../body";
+import { canTarget, handHasSkill, SKILL_RATE, SKILLS, skillPrice, skillStats } from "../skills";
 import { waxOn } from "./statuses";
 import type { Turn } from "./turn";
 
@@ -82,7 +83,9 @@ function weaponNow(t: Turn, f: Fighter) {
     if (like || mods) return { ...WEAPON_LIKE[like ?? "plain"], ...mods };
   }
   const weight = t.weightOf(f), hand = t.handOf(f);
-  return weaponOf(weight, weight === hand.weapon ? hand.weaponItem : undefined);
+  const w = weaponOf(weight, weight === hand.weapon ? hand.weaponItem : undefined);
+  // (a skill of yours may have modifiers of its own, over the weapon's: the Hookshot's)
+  return f === t.p && t.act?.type === "attack" && t.act.skill ? skillStats(w, t.act.skill) : w;
 }
 
 /** The Defense of the weapon a fighter blocks with this turn (an enemy's Block may have its own: `defense` in its pattern). */
@@ -174,10 +177,34 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
       t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: "shortsword", damage: 0, fatigue: spared, ...paid });
     }
   }
+  // A skill: paid in full as the attack is made, whatever its effect turns out to do. Stab's cuts the attack's Fatigue cost by what was paid, one
+  // for one; the Hookshot's is put on its target as Fatigue, as its blow lands (below), unless it is dodged.
+  const act = attacker === p ? t.act : undefined;
+  const skill = act?.type === "attack" && act.skill && handHasSkill(p, act.hand ?? "right", act.skill) && (target === p || canTarget(act.skill, target as Enemy)) ? act.skill : undefined;
+  /** The skill's payment, and the Fatigue it is to put on the target (the Hookshot's), for when the blow lands. */
+  let skillPaid: { spent: number; death: number; tire: number } | undefined;
+  if (skill) {
+    const price = skillPrice(p, skill);
+    // (The Model viewer's dummy fight spends nothing, as it takes nothing.)
+    const paid = t.s.config.dummy ? { spent: price, death: 0 } : spendEternity(p, price, !!hand.mortal);
+    const worth = (paid.spent + paid.death) * SKILL_RATE.fatigue;
+    if (SKILLS[skill].effect === "cheaper") {
+      cost = Math.max(0, cost - worth);
+      t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: skill, damage: 0, fatigue: worth, ...paid });
+    } else skillPaid = { ...paid, tire: worth };
+  }
+  /** The Hookshot's effect, as its blow lands (`tire`: the Fatigue it puts on the target; none when it is dodged). */
+  const skillLands = (tire: number) => {
+    if (!skill || !skillPaid) return;
+    t.tire(target, tire);
+    t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: skill, damage: 0, fatigue: tire, spent: skillPaid.spent, death: skillPaid.death });
+  };
+  /** A skill that pulls its target to you (the Hookshot) only does so if it lands. */
+  const pulling = !!skill && !!SKILLS[skill].pull;
   t.tire(attacker, cost);
   // Melee closes in on the target; a ranged attacker stays where it is. An enemy striking an ally tries to step onto the ally's line
   // instead (forward from the back line, back from the front; not at all when they share one), which your Maneuver can undo.
-  if (attacker === p) t.pulls.set(target.id, p.id);
+  if (attacker === p) { if (!pulling) t.pulls.set(target.id, p.id); }
   else if (target !== p) { if (!ranged && (target as Enemy).line !== (attacker as Enemy).line) t.shifts.set(attacker.id, (target as Enemy).line); }
   else if (!ranged) t.pulls.set(attacker.id, attacker.id);
   // Whom it attacked with its weapon this turn, however the blow goes (for the Jagged Chisel, next turn; not a Hurl Wax).
@@ -193,6 +220,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
     const effort = dodgeFatigue(target, dmg);
     t.tire(target, effort);
     t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: effort, ranged, swing });
+    skillLands(0);
     return;
   }
   const blocking = t.isBlocking(target, attacker);
@@ -213,6 +241,11 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   deathOn(t, target, blow.deadly);
   const self = attacker !== p ? (attacker as Enemy) : undefined;
   t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: blocking ? sentBack : resisted + blow.poise, ranged, fire: !!self?.intent.tags?.includes("fire"), swing });
+  // (the Hookshot, landed, blocked or not: its Fatigue, and it pulls its target to you. It is an attack: a direct hit breaks a Rest, though it deals
+  // no damage.)
+  skillLands(skillPaid?.tire ?? 0);
+  if (skill && !blocking) hurt(t, target);
+  if (pulling) t.pulls.set(target.id, p.id);
   eternalEffect(t, attacker, target, blocking ? "blocked" : "hit", ranged, weight, dmg);
   // A blocked melee blow can still leave something (the Warden's flail leaves its wax).
   const onBlocked = self && blocking && !ranged ? kindOf(self).onBlocked : undefined;

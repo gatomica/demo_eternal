@@ -1,6 +1,7 @@
 /**
  * ItemCard.tsx — what an item is, shown in the middle of every item menu (the inventory, the guide's memories, a class's gear): the
- * item itself large, then below it, in this order, its name, its type (for a weapon, a bar of its cost and damage), its lore and its effects; for
+ * item itself large, then below it, in this order, its name, its type (for a weapon, a bar of its cost and damage), its lore and its effects; a
+ * weapon's skills, each under a thin line: its name, its Eternity bar (`EternityMeasure`, as on the wheel) and what it does; for
  * armor and head gear, at the very bottom, the bar of its Resistance (`ResistMeasure`); for a weapon, there, the bar of its Defense (`DefenseMeasure`).
  */
 import { gearName, type GearSpec, pieceWeight, type Slot, weightLabel } from "./gear";
@@ -9,6 +10,7 @@ import { type ItemId, ITEMS } from "./items";
 import { blowShares, defenseOf, WEAPON_EFFECTS, WEAPONS, weaponOf } from "../core/rules";
 import type { WeaponItem, WeaponTier } from "../core/types";
 import { EFFECT, LORE } from "./lore";
+import { type SkillId, SKILLS, skillsOfWeapon } from "../core/skills";
 
 /** What the card shows. */
 export interface CardInfo {
@@ -27,6 +29,8 @@ export interface CardInfo {
   weight?: number;
   /** A weapon: its Defense (the share of a blow a Block made with it stops). */
   defense?: number;
+  /** A weapon: the skills it gives the hand that holds it. */
+  skills?: SkillId[];
 }
 
 const SLOT_NOUN: Record<Slot, string> = { weapon: "weapon", armor: "armor", head: "headgear" };
@@ -48,13 +52,15 @@ export function cardOfGear(g: GearSpec): CardInfo {
   // (The weapons' effects are off for now: none is shown.)
   const effect = !WEAPON_EFFECTS && g.slot === "weapon" ? undefined : base && !g.eternal ? `${base} Not eternal: paid in Death.` : base;
   const note = !dreams ? "Its dreams are unread." : g.eternal && !lore && !effect ? "Its dreams are faint." : undefined;
-  return { slot: g.slot, tier: g.tier, item: g.item, name: gearName(g), type: typeOf(g.slot, g.tier), lore, effect, note, ...(g.slot !== "weapon" ? { weight: pieceWeight(g) } : { defense: defenseOf(g.tier, g.item as WeaponItem | undefined) }) };
+  // (A weapon's skills show once its dreams are read, as its lore does.)
+  const skills = g.slot === "weapon" && dreams ? skillsOfWeapon(g.item as WeaponItem | undefined) : [];
+  return { slot: g.slot, tier: g.tier, item: g.item, name: gearName(g), type: typeOf(g.slot, g.tier), lore, effect, note, ...(g.slot !== "weapon" ? { weight: pieceWeight(g) } : { defense: defenseOf(g.tier, g.item as WeaponItem | undefined), skills }) };
 }
 
 /** The card of a starting class's own piece (always eternal). */
 export function cardOfItem(id: ItemId): CardInfo {
   const info = ITEMS[id];
-  return { slot: info.slot, tier: info.tier, item: id, name: info.name, type: typeOf(info.slot, info.tier), lore: info.lore, effect: info.slot === "weapon" && WEAPON_EFFECTS ? info.effect : undefined, ...(info.slot !== "weapon" ? { weight: info.weight } : { defense: defenseOf(info.tier, id as WeaponItem) }) };
+  return { slot: info.slot, tier: info.tier, item: id, name: info.name, type: typeOf(info.slot, info.tier), lore: info.lore, effect: info.slot === "weapon" && WEAPON_EFFECTS ? info.effect : undefined, ...(info.slot !== "weapon" ? { weight: info.weight } : { defense: defenseOf(info.tier, id as WeaponItem), skills: skillsOfWeapon(id as WeaponItem) }) };
 }
 
 /**
@@ -89,8 +95,22 @@ export function ResistMeasure({ share, to }: { share: number; to?: number }) {
   return (
     <div className="resist-measure" role="img" aria-label={label}>
       <i className="resist-share" style={{ width: pct(share) }} />
+      <i className="resist-missing" style={{ left: pct(share), right: 0 }} />
       {to !== undefined && to > share + 1e-9 && <i className="resist-gain" style={{ left: pct(share), width: pct(to - share) }} />}
       {to !== undefined && to < share - 1e-9 && <i className="resist-loss" style={{ left: pct(to), width: pct(share - to) }} />}
+    </div>
+  );
+}
+
+/**
+ * A skill's Eternity bar, as on the wheel: as long as your max Eternity, Eternity's pale blue from the left for the share of it the skill spends,
+ * empty (the card showing through) past it.
+ */
+export function EternityMeasure({ share }: { share: number }) {
+  const pct = Math.max(0, Math.min(1, share)) * 100;
+  return (
+    <div className="eternity-measure" role="img" aria-label={`Spends ${Math.round(share * 100)}% of your max Eternity`}>
+      <i className="eternity-spent" style={{ width: `${pct}%` }} />
     </div>
   );
 }
@@ -137,6 +157,14 @@ export function ItemCard({ info, slot, empty, note, mirrored, measure, vanish = 
       {info.lore && <p className="item-card-lore">{info.lore}</p>}
       {info.effect && <p className="item-card-effect">{info.effect}</p>}
       {shownNote && <p className="item-card-lore">{shownNote}</p>}
+      {info.skills?.map(id => (
+        <div key={id} className="item-card-skill">
+          <hr className="item-card-sep" />
+          <div className="item-card-skill-name">{SKILLS[id].name}</div>
+          <EternityMeasure share={SKILLS[id].scaling} />
+          <p className="item-card-effect">{SKILLS[id].text}</p>
+        </div>
+      ))}
       {info.weight !== undefined && <ResistMeasure share={info.weight} />}
       {info.defense !== undefined && <DefenseMeasure defense={info.defense} />}
     </div>

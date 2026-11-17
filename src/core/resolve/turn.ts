@@ -5,6 +5,7 @@
  */
 import { bodyOf } from "../body";
 import { kickFor, mirrorStance, swingFor } from "../stance";
+import { SKILLS, skillSwing } from "../skills";
 import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Hand, Line, Player, PlayerAction, Step, Swing, WeaponTier } from "../types";
 
 /** The action the player is locked into this turn, if any. */
@@ -117,7 +118,7 @@ export function beginTurn(prev: CombatState, action: PlayerAction, rng: () => nu
     wasStaggered: new Set(fighters.filter(f => f.staggered).map(f => f.id)),
     hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(), shifts: new Map(),
     cancelled: new Set(), blocked: new Set(), attacked: new Map(), interrupted: new Set(), fellReviving: new Set(),
-    swing: act?.type === "attack" && act.kick ? kickFor(p.stance, act.kick, rng) : act?.type === "attack" ? swingFor(act.hand === "left" ? mirrorStance(p.stance) : p.stance, alive.find(e => e.id === act.target)) : undefined,
+    swing: act?.type === "attack" && act.kick ? kickFor(p.stance, act.kick, rng) : act?.type === "attack" && act.skill && SKILLS[act.skill].swing ? skillSwing(act.skill, act.hand === "left" ? mirrorStance(p.stance) : p.stance) : act?.type === "attack" ? swingFor(act.hand === "left" ? mirrorStance(p.stance) : p.stance, alive.find(e => e.id === act.target)) : undefined,
     steps: [],
     events: [],
     emit: ev => {
@@ -140,7 +141,8 @@ export function beginTurn(prev: CombatState, action: PlayerAction, rng: () => nu
     handOf: f => (f === p && act?.hand === "left" ? p.offhand
       : f === p ? { weapon: p.weapon, weaponItem: p.weaponItem, eternal: p.eternal, mortal: p.mortalWeapon, lastTarget: p.lastTarget }
       : { weapon: f.weapon, eternal: f.eternal, lastTarget: f.lastTarget }),
-    isRanged: f => f !== p && !!(f as Enemy).intent.ranged,
+    // (yours: a ranged skill, the Hookshot)
+    isRanged: f => (f === p ? act?.type === "attack" && !!act.skill && !!SKILLS[act.skill].ranged : !!(f as Enemy).intent.ranged),
     isBlocking: (f, attacker) => {
       if (t.out.has(f.id)) return false;
       if (f === p) return act?.type === "block" && act.target === attacker.id;

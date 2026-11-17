@@ -23,6 +23,7 @@
   --flesh-missing: #2b1216; /* health missing: the empty part of a bar, a faint dark red, to tell it from the jet black of Death */
   --sleep: #f3f1f8;     /* Fatigue, white */
   --void: #040406;      /* Death, black */
+  --death-rim: 154 18 32; /* Death's crimson rim, breathing round its black on every bar (`death-pulse`): redder and darker than health, brighter than missing health */
   --bar-track: min(38vw, 540px);  /* full length of a health bar at BAR_FULL_HP */
   --bar-h: 20px;                   /* bar thickness */
   --bar-inset-x: 7vw;              /* how far the bars sit from the side edges */
@@ -358,12 +359,22 @@ kbd {
 /* An opened part's cost and damage bar, along its inner edge, as the item card's (`.item-card-measure`). */
 .wheel-measure path { fill: none; stroke-linecap: butt; pointer-events: none; }
 .wheel-overlay:not(.is-open) .wheel-measure { visibility: hidden; }
-.wheel-measure .wheel-measure-edge { stroke: var(--line); }
-.wheel-measure .wheel-measure-empty { stroke: rgb(21 20 27); } /* (empty between its ends: the cards' background) */
+/* (a bar's edge, drawn round it over what fills it; empty, the wheel shows through: ActionWheel.tsx `bandOutline`) */
+.wheel-measure .wheel-measure-edge { fill: none; stroke: var(--line); stroke-width: 0.6; stroke-linejoin: round; }
 .wheel-measure .wheel-measure-cost { stroke: var(--sleep); }
 .wheel-measure .wheel-measure-damage { stroke: var(--flesh-missing); }
 .wheel-measure .wheel-measure-death { stroke: var(--void); }
+/* (Death on the wheel, as on the health bars: the black arc, and over it its crimson ring and glow (ActionWheel.tsx `GlowArc`, `InsetGlow`), breathing.) */
+.wheel-measure .wheel-measure-glow { stroke: #000; animation: death-glow 1.25s ease-in-out infinite alternate; }
+.wheel-death-flood { flood-color: rgb(var(--death-rim)); }
+.wheel-missing-flood { flood-color: #000; }
 .wheel-measure .wheel-measure-through { stroke: var(--flesh-missing); } /* (a Block's: the share of a blow that comes through) */
+.wheel-measure .wheel-measure-eternity { stroke: #dcf1ff; } /* (a skill's: the Eternity it spends) */
+/* A skill that can't be aimed at anyone now: its name and bars faded. */
+.wheel-piece.is-unavailable .wheel-piece-label { fill-opacity: 0.4; }
+.wheel-piece.is-unavailable .wheel-measure { filter: opacity(0.4); }
+/* Aiming a skill: its name under the mark. */
+.wheel-aim-label { position: absolute; left: 50%; top: calc(100% + 6px); transform: translateX(-50%); white-space: nowrap; font-size: 0.85rem; font-weight: 600; letter-spacing: 0.04em; color: #fff; text-shadow: 0 0 3px rgb(0 0 0 / 0.9), 0 1px 2px rgb(0 0 0 / 0.9); pointer-events: none; }
 /* The lines are drawn thick as the small mark and thin as the wheel (a stroke adds to their width). */
 .wheel-line { fill: #fff; stroke: #fff; stroke-width: 3; stroke-linejoin: round; pointer-events: none; transition: stroke-width 0.22s ease-out; }
 .wheel-overlay.is-open .wheel-line { stroke-width: 0; }
@@ -467,7 +478,27 @@ kbd {
 .bar-recover { background: var(--sleep); animation: bar-recover 0.8s ease-in-out infinite alternate; }
 @keyframes bar-recover { from { opacity: 0.9; } to { opacity: 0.1; } }
 .bar-heal { background: var(--flesh); animation: bar-preview 0.8s ease-in-out infinite alternate; }
-.bar-death { background: var(--void); }
+/* Death, on every bar (health bars, the item card's, the wheel's: `GlowArc`): black, with a crimson rim inside it that slowly breathes (2.5 s a breath,
+   slower than a preview's flicker), never fading below a steady line, so where Death ends and missing health begins always shows. */
+.bar-death { background: var(--void); animation: death-pulse 1.25s ease-in-out infinite alternate; }
+.bar-death-preview { background: var(--void); animation: bar-preview 0.8s ease-in-out infinite alternate, death-pulse 1.25s ease-in-out infinite alternate; }
+@keyframes death-pulse {
+  from { box-shadow: inset 0 0 0 1px rgb(var(--death-rim) / 0.6), inset 0 0 3px 1px rgb(var(--death-rim) / 0.2); }
+  to { box-shadow: inset 0 0 0 1px rgb(var(--death-rim) / 1), inset 0 0 6px 2px rgb(var(--death-rim) / 0.65); }
+}
+@keyframes death-glow { from { opacity: 0.55; } to { opacity: 1; } }
+/* Missing health, on every bar (the empty end of a health bar, `.bar-missing`; a weapon's damage and a Block's share that comes through, on the item
+   card and the wheel; a Resistance bar's red): Death's treatment, in black: a black ring inside its dark red, and a black glow in from it, breathing. */
+.bar-layer > i.bar-missing { flex: 1 1 auto; background: transparent; animation: missing-pulse 1.25s ease-in-out infinite alternate; }
+@keyframes missing-pulse {
+  from { box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.6), inset 0 0 3px 1px rgb(0 0 0 / 0.2); }
+  to { box-shadow: inset 0 0 0 1px rgb(0 0 0 / 1), inset 0 0 6px 2px rgb(0 0 0 / 0.65); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar-death, .measure-death, .bar-death-preview { animation: none; box-shadow: inset 0 0 0 1px rgb(var(--death-rim)), inset 0 0 4px 1px rgb(var(--death-rim) / 0.4); }
+  .wheel-measure .wheel-measure-glow { animation: none; opacity: 0.8; }
+  .bar-layer > i.bar-missing, .measure-damage, .defense-through, .resist-measure > i.resist-missing { animation: none; box-shadow: inset 0 0 0 1px #000, inset 0 0 4px 1px rgb(0 0 0 / 0.4); }
+}
 /* Max health about to be raised: the bar's new end, flickering. */
 .bar-layer > i.bar-gain { position: absolute; right: 0; top: 0; background: var(--flesh); animation: bar-preview 0.8s ease-in-out infinite alternate; }
 .bar-eternity > i.bar-eternity-gain { left: auto; right: 0; background: #dcf1ff; animation: bar-preview 0.8s ease-in-out infinite alternate; }
@@ -479,9 +510,10 @@ kbd {
 .bar-eternity > i { position: absolute; left: 0; top: 0; bottom: 0; display: block; }
 .bar-eternity-now { background: #dcf1ff; box-shadow: 0 0 4px rgb(200 232 255 / 0.5); }
 .bar-eternity-trail { background: #7f9fb8; transition: width 0.6s ease-in 0.25s; }
+.bar-eternity > i.bar-eternity-spend { background: #dcf1ff; animation: bar-preview 0.8s ease-in-out infinite alternate; }
 @media (prefers-reduced-motion: reduce) { .bar-eternity-trail { transition: none; } }
 .bar.is-staggered { border-color: var(--sleep); box-shadow: 0 0 6px rgb(243 241 248 / 0.45); }
-@media (prefers-reduced-motion: reduce) { .bar-trail > i, .bar-healed > i.bar-filled, .bar-fatigue-box > i.bar-fatigue-spacer { transition: none; } .bar-flash { animation: none; opacity: 0; } .bar-preview, .bar-heal { animation: none; opacity: 0.55; } .bar-recover { animation: none; opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .bar-trail > i, .bar-healed > i.bar-filled, .bar-fatigue-box > i.bar-fatigue-spacer { transition: none; } .bar-flash { animation: none; opacity: 0; } .bar-preview, .bar-heal, .bar-death-preview, .bar-eternity > i.bar-eternity-spend { animation: none; opacity: 0.55; } .bar-recover { animation: none; opacity: 0.45; } }
 
 /* ---------- Guard break shards ---------- */
 .shards { position: absolute; left: 50%; top: 38%; width: 0; height: 0; pointer-events: none; z-index: 5; }
@@ -1094,21 +1126,22 @@ svg.wd-phase2 :is(.fig-neck-lining, .fig-skirt-inner) { stroke: url(#wd-p-wax88)
 .item-card-measure { position: relative; justify-self: stretch; height: 6px; margin: 2px 0; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: transparent; }
 .item-card-measure > i { position: absolute; top: 0; bottom: 0; }
 .measure-cost { left: 0; background: var(--sleep); }
-.measure-damage { background: var(--flesh-missing); }
-.measure-death { background: var(--void); }
+.measure-damage { background: var(--flesh-missing); animation: missing-pulse 1.25s ease-in-out infinite alternate; }
+.measure-death { background: var(--void); animation: death-pulse 1.25s ease-in-out infinite alternate; }
 .measure-poise { background: var(--sleep); }
 /* A Resistance bar (ItemCard.tsx `ResistMeasure`): the dark red of missing health, but white at its left end for the share of a blow that turns
    into Fatigue; a change about to be made flickers white (gained) or red (lost). Thinner than a weapon's bar, and at the very bottom of a card. */
 .resist-measure { position: relative; justify-self: stretch; height: 6px; margin: 4px 0 0; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: var(--flesh-missing); }
 .resist-measure > i { position: absolute; top: 0; bottom: 0; left: 0; }
 .resist-share { background: var(--sleep); }
+.resist-measure > i.resist-missing { animation: missing-pulse 1.25s ease-in-out infinite alternate; }
 .resist-gain { background: var(--sleep); animation: bar-preview 0.8s ease-in-out infinite alternate; }
 .resist-loss { background: var(--flesh); animation: bar-preview 0.8s ease-in-out infinite alternate; }
 /* A weapon's Defense bar (ItemCard.tsx `DefenseMeasure`), at the very bottom of its card: the Resistance bar's shape, missing health's dark red from the left for the
    share of a blow a Block with it lets through, empty (the card showing through) for the share it stops. */
 .defense-measure { position: relative; justify-self: stretch; height: 6px; margin: 4px 0 0; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: transparent; }
 .defense-measure > i { position: absolute; top: 0; bottom: 0; left: 0; }
-.defense-through { background: var(--flesh-missing); }
+.defense-through { background: var(--flesh-missing); animation: missing-pulse 1.25s ease-in-out infinite alternate; }
 /* Your Resistance in the inventory: at the bottom left, just above the bottom strip. */
 /* (as long as the bars on the card in the middle: the card's width, `.class-middle`, less its padding and border) */
 .inv-resist { position: absolute; z-index: 10; left: 3vw; bottom: calc(var(--strip-h) + 1.2vh); width: calc(min(340px, 27vw) - 34px); }
@@ -1121,6 +1154,14 @@ svg.wd-phase2 :is(.fig-neck-lining, .fig-skirt-inner) { stroke: url(#wd-p-wax88)
 .item-card-lore { margin: 0; font-size: 0.92rem; line-height: 1.45; opacity: 0.9; }
 .item-card-effect { margin: 0; font-size: 0.85rem; line-height: 1.4; color: #dcf1ff; }
 .item-card.is-empty { opacity: 0.6; }
+/* A weapon's skill on its card (ItemCard.tsx): under a thin line, its name, its Eternity bar and what it does. */
+.item-card-skill { display: grid; justify-items: center; gap: 6px; justify-self: stretch; }
+.item-card-sep { justify-self: stretch; margin: 2px 0 0; border: 0; border-top: 1px solid var(--line); }
+.item-card-skill-name { font-size: 1rem; font-weight: 600; }
+/* A skill's Eternity bar (ItemCard.tsx `EternityMeasure`): the weapon bar's shape, Eternity's pale blue from the left for the share it spends. */
+.eternity-measure { position: relative; justify-self: stretch; height: 6px; margin: 2px 0; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; background: transparent; }
+.eternity-measure > i { position: absolute; top: 0; bottom: 0; left: 0; }
+.eternity-spent { background: #dcf1ff; box-shadow: 0 0 4px rgb(200 232 255 / 0.5); }
 .guide-lore { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: rgb(21 20 27 / 0.9); }
 .guide-lore-name { font-weight: 600; }
 .guide-lore-text { margin: 0; font-size: 0.92rem; line-height: 1.45; opacity: 0.9; }

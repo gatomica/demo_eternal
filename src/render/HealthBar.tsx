@@ -33,7 +33,7 @@ export interface BarValues {
 
 const barPct = (x: number, maxHP: number) => `${(Math.max(0, x) / maxHP) * 100}%`;
 
-function Segments({ v, maxHP, preview = 0, recover }: { v: BarValues; maxHP: number; preview?: number; recover?: Recovery }) {
+function Segments({ v, maxHP, preview = 0, recover, deathPreview = 0 }: { v: BarValues; maxHP: number; preview?: number; recover?: Recovery; deathPreview?: number }) {
   const hp = Math.max(0, v.hp);
   // Fatigue fills current health and can't spill past it, even for a moment mid-turn.
   const fatigue = Math.min(Math.max(0, v.fatigue), hp);
@@ -44,6 +44,9 @@ function Segments({ v, maxHP, preview = 0, recover }: { v: BarValues; maxHP: num
   const healed = Math.min(Math.max(0, recover?.heal ?? 0), Math.max(0, v.death));
   // ...and, once the Death is all cleared, the Health that is restored: it flickers where the bar's health will grow into, just after.
   const restored = Math.min(Math.max(0, recover?.health ?? 0), Math.max(0, maxHP - hp - (v.death - healed)));
+  // Death about to be put on you (a skill your Eternity can't pay for): it flickers black just past the Death you have, as far as there is missing
+  // health for it to fill (Death fills nothing else, so at full health there is none).
+  const dying = Math.min(Math.max(0, deathPreview), Math.max(0, maxHP - hp - v.death));
   return (
     <>
       <i className="bar-room" style={{ width: barPct(hp - fatigue - cost, maxHP) }} />
@@ -53,6 +56,9 @@ function Segments({ v, maxHP, preview = 0, recover }: { v: BarValues; maxHP: num
       {healed > 0 && <i className="bar-heal" style={{ width: barPct(healed, maxHP) }} />}
       <i className="bar-death" style={{ width: barPct(v.death - healed, maxHP) }} />
       {restored > 0 && <i className="bar-heal" style={{ width: barPct(restored, maxHP) }} />}
+      {dying > 0 && <i className="bar-death-preview" style={{ width: barPct(dying, maxHP) }} />}
+      {/* (the rest, missing health: the bar's own dark red shows through, with its black ring and glow over it) */}
+      <i className="bar-missing" />
     </>
   );
 }
@@ -70,7 +76,7 @@ function Segments({ v, maxHP, preview = 0, recover }: { v: BarValues; maxHP: num
  * `mirrored` anchors the bar on the right and fills it right to left, for enemies.
  * A stagger bursts into shards.
  */
-export function HealthBar({ fighter, before, className, mirrored, preview, recover, gain = 0, eternalFlash }: {
+export function HealthBar({ fighter, before, className, mirrored, preview, recover, gain = 0, eternalFlash, deathPreview }: {
   /** An eternal effect touched this bar (extra Fatigue or damage given, Fatigue saved): it flashes pale blue (a new key flashes again). */
   eternalFlash?: string;
   fighter: Fighter;
@@ -79,6 +85,8 @@ export function HealthBar({ fighter, before, className, mirrored, preview, recov
   preview?: number;
   /** A Rest you are hovering: the Fatigue it would clear and the Health it would return, flickering on the bar. */
   recover?: Recovery;
+  /** Death about to be put on you (a skill your Eternity can't pay for), flickering black on the bar. */
+  deathPreview?: number;
   className?: string;
   mirrored?: boolean;
   /** Max health about to be added (raising a stat): the bar is drawn that much longer, the new part flickering at its end. */
@@ -130,7 +138,7 @@ export function HealthBar({ fighter, before, className, mirrored, preview, recov
       {/* The trail only shows health that was just lost, in a light red, sliding away. */}
       <span className="bar-layer bar-trail"><i className="bar-lost" style={{ width: barPct(trail.hp, maxHP) }} /></span>
       <span className="bar-layer bar-now">
-        <Segments v={now} maxHP={maxHP} preview={preview} recover={recover} />
+        <Segments v={now} maxHP={maxHP} preview={preview} recover={recover} deathPreview={deathPreview} />
         {gain > 0 && <i className="bar-gain" style={{ width: barPct(gain, maxHP) }} />}
       </span>
       {/* Fatigue just cleared: over the waking room it opened, a faint white from where the Fatigue was to where it is, slipping back to it. */}
@@ -202,7 +210,7 @@ function roman(n: number): string {
  * health bar, the Eternity bar under it, and your revives left as a red Roman numeral beside it
  * (nothing once they're gone). Your String counter sits at the top right, on the same row.
  */
-export function PlayerBars({ player, preview, recover, string, stringPops, eternalString, gain, eternalFlash, knot }: { player: Player; /** You have the revive knot (its symbol shows even when it is spent). */ knot?: boolean; /** Eternal effects this beat: which of your bars they touched (a new key flashes it again). */ eternalFlash?: { health?: string; eternity?: string }; preview?: number; recover?: Recovery; string?: number; stringPops?: StringPop[]; eternalString?: number; /** Max health and max Eternity about to be raised: shown on the bars before they are paid for. */ gain?: { health?: number; eternity?: number } }) {
+export function PlayerBars({ player, preview, spend, deathPreview, recover, string, stringPops, eternalString, gain, eternalFlash, knot }: { player: Player; /** You have the revive knot (its symbol shows even when it is spent). */ knot?: boolean; /** Eternal effects this beat: which of your bars they touched (a new key flashes it again). */ eternalFlash?: { health?: string; eternity?: string }; preview?: number; /** A skill you are on: the Eternity it would spend, flickering on the Eternity bar, and the Death for what it can't pay, on the health bar. */ spend?: number; deathPreview?: number; recover?: Recovery; string?: number; stringPops?: StringPop[]; eternalString?: number; /** Max health and max Eternity about to be raised: shown on the bars before they are paid for. */ gain?: { health?: number; eternity?: number } }) {
   return (
     <>
       {/* (A fixed slot, so nothing else on screen can push it around.) */}
@@ -216,8 +224,8 @@ export function PlayerBars({ player, preview, recover, string, stringPops, etern
           </span>
         )}
         <div className="bar-stack">
-          <HealthBar fighter={player} preview={preview} recover={recover} gain={gain?.health} eternalFlash={eternalFlash?.health} />
-          <EternityBar player={player} gain={gain?.eternity} flash={eternalFlash?.eternity} />
+          <HealthBar fighter={player} preview={preview} recover={recover} deathPreview={deathPreview} gain={gain?.health} eternalFlash={eternalFlash?.health} />
+          <EternityBar player={player} gain={gain?.eternity} flash={eternalFlash?.eternity} spend={spend} />
         </div>
       </div>
       {/* Your String, at the top right on the same row, wherever your bars are. */}
@@ -235,7 +243,7 @@ export function PlayerBars({ player, preview, recover, string, stringPops, etern
  * many points (it holds as much as your max Eternity, raised separately from your health). Eternal weapons' effects drain it; it only fills again when you reawaken.
  * Like the health bar, a change cuts at once with a flash, and a trail of the old value slides after.
  */
-export function EternityBar({ player, gain = 0, flash: spent }: { player: Player; /** Eternity was just spent: the bar flashes pale blue (a new key flashes again). */ flash?: string; /** Max Eternity about to be added: the bar is drawn that much longer, the new part flickering at its end. */ gain?: number }) {
+export function EternityBar({ player, gain = 0, flash: spent, spend = 0 }: { player: Player; /** Eternity about to be spent (a skill you are on): it flickers at the end of what you have. */ spend?: number; /** Eternity was just spent: the bar flashes pale blue (a new key flashes again). */ flash?: string; /** Max Eternity about to be added: the bar is drawn that much longer, the new part flickering at its end. */ gain?: number }) {
   const { eternity } = player;
   const maxEternity = player.maxEternity + gain;
   const [trail, setTrail] = useState(eternity);
@@ -255,7 +263,8 @@ export function EternityBar({ player, gain = 0, flash: spent }: { player: Player
       style={{ width: `calc(var(--bar-track) * ${Math.min(maxEternity, BAR_FULL_HP) / BAR_FULL_HP})` }}
     >
       <i className="bar-eternity-trail" style={{ width: pct(trail) }} />
-      <i className="bar-eternity-now" style={{ width: pct(eternity) }} />
+      <i className="bar-eternity-now" style={{ width: pct(eternity - Math.min(Math.max(0, spend), eternity)) }} />
+      {spend > 0 && eternity > 0 && <i className="bar-eternity-spend" style={{ left: pct(eternity - Math.min(spend, eternity)), width: pct(Math.min(spend, eternity)) }} />}
       {gain > 0 && <i className="bar-eternity-gain" style={{ width: pct(gain) }} />}
       {flash > 0 && <span key={`flash-${flash}`} className="bar-flash" />}
       {spent && <span key={`spent-${spent}`} className="bar-flash is-eternal" />}

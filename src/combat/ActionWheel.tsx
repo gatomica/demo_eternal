@@ -112,24 +112,98 @@ function barArc(from: number, to: number): string {
  * Fatigue it puts on its target in white just before that (the Kick's: bare hands'). A Block's (`block`): its weapon's Defense, as on the item card: missing health's dark red from the counter-clockwise end for the share of
  * a blow that comes through, empty for the share it stops.
  */
-function MeasureArc({ look, a0, a1, opacity, block }: { look: WheelLook; a0: number; a1: number; opacity: number; block?: boolean }) {
-  const b = blowShares(look.kind === "kick" ? WEAPONS.baseline : weaponOf(look.tier, look.item));
+function MeasureArc({ look, a0, a1, opacity, block, blow }: { look: WheelLook; a0: number; a1: number; opacity: number; block?: boolean; /** A skill's own numbers, in place of its weapon's. */ blow?: ReturnType<typeof blowShares> }) {
+  const b = blow ?? blowShares(look.kind === "kick" ? WEAPONS.baseline : weaponOf(look.tier, look.item));
   const s0 = a0 + BAR_GAP, s1 = a1 - BAR_GAP, span = s1 - s0;
   if (span <= 0) return null;
   const share = (n: number) => Math.max(0, Math.min(1, n)) * span;
   const through = block ? 1 - (look.kind === "kick" ? WEAPONS.baseline.defense : defenseOf(look.tier, look.item)) : 0;
   return (
     <g className="wheel-measure" style={{ opacity }} aria-hidden="true">
-      <path d={barArc(s0, s1)} className="wheel-measure-edge" style={{ strokeWidth: BAR_W + 1.2 }} />
-      <path d={barArc(s0, s1)} className="wheel-measure-empty" style={{ strokeWidth: BAR_W }} />
       {block
-        ? through > 0 && <path d={barArc(s0, s0 + through * span)} className="wheel-measure-through" style={{ strokeWidth: BAR_W }} />
+        ? through > 0 && <GlowArc kind="missing" d={barArc(s0, s0 + through * span)} width={BAR_W} />
         : <>
           <path d={barArc(s0, s0 + share(b.cost))} className="wheel-measure-cost" style={{ strokeWidth: BAR_W }} />
-          {b.deadly > 0 && <path d={barArc(s1 - share(b.deadly), s1)} className="wheel-measure-death" style={{ strokeWidth: BAR_W }} />}
-          <path d={barArc(s1 - share(b.deadly + b.damage), s1 - share(b.deadly))} className="wheel-measure-damage" style={{ strokeWidth: BAR_W }} />
+          {b.deadly > 0 && <GlowArc kind="death" d={barArc(s1 - share(b.deadly), s1)} width={BAR_W} />}
+          {b.damage > 0 && <GlowArc kind="missing" d={barArc(s1 - share(b.deadly + b.damage), s1 - share(b.deadly))} width={BAR_W} />}
           {b.poise > 0 && <path d={barArc(s1 - share(b.deadly + b.damage + b.poise), s1 - share(b.deadly + b.damage))} className="wheel-measure-cost" style={{ strokeWidth: BAR_W }} />}
         </>}
+      <path d={bandOutline(BAR_R, BAR_W, s0, s1)} className="wheel-measure-edge" />
+    </g>
+  );
+}
+
+/**
+ * Death or missing health on a bar of the wheel, drawn as on the health bars (`.bar-death`, `.bar-missing`): its colour (black, missing health's dark red),
+ * and over it the same arc again through `InsetGlow`, which keeps only a thin ring just inside its edge and a soft glow reaching in from it, breathing
+ * (`.wheel-measure-glow`): crimson round Death, black round missing health.
+ */
+function GlowArc({ kind, d, width }: { kind: "death" | "missing"; d: string; width: number }) {
+  return (
+    <>
+      <path d={d} className={kind === "death" ? "wheel-measure-death" : "wheel-measure-damage"} style={{ strokeWidth: width }} />
+      <path d={d} className="wheel-measure-glow" style={{ strokeWidth: width }} filter={`url(#${GLOW_ID[kind]})`} />
+    </>
+  );
+}
+
+const GLOW_ID = { death: "wheel-death-glow", missing: "wheel-missing-glow" } as const;
+/** The ring's thickness and the glow's reach, in ring units (a ring unit is some 3.4 px on screen, the wheel's size: the health bar's 1 px ring and 6 px glow). */
+const DEATH_RING = 0.3, DEATH_REACH = 0.9;
+
+/**
+ * The health bar's inset shadow, for a shape on the wheel: what is left is a ring just inside the shape's edge (`DEATH_RING`), and the colour blurred
+ * in from all round it (`DEATH_REACH`), clipped to the shape: nothing of the shape itself. Crimson for Death, black for missing health. Over the whole
+ * wheel (user space), since a thin arc's box may have no height.
+ */
+function InsetGlow({ kind }: { kind: "death" | "missing" }) {
+  return (
+    <filter id={GLOW_ID[kind]} filterUnits="userSpaceOnUse" x={-R_OUT - 10} y={-R_OUT - 10} width={2 * R_OUT + 20} height={2 * R_OUT + 20}>
+      <feFlood className={`wheel-${kind}-flood`} result="crimson" />
+      {/* (crimson everywhere outside the shape, blurred in over its edge, and kept only inside it: the glow) */}
+      <feComposite in="crimson" in2="SourceAlpha" operator="out" result="outside" />
+      <feGaussianBlur in="outside" stdDeviation={DEATH_REACH} result="blurred" />
+      <feComposite in="blurred" in2="SourceAlpha" operator="in" result="glow" />
+      {/* (the shape less the shape shrunk by the ring's thickness: the ring) */}
+      <feMorphology in="SourceAlpha" operator="erode" radius={DEATH_RING} result="core" />
+      <feComposite in="SourceAlpha" in2="core" operator="out" result="edge" />
+      <feComposite in="crimson" in2="edge" operator="in" result="ring" />
+      <feMerge><feMergeNode in="glow" /><feMergeNode in="ring" /></feMerge>
+    </filter>
+  );
+}
+
+/**
+ * A bar's edge on the wheel: the outline of the band `w` wide round radius `r`, between two angles, drawn over what fills it. Inside, where nothing
+ * fills it, the bar is empty: the wheel shows through (its white fade, on a piece), as the card shows through an item card's bar.
+ */
+function bandOutline(r: number, w: number, from: number, to: number): string {
+  const ro = r + w / 2, ri = r - w / 2, big = to - from > 180 ? 1 : 0;
+  const [ox0, oy0] = polar(ro, from), [ox1, oy1] = polar(ro, to), [ix1, iy1] = polar(ri, to), [ix0, iy0] = polar(ri, from);
+  return `M${ox0} ${oy0} A${ro} ${ro} 0 ${big} 1 ${ox1} ${oy1} L${ix1} ${iy1} A${ri} ${ri} 0 ${big} 0 ${ix0} ${iy0} Z`;
+}
+
+/** A skill's Eternity bar: just outside the attack's, thinner, as long as your max Eternity. */
+const ETERNITY_R = BAR_R + BAR_W + 3, ETERNITY_W = 2.6;
+
+/**
+ * A skill's Eternity bar (see `WheelOption.skill`), as on the item card: the Eternity it spends in Eternity's pale blue from the
+ * counter-clockwise end, the part of it your Eternity can't pay (Death on you) black after it.
+ */
+function EternityArc({ eternity, death, a0, a1, opacity }: { eternity: number; death: number; a0: number; a1: number; opacity: number }) {
+  const s0 = a0 + BAR_GAP, s1 = a1 - BAR_GAP, span = s1 - s0;
+  if (span <= 0) return null;
+  const share = (n: number) => Math.max(0, Math.min(1, n)) * span;
+  const paid = Math.max(0, eternity - death);
+  const arc = (from: number, to: number) => {
+    const [x0, y0] = polar(ETERNITY_R, from), [x1, y1] = polar(ETERNITY_R, to);
+    return `M${x0} ${y0} A${ETERNITY_R} ${ETERNITY_R} 0 ${to - from > 180 ? 1 : 0} 1 ${x1} ${y1}`;
+  };
+  return (
+    <g className="wheel-measure" style={{ opacity }} aria-hidden="true">
+      {paid > 0 && <path d={arc(s0, s0 + share(paid))} className="wheel-measure-eternity" style={{ strokeWidth: ETERNITY_W }} />}
+      {death > 0 && <GlowArc kind="death" d={arc(s0 + share(paid), s0 + share(paid + death))} width={ETERNITY_W} />}
+      <path d={bandOutline(ETERNITY_R, ETERNITY_W, s0, s1)} className="wheel-measure-edge" />
     </g>
   );
 }
@@ -172,7 +246,7 @@ function useOpening(opened: Dir | null): { dir: Dir | null; k: number } {
  * The options as the pieces of a ring around whoever you selected. WASD highlights, E commits, Q
  * closes. With a mouse, clicking a piece commits it straight away.
  */
-export function ActionWheel({ wheel, open, highlight, opened, sub, center, anchor, hints, onHighlight, onSub, onCommit }: {
+export function ActionWheel({ wheel, open, highlight, opened, sub, center, anchor, hints, aimLabel, onHighlight, onSub, onCommit }: {
   wheel: Wheel;
   /** Focused: the ring has grown into the wheel. Otherwise it is the small mark over the target. */
   open: boolean;
@@ -187,6 +261,8 @@ export function ActionWheel({ wheel, open, highlight, opened, sub, center, ancho
   aroundPlayer?: boolean;
   /** The keys to show on it, in the first fights. */
   hints?: WheelHints;
+  /** Aiming a skill: the mark (the rest of the wheel hidden) moves only among the enemies it can be aimed at, with the skill's name under it. */
+  aimLabel?: string;
   onHighlight: (d: Dir) => void;
   /** The pointer over a part of the opened-up action. */
   onSub?: (s: SubSlot) => void;
@@ -277,8 +353,9 @@ export function ActionWheel({ wheel, open, highlight, opened, sub, center, ancho
         // (left of Dodge, above Attack, right of Block, below Rest).
         const [lx, ly] = polar(mid, deg);
         // (The name's half width and half height, roughly, from its letters: the label is 9.5 units tall. A picture's: half its size.)
-        const halfW = shown.look ? Math.max(PICTURE / 2, shown.alternatives ? shown.label.length * 9.5 * 0.3 : 0) * unit : shown.label.length * 9.5 * 0.3 * unit;
-        const halfH = shown.look ? (PICTURE / 2) * unit : 9.5 * 0.5 * unit;
+        const pictured = !!shown.look;
+        const halfW = pictured ? Math.max(PICTURE / 2, shown.alternatives ? shown.label.length * 9.5 * 0.3 : 0) * unit : shown.label.length * 9.5 * 0.3 * unit;
+        const halfH = pictured ? (PICTURE / 2) * unit : 9.5 * 0.5 * unit;
         const cos = Math.cos((deg * Math.PI) / 180), sin = Math.sin((deg * Math.PI) / 180);
         const out = Math.min(Math.abs(cos) > 1e-3 ? halfW / Math.abs(cos) : Infinity, Math.abs(sin) > 1e-3 ? halfH / Math.abs(sin) : Infinity) + 16;
         keyHints.push(<HintKey key="select" k="yes" at={[lx * unit + cos * out, ly * unit + sin * out]} hint={hints.select} />);
@@ -296,7 +373,8 @@ export function ActionWheel({ wheel, open, highlight, opened, sub, center, ancho
     const style = opacity === undefined ? undefined : { opacity };
     return (
       <>
-        {o.look && <MeasureArc look={o.look} a0={a0} a1={a1} opacity={opacity ?? 1} block={o.action.type === "block"} />}
+        {o.look && <MeasureArc look={o.look} a0={a0} a1={a1} opacity={opacity ?? 1} block={o.action.type === "block"} blow={o.skill?.blow} />}
+        {o.skill && <EternityArc eternity={o.skill.eternity} death={o.skill.death} a0={a0} a1={a1} opacity={opacity ?? 1} />}
         {o.look && <Picture look={o.look} at={at} style={style} />}
         {(!o.look || o.alternatives) && <text x={at[0]} y={at[1]} className="wheel-piece-label" style={style}>{o.label}</text>}
       </>
@@ -306,23 +384,26 @@ export function ActionWheel({ wheel, open, highlight, opened, sub, center, ancho
   return (
     <div ref={ref} className={`wheel-overlay ${open ? "is-open" : ""}`} style={{ width: size, height: size }} role={open ? "menu" : undefined} aria-label={`Actions for ${center}`}>
       <svg className="wheel-ring" viewBox={`${-R_OUT - 2} ${-R_OUT - 2} ${2 * R_OUT + 4} ${2 * R_OUT + 4}`}>
-        {/* The ring fades to nothing quickly; the piece you are on fades more slowly, and starts solid. */}
+        {/* The ring fades to nothing quickly; the piece you are on fades slowly, and is see-through all the way (so the white of Fatigue on its bar stands out). */}
         <RingFade id="wheel-fade" stops={[[0, 0.6], [0.4, 0.2], [0.85, 0], [1, 0]]} />
-        <RingFade id="wheel-fade-lit" stops={[[0, 1], [0.6, 0.8], [1, 0]]} />
+        <defs><InsetGlow kind="death" /><InsetGlow kind="missing" /></defs>
+        <RingFade id="wheel-fade-lit" stops={[[0, 0.5], [0.6, 0.38], [1, 0.12]]} />
         {DIRS.map(dir => {
           const o = wheel[dir], part = parts?.[dir] ?? null;
           // (what this quarter is now: the opened action's part, past halfway; else the action)
           const here = asParts ? part : o;
           const lit = open && !!here && (asParts ? sub === dir : highlight === dir);
+          // (a part that can't be chosen now is drawn faded, and does nothing)
+          const off = !here || !!here.disabled;
           return (
             <g
               key={dir}
               role="menuitem"
-              aria-disabled={!here}
+              aria-disabled={off}
               aria-label={here?.label}
-              className={`wheel-piece ${lit ? "is-highlighted" : ""} ${here ? "" : "is-disabled"}`}
+              className={`wheel-piece ${lit ? "is-highlighted" : ""} ${off ? "is-disabled" : ""} ${here?.disabled ? "is-unavailable" : ""}`}
               onMouseEnter={() => { if (!open || !here) return; if (asParts) onSub?.(dir); else onHighlight(dir); }}
-              onClick={() => open && here && onCommit(here)}
+              onClick={() => open && here && !here.disabled && onCommit(here)}
             >
               <path d={piece(CENTER[dir] - 45, CENTER[dir] + 45)} className="wheel-piece-shape" />
               {o && fadeOut > 0 && face(o, dir, parts ? fadeOut : undefined)}
@@ -342,6 +423,7 @@ export function ActionWheel({ wheel, open, highlight, opened, sub, center, ancho
           <path key={i} d={pointedLine(l.deg, 1.1, l.from, l.to)} className="wheel-line wheel-line-sub" style={{ opacity: fadeOut }} />
         ))}
       </svg>
+      {!open && aimLabel && <span className="wheel-aim-label">{aimLabel}</span>}
       {keyHints}
     </div>
   );

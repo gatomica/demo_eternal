@@ -5,7 +5,7 @@ import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, us
 import { PHASE_TWO, playMusic } from "../audio/music";
 import { eternalSfx, play as playSfx, prepare as prepareSfx, sfxFor } from "../audio/sfx";
 import { ActionWheel, type Anchor, type WheelHints } from "./ActionWheel";
-import { APPROACH_MS, BLOCK_PUSH, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_LATERAL, DODGE_PAST, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, PREP_MS, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, USURP_TURN_MS, USURP_WISP_MS, USURP_AFTER_MS, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
+import { APPROACH_MS, BLOCK_PUSH, HOOK_FLY_MS, HOOK_HOLD_MS, HOOK_PULL_MS, HOOK_WIND_MS, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_LATERAL, DODGE_PAST, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, PREP_MS, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, USURP_TURN_MS, USURP_WISP_MS, USURP_AFTER_MS, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
 import { LessonBox } from "./LessonBox";
 import { prepareWalk, speak } from "../audio/walk";
 import { useDev } from "../ui/dev";
@@ -14,7 +14,8 @@ import { alternativeOf, preferredAlternative, rememberAlternative } from "./pref
 import { defaultSelection, moveSelection, rowsOf, sameSel, type Selection, type SubSlot, type Wheel, type WheelOption } from "./selection";
 import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveSkip, resolveTurn, snapshotOf } from "../core/resolve";
-import { attackCost, restRecovery, WEAPONS } from "../core/rules";
+import { attackCost, restRecovery, WEAPONS, weaponOf } from "../core/rules";
+import { type SkillId, SKILLS, skillPayment, skillShares, skillsOf, targetsOf } from "../core/skills";
 import type { CombatEvent, CombatState, Enemy, Opening, Player, PlayerAction, Side, Stance, Swing, WeaponItem, WeaponTier } from "../core/types";
 import { ITEMS } from "../explore/items";
 import { behind, right as rightOf, bodiesOfEnemies, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, SCENE_TILT, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
@@ -48,7 +49,7 @@ const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 /** The player is drawn in 3D in a fight, on the Sleepwalker's body (`player3dPose`, Sleepwalker3D's `gear`). */
 const PLAYER_3D = true;
 /** The poses the left hand's Attack or Block is drawn mirrored in: its wind-ups, strikes and the Block itself (the stances around them are held as they are). */
-const PUNCH_POSES = new Set<PoseName>(["attack", "punch", "strike", "swing-left-up", "swing-left", "swing-right-up", "swing-right", "block"]);
+const PUNCH_POSES = new Set<PoseName>(["attack", "punch", "strike", "swing-left-up", "swing-left", "swing-right-up", "swing-right", "block", "p3-stab-up", "p3-stab", "p3-hook-up", "p3-hook-throw"]);
 
 /** What the wheel calls a hand's Attack or Block: the weapon it holds ("Brick Hammer", "Bronze Shortsword"), or the hand itself when it is empty. */
 const handName = (weapon: WeaponTier, item: WeaponItem | undefined, side: Side): string =>
@@ -133,6 +134,9 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   // The highlighted action opened up into its alternatives (Attack: the left hand's, the Kick, the right hand's), and the part on.
   const [expanded, setExpanded] = useState(false);
   const [subSlot, setSubSlot] = useState<SubSlot>("right");
+  // A skill chosen on your wheel, being aimed: the rest of the wheel is hidden and the mark moves only among the enemies it can be aimed at
+  // (`slot`: where it was on the Skill menu, to go back to).
+  const [aiming, setAiming] = useState<{ action: PlayerAction & { skill: SkillId }; slot: SubSlot } | null>(null);
 
   const [paused, setPaused] = useState(false);
   /** The 3D Warden plays Usurp Flame as the attack it is (it launches at its target in its wind-up pose, as any attack does), not as the old scene (`USURP_STAGES`). */
@@ -208,6 +212,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   // What's on screen: mid-turn during playback, otherwise the fight as it stands.
   // While an attacker is still closing in, the fight shows as it was before the blow.
   const step = playback?.steps[playback.index];
+  /** Your Hookshot, if this step is it (your attack swung as a hook). */
+  const hookBlow = step?.events.find((ev): ev is Extract<CombatEvent, { kind: "attack" }> => ev.kind === "attack" && ev.attacker === "player" && (ev.swing === "hook-left" || ev.swing === "hook-right"));
+  /**
+   * The Hookshot as it plays (`key`: its turn and step): where its target stood when it was thrown (`to`) and where the pull leaves it (`end`), and
+   * when the sickle was thrown (`out`) and pulled back (`back`), `performance.now()` times.
+   */
+  const [hook, setHook] = useState<{ key: string; to: Vec; end: Vec; out?: number; back?: number } | null>(null);
   const impact = playback?.phase === "impact";
   // The fight just before this step, so a bar that appears mid-turn still animates from it.
   const prevView = useMemo(
@@ -268,7 +279,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   // do: Eternity is the player's, so an enemy's weapon effect takes place without any of that.
   const eternalHere = impact && step ? step.events.filter((ev): ev is Extract<CombatEvent, { kind: "eternal" }> => ev.kind === "eternal" && ev.attacker === "player") : [];
   /** Whose bar an effect touches: the target's (extra Fatigue or damage), or the user's own (Fatigue saved). */
-  const touchedBy = (ev: Extract<CombatEvent, { kind: "eternal" }>) => (ev.effect === "shortsword" ? ev.attacker : ev.target);
+  const touchedBy = (ev: Extract<CombatEvent, { kind: "eternal" }>) => (ev.effect === "shortsword" || ev.effect === "stab" ? ev.attacker : ev.target);
   const barFlashOf = (id: string) => (eternalHere.some(ev => touchedBy(ev) === id) ? stepKey : undefined);
   /** The weapon's flash: pale blue, or dark red when the effect was paid in Death (a key starting "death|"). */
   const auraOf = (id: string) => {
@@ -277,8 +288,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   };
 
   // Keep the selection valid: a fallen enemy hands the cursor to the next one.
-  const rows = rowsOf(fight);
-  const sel: Selection = rows.flat().some(s => sameSel(s, selection)) ? selection : defaultSelection(fight);
+  /** The rows a skill can be aimed along: only the enemies it can be aimed at (Stab: the front line), and not you. */
+  const aimRowsOf = (skill: SkillId): Selection[][] => {
+    const ok = new Set(targetsOf(fight, skill).map(e => e.id));
+    return rowsOf(fight).map((row, i) => (i === 0 ? [] : row.filter(x => x.kind === "enemy" && ok.has(x.id))));
+  };
+  const rows = aiming ? aimRowsOf(aiming.action.skill) : rowsOf(fight);
+  const sel: Selection = rows.flat().some(s => sameSel(s, selection)) ? selection : aiming ? rows.flat()[0] ?? { kind: "player" } : defaultSelection(fight);
   const selectedEnemy = sel.kind === "enemy" ? view.enemies.find(e => e.id === sel.id) : undefined;
   // During playback the bar follows whichever enemy the current step is about.
   const shownId = (busy && involvedEnemy(step)) || selectedEnemy?.id;
@@ -323,11 +339,41 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   };
 
   /* ---------- the wheel for the current selection ---------- */
+  /**
+   * Skill, at the top of your own wheel, as Attack and Block are: closed, it is the skill you used last (its weapon's picture, with "Skill" over it),
+   * and E makes it; its direction again opens it into your weapons' skills, each on its hand's quarter (D the right hand's, A the left hand's; a hand's
+   * second skill goes above or below). Each is drawn as its weapon's picture, with its attack's bar (from the skill's own numbers) and its Eternity bar;
+   * one with no enemy to aim at is faded. Not in the lesson, and not without a weapon that has a skill.
+   */
+  const skillOption = (): WheelOption | null => {
+    const p = fight.player, list = skillsOf(p);
+    if (current || !list.length) return null;
+    const alternatives: NonNullable<WheelOption["alternatives"]> = { up: null, left: null, down: null, right: null };
+    /** Where each hand's skills go, in turn: its own side first. */
+    const places: Record<Side, SubSlot[]> = { right: ["right", "up", "down"], left: ["left", "down", "up"] };
+    for (const { skill, hand } of list) {
+      const slot = places[hand].find(x => !alternatives[x]);
+      if (!slot) continue;
+      const sk = SKILLS[skill], left = hand === "left";
+      const weapon = left ? p.offhand.weapon : p.weapon, item = left ? p.offhand.weaponItem : p.weaponItem;
+      const pay = skillPayment(p, skill, left ? !!p.offhand.mortal : !!p.mortalWeapon);
+      alternatives[slot] = {
+        label: sk.name,
+        action: { type: sk.type, skill, hand },
+        look: { kind: "weapon", tier: weapon, item, side: hand },
+        disabled: !targetsOf(fight, skill).length,
+        skill: { blow: skillShares(p, skill, weaponOf(weapon, item)), eternity: pay.price / p.maxEternity, death: pay.death / p.maxEternity },
+      };
+    }
+    // Closed, it is the skill you used last (else the first there is).
+    const preferred = alternatives[preferredAlternative("skill")] ?? (["right", "left", "up", "down"] as SubSlot[]).map(x => alternatives[x]).find(Boolean)!;
+    return { ...preferred, label: "Skill", alternatives };
+  };
   const wheelOf = (sel: Selection): Wheel => {
     const opt = (label: string, action: PlayerAction, look?: WheelOption["look"]): WheelOption => ({ label, action, ...(look ? { look } : {}) });
     if (sel.kind === "player") {
       return {
-        up: null,
+        up: skillOption(),
         left: opt("Dodge", { type: "maneuver", target: "self" }),
         down: opt("Rest", { type: "rest" }),
         right: null,
@@ -422,16 +468,23 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return { dirs, parts, select: on ? { fast: !!onKey && !tried.includes(onKey) } : undefined };
   })();
   const chosen = wheelOpen && highlight ? (expanded ? wheel[highlight]?.alternatives?.[subSlot] ?? null : wheel[highlight]) : null;
-  // Hovering an Attack (before you commit to it): the Fatigue it would cost flickers on your bar (its own weight, else the weapon in the hand it uses).
-  const previewCost = !busy && chosen?.action.type === "attack"
+  /** What the bars preview: the action you are on, or the skill you are aiming. */
+  const previewAction = busy ? undefined : aiming?.action ?? chosen?.action;
+  // Hovering an Attack (before you commit to it): the Fatigue it would cost flickers on your bar (its own weight, else the weapon in the hand it uses;
+  // a skill's, cut by what it pays).
+  const previewCost = previewAction?.type === "attack"
     ? (() => {
       // (a Kick's own weight, else the weapon in the hand it uses, and which class's own it is)
-      const a = chosen.action, left = a.hand === "left", weapon = left ? p.offhand.weapon : p.weapon, item = left ? p.offhand.weaponItem : p.weaponItem;
-      return attackCost(p, a.weight ?? weapon, (a.weight ?? weapon) === weapon ? item : undefined);
+      const a = previewAction, left = a.hand === "left", weapon = left ? p.offhand.weapon : p.weapon, item = left ? p.offhand.weaponItem : p.weaponItem;
+      // (a skill's, from its own numbers: Stab's cost cut by what it pays, the Hookshot's none)
+      return a.skill ? skillShares(p, a.skill, weaponOf(weapon, item)).cost * p.maxHP : attackCost(p, a.weight ?? weapon, (a.weight ?? weapon) === weapon ? item : undefined);
     })()
     : 0;
+  // A skill: the Eternity it would spend flickers on your Eternity bar, and the Death on you for what Eternity can't pay on your health bar.
+  const previewPay = previewAction?.skill ? skillPayment(p, previewAction.skill, previewAction.hand === "left" ? !!p.offhand.mortal : !!p.mortalWeapon) : undefined;
+  const previewSpend = previewPay?.spent ?? 0, previewDeath = previewPay?.death ?? 0;
   // Hovering a Rest: the Fatigue it would clear and the Health it would return flicker on your bar.
-  const previewRecover = !busy && chosen?.action.type === "rest" ? restRecovery(p) : undefined;
+  const previewRecover = previewAction?.type === "rest" ? restRecovery(p) : undefined;
   const wheelCenter = sel.kind === "player" ? "You" : selectedEnemy?.name ?? "";
 
   const hudRef = useRef<HTMLDivElement>(null);
@@ -808,6 +861,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         }, leapPlan.current?.key === stepKey ? Math.max(0, leapPlan.current.approach - (APPROACH_MS - DODGE_DELAY_MS)) : DODGE_DELAY_MS);
         cleanup = () => window.clearTimeout(timer);
       }
+    } else if (hookBlow) {
+      // (The Hookshot: no knockback, no push; its pull is timed on its own, below.)
     } else if (attack.result === "hit") {
       // A clean hit knocks the target back, and it stays there.
       // (by a leap: away from where it passed, the leaper flying on)
@@ -842,6 +897,36 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return cleanup;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playback?.index, playback?.phase, !!playback, selId, fight, usurpStage, igniteState, waking, usurpTurned]);
+
+  // Your Hookshot, beat by beat. In its approach you stay where you are and wind up overhead; then you throw, and the sickle flies out on its braid
+  // (`HOOK_FLY_MS`), landing as the blow does. Hooked, it holds a moment (`HOOK_HOLD_MS`); then you pull, with a sideways swing, and the sickle comes back
+  // to your hand, dragging its target after it to you (unless it dodged: the sickle comes back from where it was).
+  useEffect(() => {
+    if (!playback || !hookBlow) return;
+    const key = `${playback.from.turn}-${playback.index}`;
+    if (playback.phase === "approach") {
+      const t = world.current.pos[hookBlow.target];
+      if (!t) return;
+      setHook({ key, to: t, end: t });
+      const timer = window.setTimeout(() => setHook(h => (h && h.key === key ? { ...h, out: performance.now() } : h)), HOOK_WIND_MS);
+      return () => window.clearTimeout(timer);
+    }
+    if (playback.phase !== "impact") return;
+    const timer = window.setTimeout(() => {
+      const w = world.current, a = w.pos.player, t = w.pos[hookBlow.target];
+      const landed = hookBlow.result !== "dodged" && !!a && !!t;
+      const end = landed ? closeIn(t!, a!, STRIKE_GAP) : t ?? hook?.to ?? { x: 0, z: 0 };
+      // (the one hooked slides to you as a picture, drawn again where it stops: `SceneShot.rigid`)
+      if (landed) shoot(dragBody(w.pos, hookBlow.target, end), shotRef.current.camera, HOOK_PULL_MS, undefined, undefined, undefined, [hookBlow.target]);
+      setHook(h => (h && h.key === key ? { ...h, end: landed ? end : h.to, back: performance.now() } : h));
+    }, HOOK_HOLD_MS);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playback?.index, playback?.phase, !!playback]);
+  /** The Hookshot's sickle, for your figure to draw (only its numbers), while this step is it. */
+  const hookNow = hook && playback && hookBlow && hook.key === `${playback.from.turn}-${playback.index}` && hook.out
+    ? { tx: hook.to.x, tz: hook.to.z, ex: hook.end.x, ez: hook.end.z, out: hook.out, fly: HOOK_FLY_MS, back: hook.back ?? 0, pull: HOOK_PULL_MS }
+    : undefined;
 
   // Waking up: black but for the guide's light, which comes closer; then the dark lifts and the lesson begins.
   useEffect(() => {
@@ -884,9 +969,47 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     setExpanded(false);
   };
 
+  /** Opens an action up into its alternatives, on the part you used last (or its first part, if that one is empty). */
+  const openUp = (d: Dir) => {
+    const o = wheel[d];
+    if (!o?.alternatives) return;
+    const last = preferredAlternative(alternativeOf(o.action));
+    const first = (["right", "up", "left", "down"] as SubSlot[]).find(x => o.alternatives![x]) ?? "right";
+    setSubSlot(o.alternatives[last] ? last : first);
+    setExpanded(true);
+  };
+  /** A skill chosen: the wheel closes into the mark, on the first enemy it can be aimed at. */
+  const startAim = (option: WheelOption) => {
+    const skill = option.action.skill;
+    if (!skill) return;
+    // (the closed Skill is the part it stands for: the same action)
+    const slot = (Object.keys(wheel.up?.alternatives ?? {}) as SubSlot[]).find(x => wheel.up?.alternatives?.[x]?.action === option.action) ?? "right";
+    const first = aimRowsOf(skill).flat()[0];
+    if (!first) return;
+    setAiming({ action: { ...option.action, skill }, slot });
+    closeWheel();
+    setSelection(first);
+  };
+  /** Back from aiming: your wheel again, the Skill menu open on the skill you were aiming. */
+  const stopAim = () => {
+    const slot = aiming?.slot ?? "up";
+    setAiming(null);
+    setSelection({ kind: "player" });
+    setWheelOpen(true);
+    setHighlight("up");
+    setSubSlot(slot);
+    setExpanded(true);
+  };
+  /** Aiming: the skill at this enemy, if it can be aimed at it. */
+  const aimAt = (id: string) => {
+    if (!aiming || !aimRowsOf(aiming.action.skill).flat().some(x => x.kind === "enemy" && x.id === id)) return;
+    play({ ...aiming.action, target: id });
+  };
+
   /** Resolve the turn, then play it back step by step. */
   const play = (action: PlayerAction, skip = false) => {
     turnStart.current = performance.now();
+    setAiming(null);
     // (Skip battle: a turn where you do nothing and every enemy falls; see `resolveSkip`.)
     const next = skip ? resolveSkip(fight) : resolveTurn(fight, action);
     const pose: PoseName = forced ? "kneel" : skip ? "idle" : action.type; // staggered or reviving: down on one knee
@@ -899,6 +1022,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   };
   const commit = (option: WheelOption | null) => {
     if (!option || !playing || busy) return;
+    // (a skill with no one to aim at does nothing)
+    if (option.disabled) return;
     // (In the lesson, only the action it asks for, and not while it is still speaking.)
     if (current && (typing || current.goal?.until !== "commit" || !current.goal.want || !isWanted(option.action, current.goal.want) || !lessonStand?.onTarget)) return;
     if (current) nextBeat();
@@ -908,6 +1033,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       if (used && !current) rememberAlternative(alternativeOf(option.action), used);
     }
     if (showHints) { const key = triedKeyOf(option); if (key) triedAction(key); }
+    // A skill is aimed next, unless it already has its target.
+    if (option.action.skill && !option.action.target) { startAim(option); return; }
     play(option.action);
   };
 
@@ -1131,6 +1258,13 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       if (!current.goal) { if (key === "select") nextBeat(); return; }
       if (!lessonStand || !lessonAllows(current.goal, key, lessonStand)) return;
     }
+    if (aiming) {
+      // Aiming a skill: the directions move the mark among the enemies it can be aimed at, Yes makes it, No goes back to the Skill menu.
+      if (key === "select") { if (sel.kind === "enemy") { menuSound(key); aimAt(sel.id); } }
+      else if (key === "back") { menuSound(key); stopAim(); }
+      else if (key !== "pause") moveCursor(key);
+      return;
+    }
     if (!wheelOpen) {
       if (key === "select") { menuSound(key); openWheel(sel); }
       else if (key !== "back" && key !== "pause") moveCursor(key);
@@ -1140,17 +1274,16 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // An action opened up: only Q closes it up again (Q again closes the wheel); each direction picks the part on its quarter; E commits the part
       // (an empty one does nothing).
       if (key === "back") { menuSound(key); setExpanded(false); return; }
-      if (key === "select") { if (chosen) menuSound(key); commit(chosen); return; }
+      if (key === "select") { if (chosen && !chosen.disabled) menuSound(key); commit(chosen); return; }
       if (key === "pause") return;
       if (key !== subSlot) { menuSound(key); setSubSlot(key); }
       return;
     }
     if (key === "back") closeWheel();
-    else if (key === "select") { if (chosen) menuSound(key); commit(chosen); }
+    else if (key === "select") { if (chosen && !chosen.disabled) menuSound(key); commit(chosen); }
     else if (key !== "pause" && key === highlight && !current && wheel[key]?.alternatives) {
       // (on the part you used last, if this action has it)
-      const o = wheel[key]!, last = preferredAlternative(alternativeOf(o.action));
-      menuSound(key); setSubSlot(o.alternatives![last] ? last : "right"); setExpanded(true);
+      menuSound(key); openUp(key);
     } // (not in the lesson)
     else if (key !== "pause" && wheel[key]) { if (key !== highlight) menuSound(key); setHighlight(key); }
   });
@@ -1199,8 +1332,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // An attacker closes in; the first step after the attacks holds until the attack phase has lasted
       // MIN_ATTACK_PHASE_MS. The last step stays long enough for a Rest's animation, if one goes through.
       playback.phase === "approach"
-        ? risesNow ? 250 : isAttackStep(step) ? (leapPlan.current?.key === stepKey ? leapPlan.current.approach : APPROACH_MS) + (usurpTurning() ? USURP_TURN_MS : 0) :Math.max(prepsIn(playback, step) ? PREP_MS : 0, MIN_ATTACK_PHASE_MS - (performance.now() - turnStart.current))
-        : Math.max(STEP_MS, usurpAsAttack && usurpOf(step) ? USURP_WISP_MS + USURP_AFTER_MS : 0, raising?.at === playback.index ? raiseMs + USURP_AFTER_MS : 0,playback.index === playback.steps.length - 1 && resting ? REST_ANIM_MS : 0, slideMs(playback), leapPlan.current?.key === `${playback.from.turn}-${playback.index}-approach` ? leapPlan.current.after + 100 : 0),
+        ? risesNow ? 250 : hookBlow ? HOOK_WIND_MS + HOOK_FLY_MS : isAttackStep(step) ? (leapPlan.current?.key === stepKey ? leapPlan.current.approach : APPROACH_MS) + (usurpTurning() ? USURP_TURN_MS : 0) :Math.max(prepsIn(playback, step) ? PREP_MS : 0, MIN_ATTACK_PHASE_MS - (performance.now() - turnStart.current))
+        : Math.max(STEP_MS, hookBlow ? HOOK_HOLD_MS + HOOK_PULL_MS + 150 : 0, usurpAsAttack && usurpOf(step) ? USURP_WISP_MS + USURP_AFTER_MS : 0, raising?.at === playback.index ? raiseMs + USURP_AFTER_MS : 0,playback.index === playback.steps.length - 1 && resting ? REST_ANIM_MS : 0, slideMs(playback), leapPlan.current?.key === `${playback.from.turn}-${playback.index}-approach` ? leapPlan.current.after + 100 : 0),
     );
     return () => window.clearTimeout(timer);
   }, [playback, paused, waitingForString]);
@@ -1422,6 +1555,12 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // leg's from Left Lead into Right Lead, the left leg's the mirror of it (drawn mirrored, `kickMirrored` below).
     "kick-right": { windUp: "p3-kick-up", strike: "p3-kick" },
     "kick-left": { windUp: "p3-kick-up", strike: "p3-kick" },
+    // A Stab (the Shortsword's skill) draws the blade back by the hip from Right Lead and thrusts it straight out (the left hand's, mirrored).
+    stab: { windUp: "p3-stab-up", strike: "p3-stab" },
+    // A Hookshot (the Sickle's) winds up overhead, then throws (its arm out at the target while the sickle is out), and pulls with a sideways swing's
+    // landing once the sickle has hooked: from Right Lead a backhand (Swing Right's), from any other stance an openhand (Swing Left's).
+    "hook-left": { windUp: hook?.out ? "p3-hook-throw" : "p3-hook-up", strike: hook?.back ? "swing-left" : "p3-hook-throw" },
+    "hook-right": { windUp: hook?.out ? "p3-hook-throw" : "p3-hook-up", strike: hook?.back ? "swing-right" : "p3-hook-throw" },
   };
   // In 3D (the player always is, in a fight) a sideways swing has its own wind-up and landing, from the one stance into the other.
   if (PLAYER_3D) {
@@ -1657,7 +1796,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       if (ev.kind === "eternal" && ev.attacker === "player") {
         // A halo where the effect took hold: where the blow met a Block, where it hit, or on the one who used it (Fatigue saved).
         const blocked = step.events.some(x => x.kind === "attack" && x.attacker === ev.attacker && x.target === ev.target && x.result === "blocked" && !x.ranged);
-        const self = ev.effect === "shortsword";
+        const self = ev.effect === "shortsword" || ev.effect === "stab";
         projectiles.push({ from: self ? ev.attacker : ev.target, to: self ? ev.attacker : ev.attacker, kind: ev.death > 0 ? "eternityDeath" : "eternity", where: self ? "self" : blocked ? "block" : "hit", key: `${stepKey}-${ev.attacker}-eternal${flames++}` });
       }
       if (ev.kind !== "attack") continue;
@@ -1807,6 +1946,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       pose: track("player", PLAYER_3D ? player3dPose(leftLeading ? "low-right" : playerPose) : playerPose),
       player3d: PLAYER_3D,
       mirror: leftLeading || kickMirrored,
+      hook: hookNow,
       punch: PLAYER_3D && leftPunch && PUNCH_POSES.has(playerPose),
       dead: youDead ? "pieces" : undefined,
       encased: playerSealed,
@@ -1831,7 +1971,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       selected: !busy && sel.kind === "player",
       disabled: busy || !playing || forced !== null,
       label: "Select yourself",
-      onPick: () => { if (playSignal === undefined) openWheel({ kind: "player" }); },
+      onPick: () => { if (playSignal === undefined) { if (aiming) stopAim(); else openWheel({ kind: "player" }); } },
     },
     ...view.enemies
       // Some (the waxed) stay where they fell, faded, for the rest of the fight.
@@ -1897,7 +2037,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         // It holds String you lost.
         // (A body of several parts, the Wax Blob, has one string round the whole heap, on its middle part, whichever part holds it.)
         holdsString: e.body ? e.part === "mid" && view.enemies.some(x => x.body === e.body && !!x.holds) : !!e.holds,
-        onPick: () => { if (playSignal === undefined) openWheel({ kind: "enemy", id: e.id }); },
+        onPick: () => { if (playSignal === undefined) { if (aiming) aimAt(e.id); else openWheel({ kind: "enemy", id: e.id }); } },
         // While you plan, the bar of whoever you're targeting, right below it (mid-turn it sits on the black strip instead).
         // (A part of a body, the Wax Blob: the bar always hangs below its middle part, whichever part is the target.)
         // (Mid-turn too: the bar of whoever the turn is about hangs below it, with what is changing flashing as it lands, not in the corner of the screen.)
@@ -1999,7 +2139,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
 
       {/* Your health bar sits in a fixed slot, so nothing else on screen can push it around. The target's hangs right below it, in the scene, planning or not. */}
-      <PlayerBars knot={knotOwned} eternalFlash={{ health: barFlashOf("player"), eternity: eternalHere.some(ev => ev.attacker === "player" && ev.spent > 0) ? stepKey : undefined }} player={endHeal(barsOf(p))} preview={previewCost} recover={previewRecover} string={carried + landed} stringPops={pops} eternalString={eternalString} />
+      <PlayerBars knot={knotOwned} eternalFlash={{ health: barFlashOf("player"), eternity: eternalHere.some(ev => ev.attacker === "player" && ev.spent > 0) ? stepKey : undefined }} player={endHeal(barsOf(p))} preview={previewCost} spend={previewSpend} deathPreview={previewDeath} recover={previewRecover} string={carried + landed} stringPops={pops} eternalString={eternalString} />
 
       {/* The ring over whoever you have selected: a small mark while you plan, grown into the wheel when you focus. */}
       {playing && !forced && !busy && !waking && intro === null && (
@@ -2012,6 +2152,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
           center={wheelCenter}
           anchor={anchor}
           hints={wheelHints}
+          aimLabel={aiming ? SKILLS[aiming.action.skill].name : undefined}
           onHighlight={d => { if (!lesson) { if (d !== highlight) menuSound(d); setHighlight(d); } }}
           onSub={s => { if (s !== subSlot) menuSound(s); setSubSlot(s); }}
           onCommit={o => { menuSound("select"); commit(o); }}

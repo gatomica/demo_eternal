@@ -244,7 +244,7 @@ export type PoseName =
   | "strike" | "fallen" | "kneel" | "punch"
   | "t-pose" | "t-pose-b" | "w-t" | "w-t-b"
   | "sw-windup" | "sw-brace" | "sw-flinch" | "sw-down" | "sw-idle" | "sw-charging" | "sw-struggling" | "sw-shoulder-in"
-  | "sw-overhead" | "sw-overhead-leap" | "sw-dead" | "p3-idle" | "p3-low" | "sw-chop" | "sw-overhead-strike" | "p3-overhead-leap" | "p3-overhead-strike" | "p3-flinch" | "p3-right-lead" | "p3-kick-up" | "p3-kick" | "sw-swing-l-windup" | "sw-swing-l" | "sw-swing-r-windup" | "sw-swing-r" | "sw-parry" | "sw-charge" | "sw-backstep" | "p3-backstep" | "sw-despair"
+  | "sw-overhead" | "sw-overhead-leap" | "sw-dead" | "p3-idle" | "p3-low" | "sw-chop" | "sw-overhead-strike" | "p3-overhead-leap" | "p3-overhead-strike" | "p3-flinch" | "p3-right-lead" | "p3-kick-up" | "p3-kick" | "p3-stab-up" | "p3-stab" | "p3-hook-up" | "p3-hook-throw" | "sw-swing-l-windup" | "sw-swing-l" | "sw-swing-r-windup" | "sw-swing-r" | "sw-parry" | "sw-charge" | "sw-backstep" | "p3-backstep" | "sw-despair"
   | "w-idle" | "w-hands" | "w-scratch" | "w-wax-hand" | "w-hurl"
   | "w-staggered" | "w-dead" | "w-cower" | "w-reared" | "w-hurl-windup" | "w-clutch-eat" | "w-brace" | "w-brace-block" | "w-overhead-windup" | "w-overhead-strike" | "w-crawl" | "w-low-windup" | "w-low-strike" | "w-drag" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
   | WardenPoseName
@@ -646,6 +646,51 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
   "p3-kick": {
     ...RIGHT_LEAD,
     for3d: { ...RIGHT_LEAD.for3d, toward3: -20, legDirs3: { right: [[0.64, -0.15, 0.77], [0.63, -0.25, 0.75]] } },
+  },
+  // Stab (the Bronze Shortsword's skill), winding up: Right Lead (the right shoulder and the right leg toward the target), coiled: the right arm drawn
+  // back, the upper arm down and behind the body, the forearm level and pointing ahead, so the hand is by the hip and the blade lies level beside
+  // it, its point at the target. The upper body leans a little back, away from it (`toward3`). (Made with the left hand, it is this, mirrored.)
+  "p3-stab-up": {
+    ...RIGHT_LEAD,
+    for3d: {
+      ...RIGHT_LEAD.for3d, toward3: -8,
+      arms3: { right: { dirs: [[0.3, -0.55, -0.78], [0.05, 0.05, 1]] }, left: { aim: { dir: [-0.3, -0.55, -0.8], reach: 0.85 } } },
+      weapon3: [0, 0.03, 1],
+    },
+  },
+  // Stab, landing: the thrust. The right arm shot out straight at the target at chest height, the blade on along it; the upper body lunging in after
+  // it (`toward3`); the left arm flung back behind for balance. It stays in Right Lead.
+  "p3-stab": {
+    ...RIGHT_LEAD,
+    for3d: {
+      ...RIGHT_LEAD.for3d, toward3: 18,
+      arms3: { right: { aim: { dir: [0.08, -0.05, 1], reach: 1 } }, left: { aim: { dir: [-0.35, -0.3, -0.85], reach: 0.95 } } },
+      weapon3: [0.04, -0.12, 1],
+    },
+  },
+  // Hookshot (the Nomadic Sickle's skill), winding up: the one-handed Overhead's wind-up (`p3-overhead-leap`), but standing, both feet on the floor
+  // (the right ahead, the left behind) and leaning back less: the sickle held up over the head on its braid, the left arm out ahead for balance.
+  // (Made with the left hand, it is this, mirrored.)
+  "p3-hook-up": {
+    head: [38, 36], neck: [39, 47], hip: [44, 74],
+    weaponArm: { elbow: [50, 31], hand: [36, 20] },
+    freeArm: { elbow: [50, 51], hand: [64, 52] },
+    leadLeg: { knee: [62, 82], foot: [52, 100] },
+    rearLeg: { knee: [36, 94], foot: [28, 114] },
+    weapon: { at: [36, 20], angle: -160 }, torso34: "front", leadSide: "right",
+    for3d: { pitch3: 10, spin3: 45, hip: [44, 76], leadLeg: { knee: [54, 95], foot: [57, 114] }, rearLeg: { knee: [38, 95], foot: [33, 114] } },
+  },
+  // Hookshot, thrown: the Overhead's landing body, the throwing arm let go straight out ahead and a little up, at the target, the hand holding on to
+  // the braid as the sickle flies off on it; the left arm swung back. It holds this while the sickle is out, until the pull (a sideways swing's
+  // landing: `swing-left` or `swing-right`).
+  "p3-hook-throw": {
+    head: [64, 42], neck: [58, 52], hip: [44, 76],
+    weaponArm: { elbow: [62, 60], hand: [72, 68] },
+    freeArm: { elbow: [52, 66], hand: [44, 76] },
+    leadLeg: { knee: [64, 96], foot: [74, 114] },
+    rearLeg: { knee: [34, 96], foot: [24, 114] },
+    weapon: { at: [72, 68], angle: 0 }, leadSide: "right",
+    for3d: { spin3: 25, arms3: { right: { aim: { dir: [0.1, 0.12, 1], reach: 1 } }, left: { aim: { dir: [-0.5, -0.3, -0.55], reach: 0.95 } } }, weapon3: [0.05, 0.1, 1] },
   },
   // The player's Lowered stance in 3D: centred, square to what it faces, neither leg leading (the feet set apart either side), the knees bent into a
   // crouch, the back straight over them; the arms lowered at its sides, the weapon pointing down ahead.
