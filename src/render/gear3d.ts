@@ -46,6 +46,13 @@ export interface GearModel {
   /** How long its damaging part is, along x, from its far end back (figure units): the blade, the brick, the bulb. A swing's arch is that thick. */
   damage: number;
   /**
+   * Where the hands hold it, along x (figure units): `one`, the hand that holds it alone (the Gear viewer's red dot); `two`, where a second hand goes
+   * to hold it in both (its purple dot). A short handle is held alone close to the hilt, the second hand further down the handle; a pole (`subtype`
+   * "pole" in core/rules.ts: the Brick Hammer, the Barbarian's Axe) is held alone about the middle of its haft, the second hand near its end, away
+   * from the head. (The player's figure holds it at `one`; the enemies' still at the origin.)
+   */
+  grips: { one: number; two: number };
+  /**
    * Its edge side: the way (across it, in y and z) the side it strikes with faces, which leads through a swing: a blade's edge, one of a hammer's
    * striking ends, the torch's side with the mark carved in it. None: it has no side to strike with, and it is held as it always was.
    */
@@ -431,12 +438,12 @@ function sickle(): Prim[] {
  * the shortsword's +y edge, the axe's bit (its head stands out along +y), the sickle's inner, hollow edge (toward -y, the handle's line), the torch's side with the carved mark (+y).
  */
 export const GEAR_WEAPONS: GearModel[] = [
-  { id: "chisel", name: "Jagged Chisel", tier: "light", reach: 15, damage: 11.4, edge: [0, 1, 0], note: "Light. Bronze, rusted green: a ridged grip, an oval guard, a broad blade ground square, nicked and chipped, waxed from the carving.", prims: chisel() },
-  { id: "hammer", name: "Brick Hammer", tier: "heavy", reach: 41, damage: 11.5, edge: [0, 1, 0], note: "Heavy. A straight haft and a head of bricks, laid in a running bond.", prims: hammer() },
-  { id: "torch", name: "Waxed Torch", tier: "normal", reach: 35, damage: 12.4, edge: [0, 1, 0], note: "Normal. A torch sealed in a bulb of wax, the sealing king's mark carved into it, the wax run down its handle.", prims: torch() },
-  { id: "shortsword", name: "Bronze Shortsword", tier: "normal", item: "shortsword", reach: 34, damage: 29.6, edge: [0, 1, 0], note: "The Soldier's. The chisel made whole: a ball pommel, a plain grip, an oval guard and a long ridged blade coming to a point.", prims: shortsword() },
-  { id: "axe", name: "Barbarian's Axe", tier: "heavy", item: "axe", reach: 43, damage: 13, edge: [0, 1, 0], note: "The Barbarian's. A long dark haft, a broad two-lobed head of black iron set on its side, its edge ground gray.", prims: axe() },
-  { id: "sickle", name: "Nomadic Sickle", tier: "light", item: "sickle", reach: 20, damage: 12, edge: [0, -1, 0], note: "The Nomad's. A short handle, an iron collar and a crescent blade, thickest at the collar and thinning to its point.", prims: sickle() },
+  { id: "chisel", name: "Jagged Chisel", tier: "light", reach: 15, damage: 11.4, edge: [0, 1, 0], grips: { one: 0, two: -3.2 }, note: "Light. Bronze, rusted green: a ridged grip, an oval guard, a broad blade ground square, nicked and chipped, waxed from the carving.", prims: chisel() },
+  { id: "hammer", name: "Brick Hammer", tier: "heavy", reach: 41, damage: 11.5, edge: [0, 1, 0], grips: { one: 20.5, two: -4.5 }, note: "Heavy. A straight haft and a head of bricks, laid in a running bond.", prims: hammer() },
+  { id: "torch", name: "Waxed Torch", tier: "normal", reach: 35, damage: 12.4, edge: [0, 1, 0], grips: { one: 3, two: -2 }, note: "Normal. A torch sealed in a bulb of wax, the sealing king's mark carved into it, the wax run down its handle.", prims: torch() },
+  { id: "shortsword", name: "Bronze Shortsword", tier: "normal", item: "shortsword", reach: 34, damage: 29.6, edge: [0, 1, 0], grips: { one: 0, two: -3.2 }, note: "The Soldier's. The chisel made whole: a ball pommel, a plain grip, an oval guard and a long ridged blade coming to a point.", prims: shortsword() },
+  { id: "axe", name: "Barbarian's Axe", tier: "heavy", item: "axe", reach: 43, damage: 13, edge: [0, 1, 0], grips: { one: 23, two: -4.5 }, note: "The Barbarian's. A long dark haft, a broad two-lobed head of black iron set on its side, its edge ground gray.", prims: axe() },
+  { id: "sickle", name: "Nomadic Sickle", tier: "light", item: "sickle", reach: 20, damage: 12, edge: [0, -1, 0], grips: { one: 1.8, two: -2.2 }, note: "The Nomad's. A short handle, an iron collar and a crescent blade, thickest at the collar and thinning to its point.", prims: sickle() },
 ];
 
 export type GearId = (typeof GEAR_WEAPONS)[number]["id"];

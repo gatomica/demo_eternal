@@ -14,7 +14,7 @@ import { alternativeOf, preferredAlternative, rememberAlternative } from "./pref
 import { defaultSelection, moveSelection, rowsOf, sameSel, type Selection, type SubSlot, type Wheel, type WheelOption } from "./selection";
 import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveSkip, resolveTurn, snapshotOf } from "../core/resolve";
-import { attackCost, restRecovery, WEAPONS, weaponOf } from "../core/rules";
+import { attackCost, blowShares, bothHands, bothHandsLead, dualWielding, restRecovery, WEAPONS, weaponOf } from "../core/rules";
 import { type SkillId, SKILLS, skillPayment, skillShares, skillsOf, targetsOf } from "../core/skills";
 import type { CombatEvent, CombatState, Enemy, Opening, Player, PlayerAction, Side, Stance, Swing, WeaponItem, WeaponTier } from "../core/types";
 import { ITEMS } from "../explore/items";
@@ -384,12 +384,16 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // (and drawn as what it holds: its sprite, or the empty hand's mitten)
     const rightLook = { kind: "weapon", tier: p.weapon, item: p.weaponItem, side: "right" } as const;
     const leftLook = { kind: "weapon", tier: p.offhand.weapon, item: p.offhand.weaponItem, side: "left" } as const;
+    // Both hands (the top part of each): the two weapons crossed, or the one held in both over its shadow; led by the right hand, unless only the left
+    // holds a weapon.
+    const rightHeld = { tier: p.weapon, item: p.weaponItem }, leftHeld = { tier: p.offhand.weapon, item: p.offhand.weaponItem };
+    const bothLook = { kind: "both", right: rightHeld, left: leftHeld } as const, bothLead = bothHandsLead(rightHeld, leftHeld);
     return {
       up: (() => {
-        // Opened up: the right hand's blow on the right, the left hand's on the left (bare hands' cost and damage while it is empty), and below the Kick,
-        // made with neither hand (bare hands' cost and damage, whatever the hands hold).
+        // Opened up: the right hand's blow on the right, the left hand's on the left (bare hands' cost and damage while it is empty), below the Kick,
+        // made with neither hand (bare hands' cost and damage, whatever the hands hold), and above the blow made with both (see `bothHands`).
         const alternatives: NonNullable<WheelOption["alternatives"]> = {
-          up: null,
+          up: opt("Both hands", { type: "attack", target: sel.id, both: true, hand: bothLead }, bothLook),
           left: opt(leftName, { type: "attack", target: sel.id, hand: "left" }, leftLook),
           down: opt("Kick", { type: "attack", target: sel.id, weight: "baseline", kick: true }, { kind: "kick" }),
           right: opt(rightName, { type: "attack", target: sel.id }, rightLook),
@@ -401,10 +405,10 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       left: opt("Dodge", { type: "maneuver", target: sel.id }),
       down: null,
       right: (() => {
-        // Opened up: the right hand's Block on the right, the left hand's on the left (each with that hand's weight); nothing below yet (the
-        // weaponless Block, to come).
+        // Opened up: the right hand's Block on the right, the left hand's on the left (each with that hand's weight), above the Block made with both
+        // (the two hands' Defense averaged); nothing below yet (the weaponless Block, to come).
         const alternatives: NonNullable<WheelOption["alternatives"]> = {
-          up: null,
+          up: opt("Both hands", { type: "block", target: sel.id, both: true, hand: bothLead }, bothLook),
           left: opt(leftName, { type: "block", target: sel.id, hand: "left" }, leftLook),
           down: null,
           right: opt(rightName, { type: "block", target: sel.id }, rightLook),
@@ -477,6 +481,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // (a Kick's own weight, else the weapon in the hand it uses, and which class's own it is)
       const a = previewAction, left = a.hand === "left", weapon = left ? p.offhand.weapon : p.weapon, item = left ? p.offhand.weaponItem : p.weaponItem;
       // (a skill's, from its own numbers: Stab's cost cut by what it pays, the Hookshot's none)
+      // (both hands': the two hands' stats together, from the two-handed base)
+      if (a.both) return blowShares(bothHands({ tier: p.weapon, item: p.weaponItem }, { tier: p.offhand.weapon, item: p.offhand.weaponItem }), true).cost * p.maxHP;
       return a.skill ? skillShares(p, a.skill, weaponOf(weapon, item)).cost * p.maxHP : attackCost(p, a.weight ?? weapon, (a.weight ?? weapon) === weapon ? item : undefined);
     })()
     : 0;
@@ -1595,6 +1601,21 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    * lands is the right leg's mirrored (it lands in Left Lead).
    */
   const kickMirrored = (swingOf === "kick-right" && playerPose === "p3-kick-up") || (swingOf === "kick-left" && playerPose === "p3-kick");
+  /**
+   * Your Attack or Block made with both hands, while it is at work (its wind-up and strike, or its Block). One weapon (or none): the free hand joins the
+   * one at work. A weapon in each: the left arm takes the pose the left hand's own blow would be in at this moment (its swing as it would be alone from
+   * your stance, `offSwing` on your attack event; a Block's own pose), so both swing at once.
+   */
+  const bothAction = (playback?.action?.type === "attack" || playback?.action?.type === "block") && !!playback.action.both;
+  const bothNow = PLAYER_3D && bothAction && PUNCH_POSES.has(playerPose);
+  const dualNow = bothNow && dualWielding({ tier: p.weapon, item: p.weaponItem }, { tier: p.offhand.weapon, item: p.offhand.weaponItem });
+  const offSwingOf: Swing = playback
+    ? (playback.steps.flatMap(st => st.events).find(ev => ev.kind === "attack" && ev.attacker === "player") as { offSwing?: Swing } | undefined)?.offSwing ?? swingOf
+    : swingOf;
+  const offPoseNow: PoseName | undefined = !dualNow ? undefined
+    : playerPose === swingPoses[swingOf].windUp ? player3dPose(swingPoses[offSwingOf].windUp)
+    : playerPose === swingPoses[swingOf].strike ? player3dPose(swingPoses[offSwingOf].strike)
+    : player3dPose(playerPose);
   // While you plan, an enemy only shows its stance; as the turn plays, its action shows.
   // After its attack, an enemy already settles into the stance it takes next (if it's still up).
   /** Still on its feet once the turn is over (not staggered, fallen or reviving). */
@@ -1948,6 +1969,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       mirror: leftLeading || kickMirrored,
       hook: hookNow,
       punch: PLAYER_3D && leftPunch && PUNCH_POSES.has(playerPose),
+      both: bothNow,
+      offPose: offPoseNow,
       dead: youDead ? "pieces" : undefined,
       encased: playerSealed,
       // Waxed (or waxed by a torch, which is only a look) but still standing: wax caked on you.

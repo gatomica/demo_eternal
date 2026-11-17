@@ -3,21 +3,24 @@
  */
 import type { CombatState, PlayerAction, Side, WeaponItem, WeaponTier } from "../core/types";
 import type { Dir } from "../ui/input";
+import type { HeldWeapon } from "../core/rules";
 
 /** What the cursor is on: you, or an enemy. */
 export type Selection = { kind: "player" } | { kind: "enemy"; id: string };
 
 /**
  * The parts an action with alternatives opens into: the whole wheel's four quarters, by their directions (`left` the left hand's, `right` the right
- * hand's, `down` the one made with neither hand; `up`, for later).
+ * hand's, `down` the one made with neither hand, `up` the one made with both).
  */
 export type SubSlot = Dir;
 
 /**
- * What an option is made with, for the wheel to draw instead of its name: a hand's weapon (its inventory sprite; an empty hand, its mitten), or the
- * Kick (a boot). Its cost and damage bar runs along the part's inner edge (`tier`'s; the Kick's, bare hands').
+ * What an option is made with, for the wheel to draw instead of its name: a hand's weapon (its inventory sprite; an empty hand, its mitten), the
+ * Kick (a boot), or both hands (`both`: the two weapons crossed; one weapon, or none, held in both hands: its picture with a shadow of it below and to
+ * the side). Its cost and damage bar runs along the part's inner edge (`tier`'s; the Kick's, bare hands'; both hands', `bothHands` from the two-handed
+ * base).
  */
-export type WheelLook = { kind: "weapon"; tier: WeaponTier; item?: WeaponItem; side: Side } | { kind: "kick" };
+export type WheelLook = { kind: "weapon"; tier: WeaponTier; item?: WeaponItem; side: Side } | { kind: "kick" } | { kind: "both"; right: HeldWeapon; left: HeldWeapon };
 
 /** An option on the action wheel. */
 export interface WheelOption {

@@ -6,6 +6,7 @@
 import { bodyOf } from "../body";
 import { kickFor, mirrorStance, swingFor } from "../stance";
 import { SKILLS, skillSwing } from "../skills";
+import { dualWielding } from "../rules";
 import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Hand, Line, Player, PlayerAction, Step, Swing, WeaponTier } from "../types";
 
 /** The action the player is locked into this turn, if any. */
@@ -69,6 +70,8 @@ export interface Turn {
   hurtBy?: string;
   /** How your attack this turn swings (from the stance you start it in). */
   swing?: Swing;
+  /** A two-handed attack with a weapon in each hand: how the other (left) hand's swings with it, as it would on its own from that stance. */
+  offSwing?: Swing;
 
   /** Steps recorded so far, and the events of the one under way. */
   steps: Step[];
@@ -119,6 +122,8 @@ export function beginTurn(prev: CombatState, action: PlayerAction, rng: () => nu
     hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(), shifts: new Map(),
     cancelled: new Set(), blocked: new Set(), attacked: new Map(), interrupted: new Set(), fellReviving: new Set(),
     swing: act?.type === "attack" && act.kick ? kickFor(p.stance, act.kick, rng) : act?.type === "attack" && act.skill && SKILLS[act.skill].swing ? skillSwing(act.skill, act.hand === "left" ? mirrorStance(p.stance) : p.stance) : act?.type === "attack" ? swingFor(act.hand === "left" ? mirrorStance(p.stance) : p.stance, alive.find(e => e.id === act.target)) : undefined,
+    offSwing: act?.type === "attack" && act.both && dualWielding({ tier: p.weapon, item: p.weaponItem }, { tier: p.offhand.weapon, item: p.offhand.weaponItem })
+      ? swingFor(mirrorStance(p.stance), alive.find(e => e.id === act.target)) : undefined,
     steps: [],
     events: [],
     emit: ev => {

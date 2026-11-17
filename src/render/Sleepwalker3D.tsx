@@ -13,7 +13,7 @@ import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } fro
 import { type Cam, FIGURE_HEIGHT, facingVec, METERS_PER_UNIT as U, right as rightOf, type Vec } from "./camera";
 import { DebugLimbsContext } from "./debugLimbs";
 import { arcPart, canvas3d, ellipsoidPart, trailPart, Figure3DSvg, type Part, ribcagePart, sameDrawing, weaponParts } from "./figure3d";
-import { held as heldAlong, type Joint, JOINTS, liftPose, type P3, placeRig, poseWeaponAxis, type Rig3, ribcageOf, type Seen, swingArc } from "./rig3d";
+import { GRIP_GAP, held as heldAlong, type Joint, JOINTS, liftPose, type P3, placeRig, poseWeaponAxis, reach3, type Rig3, ribcageOf, type Seen, swingArc } from "./rig3d";
 import { ALL_POSES, type PoseName } from "./poses";
 import { modelOfWeapon } from "./gear3d";
 import { visibleCap } from "./hoodCap";
@@ -111,6 +111,16 @@ export interface Sleepwalker3DProps {
   /** The player's left hand's weapon (bare, if left out): held low by the left hand, out of the way, unless the left hand is at work (`punch`). */
   offWeapon?: WeaponTier;
   /**
+   * The player's Attack or Block made with both hands, one weapon (or none) between them: the free hand joins the hand at work, on the grip just
+   * behind it (bare: the two fists clasped together).
+   */
+  both?: boolean;
+  /**
+   * The player's Attack or Block made with both hands, a weapon in each: the left arm takes this pose's arm instead (drawn mirrored, as a left-hand blow
+   * of its own), swinging its weapon as it would alone, at the same time as the right, and leaving its own arch.
+   */
+  offPose?: PoseName;
+  /**
    * The pose drawn mirrored, the gear not (as for a Punch), and the weapon still in the right hand, pointing as the mirrored pose points it: the
    * player's Left leg leading stance, the mirror of Right leg leading.
    */
@@ -178,6 +188,19 @@ function punched(rig: Rig3): Rig3 {
 const HELD_BACK_WAY: P3 = [0.08, -0.8, 0.6];
 /** The left hand's weapon, when the left hand is not at work: the mirror of that, down and ahead, low, out of the way. */
 const OFF_HELD_WAY: P3 = [-0.08, -0.8, 0.6];
+/** Both bare hands at work together: how far beside the working fist the other one is clasped (figure units, toward its own side). */
+const CLASP = 1.8;
+/** Both hands on the same spot of a handle (a crossed two-handed swing): how far up it the second sits beside the first (figure units). */
+const CLAMP_STEP = 2.4;
+/**
+ * The sideways swings, in the working hand's own frame (drawn mirrored for the left hand), as a weapon held in both hands swings them: whether the swing
+ * is crossed (the Openhand: winding up, the leading leg is not the working hand's side), and whose arm leads (keeps its place) in that pose. The
+ * Openhand winds up in Left Lead and lands in Right Lead; the Backhand winds up in Right Lead and lands in Left Lead.
+ */
+const TWO_HANDED_SIDE: Partial<Record<PoseName, { crossed: boolean; lead: "work" | "free" }>> = {
+  "sw-swing-l-windup": { crossed: true, lead: "free" }, "sw-swing-l": { crossed: true, lead: "work" },
+  "sw-swing-r-windup": { crossed: false, lead: "work" }, "sw-swing-r": { crossed: false, lead: "free" },
+};
 /** The left hand's weapon's broad face turns to the other side, as a mirror shows the right's. */
 const FACE_L: P3 = [-1, 0, 0];
 
@@ -255,7 +278,7 @@ function hull(ps: [number, number][]): [number, number][] {
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
-function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "baseline", punch: punching, mirror, hook, gearOnly, hooded: hoodedKind, encased, waxCaked, dead, gear, eternalFlash, title, swayId, cam, at, yaw, scale = 1, w, h, box }: Sleepwalker3DProps) {
+function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "baseline", punch: punching, both: bothGiven, offPose: offGiven, mirror, hook, gearOnly, hooded: hoodedKind, encased, waxCaked, dead, gear, eternalFlash, title, swayId, cam, at, yaw, scale = 1, w, h, box }: Sleepwalker3DProps) {
   const openingId = useId(); // (the clip that cuts the face to the black hood's opening)
   // The cloth that hangs from it (the tailcoat, the braid, the leather skirt) sways with its movement (sway.ts).
   const root = useRef<SVGSVGElement>(null);
@@ -278,10 +301,13 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
   const pose: PoseName = dead ? "sw-dead" : shown;
   const debug = useContext(DebugLimbsContext);
   // Its weapon, modelled in 3D (gear3d.ts); the flat sprite only if there were none.
-  const model = modelOfWeapon(weapon, gear?.weaponItem), reach = model?.reach ?? WEAPON_REACH[weapon];
+  // The player's hand holds it where one hand does (its model's `grips.one`, the Gear viewer's red dot), so it reaches that much less from the hand;
+  // an enemy's, at its origin.
+  const model = modelOfWeapon(weapon, gear?.weaponItem), oneAt = gear && model ? model.grips.one : 0, reach = (model?.reach ?? WEAPON_REACH[weapon]) - oneAt;
   // (the left hand's, if it holds one)
   const offModel = offWeapon !== "baseline" ? modelOfWeapon(offWeapon, gear?.offItem) : undefined;
-  const offReach = offWeapon !== "baseline" ? offModel?.reach ?? WEAPON_REACH[offWeapon] : 0;
+  const offOneAt = gear && offModel ? offModel.grips.one : 0;
+  const offReach = offWeapon !== "baseline" ? (offModel?.reach ?? WEAPON_REACH[offWeapon]) - offOneAt : 0;
   // The left hand at work: the very pose you see in the same blow (or Block) with the weapon, mirrored (lifted the same way, with the length of the
   // weapon it swings, the left hand's if it holds one, else the right's, so the arms are where that pose has them), both arms included.
   const punch = !!punching && !dead;
@@ -291,11 +317,85 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
   /** Drawn mirrored: the left hand at work, or a mirrored stance. */
   const flipped = (punch || !!mirror) && !dead;
   const liftFor = (p: PoseName) => (flipped ? punched(lift(p, "right", liftReach)) : lift(p, hand, reach));
-  const rig = useMemo(() => (dead ? fallen(lift(pose, hand, reach)) : liftFor(pose)), [pose, hand, reach, liftReach, dead, flipped]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** Both hands at work on one weapon (or none): the free hand joins the one at work. */
+  const gripping = !!bothGiven && !offGiven && !dead;
+  /** The hand at work (the left's when it leads), and the other. */
+  const work: "R" | "L" = punch ? "L" : "R", free: "R" | "L" = punch ? "R" : "L";
+  /** What the hand at work holds: its model, where a hand holds it alone (`grips.one`) and where the second hand goes (`grips.two`), its reach from the hand. */
+  const workArmed = punch ? leftArmed : weapon !== "baseline";
+  const workOne = punch ? offOneAt : oneAt, workReach = punch ? offReach : reach;
+  const workTwo = (punch ? offModel : model)?.grips.two ?? workOne - GRIP_GAP;
+  /**
+   * A two-handed sideways swing (one weapon, or none, in both hands; `TWO_HANDED_SIDE`): the leading arm (the one on the leading leg's side) keeps where
+   * its pose has it, and the other comes to it. The weapon points as the pose points the working hand's, from the leading hand: in a Backhand that hand
+   * is on its usual spot (the working hand winding up, on `one`; the free hand as it lands, on `two`, the working hand coming back to `one`); in an
+   * Openhand (crossed: the working hand is not the leading leg's as it winds up) both hands are on `two`, side by side. Bare-handed, the other fist is
+   * clasped to the leading one. Undefined when the pose is no such swing.
+   */
+  const sideGrip = (r: Rig3, p: PoseName): { held?: { hand: P3; axis: P3; tip: P3 }; other: "R" | "L"; target: P3 } | undefined => {
+    const g = gripping ? TWO_HANDED_SIDE[p] : undefined;
+    if (!g) return undefined;
+    const lock = g.lead === "work" ? work : free, other = lock === work ? free : work, lockHand = r.joints[`hand${lock}` as Joint];
+    if (!workArmed) {
+      const sg = other === "R" ? 1 : -1;
+      return { other, target: [lockHand[0] + sg * CLASP * U, lockHand[1], lockHand[2]] };
+    }
+    const lockX = g.crossed || lock === free ? workTwo : workOne;
+    const otherX = g.crossed ? workTwo + CLAMP_STEP : other === free ? workTwo : workOne;
+    const a = poseWeaponAxis(ALL_POSES[p]), raw: P3 = work === "L" ? [-a[0], a[1], a[2]] : a;
+    // (the far end kept off the floor, from the leading hand)
+    const { axis, tip } = heldAlong(lockHand, raw, workReach + workOne - lockX);
+    const at = (x: number) => plus(lockHand, axis, (x - lockX) * U);
+    return { held: { hand: at(workOne), axis, tip }, other, target: at(otherX) };
+  };
+  /** The right hand's weapon in a pose as it swings it (held in both hands in a sideways swing: `sideGrip`). */
+  const rightIn = (r: Rig3, p: PoseName) => (!punch && sideGrip(r, p)?.held) || weaponIn(r, p, reach);
+  /** The left hand's weapon as it swings it, mirrored (held in both hands in a sideways swing: `sideGrip`). */
+  const leftIn = (r: Rig3, p: PoseName) => (punch && sideGrip(r, p)?.held) || mirroredIn(r, p, offReach);
+  /** Both hands at work, a weapon in each: the left arm swings its own (mirrored) pose. */
+  const offPose = !dead && offWeapon !== "baseline" ? offGiven : undefined;
+  /**
+   * The left arm as it is in the left hand's own blow in pose `p` (drawn mirrored, lifted with its weapon's length), hung from this body's left shoulder:
+   * a weapon in each hand, both swinging at once.
+   */
+  const withOffArm = (r: Rig3, p: PoseName): Rig3 => {
+    const o = punched(lift(p, "right", offReach)), sh = r.joints.shoulderL, osh = o.joints.shoulderL;
+    const moved = (j: Joint): P3 => [sh[0] + o.joints[j][0] - osh[0], sh[1] + o.joints[j][1] - osh[1], sh[2] + o.joints[j][2] - osh[2]];
+    return { ...r, joints: { ...r.joints, elbowL: moved("elbowL"), handL: moved("handL") } };
+  };
+  /** One arm reaching `target` from its shoulder, its elbow out to its side, as a pose held in both hands has it. */
+  const reachArm = (r: Rig3, side: "R" | "L", target: P3): Rig3 => {
+    const sg = side === "R" ? 1 : -1;
+    const { elbow, hand: reached } = reach3(r.joints[`shoulder${side}` as Joint], target, RIG.upperArm * U, RIG.forearm * U, [sg, 0, -0.3]);
+    return { ...r, joints: { ...r.joints, [`elbow${side}`]: elbow, [`hand${side}`]: reached } as Rig3["joints"] };
+  };
+  /**
+   * The free hand joining the one at work (`gripping`), outside a sideways swing (an overhead, a Block): on the weapon's second spot (`grips.two`), or,
+   * bare-handed, the two fists clasped together. In a sideways swing, the leading arm stays and the other comes to it (`sideGrip`).
+   */
+  const gripped = (r: Rig3, p: PoseName): Rig3 => {
+    const side = sideGrip(r, p);
+    if (side) return reachArm(r, side.other, side.target);
+    const sg = free === "R" ? 1 : -1;
+    let target: P3;
+    if (workArmed) {
+      const h = punch ? mirroredIn(r, p, offReach) : weaponIn(r, p, reach);
+      target = plus(h.hand, h.axis, (workTwo - workOne) * U);
+    } else {
+      const wh = r.joints[`hand${work}` as Joint];
+      target = [wh[0] + sg * CLASP * U, wh[1], wh[2]];
+    }
+    return reachArm(r, free, target);
+  };
+  const rig = useMemo(() => {
+    if (dead) return fallen(lift(pose, hand, reach));
+    const r = liftFor(pose);
+    return offPose ? withOffArm(r, offPose) : gripping ? gripped(r, pose) : r;
+  }, [pose, hand, reach, liftReach, dead, flipped, offPose, gripping, offReach, weapon, leftArmed]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Nothing in the hand that swings: bare hands (the right's, or a Punch's left; the right hand's weapon is then held back). */
   const bare = punch ? !leftArmed : weapon === "baseline";
   /** The weapon that swings in this pose, where its hand points it: the left hand's (mirrored) when it is at work, else the right's. */
-  const swungIn = (r: Rig3, p: PoseName) => (leftArmed ? mirroredIn(r, p, offReach) : weaponIn(r, p, reach));
+  const swungIn = (r: Rig3, p: PoseName) => (leftArmed ? leftIn(r, p) : rightIn(r, p));
   const swungModel = leftArmed ? offModel : model;
   const fist: Joint = punch ? "handL" : "handR", fistShoulder: Joint = punch ? "shoulderL" : "shoulderR";
   /** A way on the body as it stood, as it is now (tipped onto its back, if dead). */
@@ -337,6 +437,23 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
     const arch = strike === pose && arc ? arc : swingArc(swungIn(liftSwing(from), from).tip, swungIn(liftSwing(strike), strike).tip);
     return { arc: arch, at: (strike === pose ? 1 : 0) as 0 | 1 };
   }, [windUp, pose, hand, reach, bare, arc, leftArmed, offReach]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A weapon in each hand, both swinging (`offPose`): the left one's own arch, from its far end in its wind-up to where it ends, and the swing its edge
+  // side leads through (the arch it leaves, or, winding up, the one it is about to make).
+  const offSwing = useMemo(() => {
+    if (!offPose) return undefined;
+    const offWind = SWINGS[offPose];
+    if (offWind && windUp) {
+      const from = mirroredIn(withOffArm(liftFor(windUp), offWind), offWind, offReach).tip, to = mirroredIn(rig, offPose, offReach).tip;
+      const sh = rig.joints.shoulderL, far = (RIG.upperArm + RIG.forearm + offReach) * U;
+      const mid: P3 | undefined = ACROSS.has(offPose) ? [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, sh[2] + far] : undefined;
+      const arch = swingArc(from, to, offModel && offModel.damage * U, mid);
+      return { trail: arch, edge: { arc: arch, at: 1 as const } };
+    }
+    const offStrike = STRIKE_OF[offPose], strike = STRIKE_OF[pose];
+    if (!offStrike || !strike) return undefined;
+    const arch = swingArc(mirroredIn(rig, offPose, offReach).tip, mirroredIn(withOffArm(liftFor(strike), offStrike), offStrike, offReach).tip);
+    return { trail: undefined, edge: { arc: arch, at: 0 as const } };
+  }, [offPose, pose, windUp, rig, offReach, offModel]); // eslint-disable-line react-hooks/exhaustive-deps
   const c = canvas3d(placeRig(rig, at, yaw, cam, w, h, scale), box);
   const { seen, see, X, Y, scaleAt, parts, bones, ball, behind, meet } = c;
   const red = (side: "R" | "L") => (debug && side === "R" ? " dbg-red" : "");
@@ -908,6 +1025,7 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
   // (the pull's arch is a trail of its own, drawn anew: the throw's, before it, keeps its place until then)
   if (arc) parts.push(pulling ? trailPart(c, "swing-pull", arc.circle) : arcPart(c, arc));
   if (kickArc) parts.push(arcPart(c, kickArc));
+  if (offSwing?.trail) parts.push(trailPart(c, "swing-left", offSwing.trail.circle));
 
   // The Hookshot: the sickle in the hand at work thrown out on its braid to its target, spinning end over end, held there, then pulled back in to the
   // hand as its target is dragged after it (see `hook`). Undefined while it is in the hand.
@@ -945,8 +1063,9 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
    * handle. In the hand it hangs straight down from it (as long as `SICKLE_BRAID_LUMPS` twists, short of the floor), swaying; thrown (`holder`, the
    * hand that keeps hold of its end), it is stretched from the sickle all the way back to that hand, its end hanging from the hand.
    */
-  const sickleBraid = (key: string, held: { hand: P3; axis: P3 }, holder?: P3) => {
-    const base = plus(held.hand, held.axis, -SICKLE_POMMEL * U), down: P3 = [0, -1, 0];
+  const sickleBraid = (key: string, held: { hand: P3; axis: P3 }, holder?: P3, gripAt = 0) => {
+    // (`gripAt`: how far up the handle the hand holds it, `held.hand` being there)
+    const base = plus(held.hand, held.axis, -(SICKLE_POMMEL + gripAt) * U), down: P3 = [0, -1, 0];
     /** The twists, from `from` along `dir` (each `BRAID_STEP` apart, the first `start` along), to its two sides along `side`, tapering. */
     const twistsAlong = (from: P3, dir: P3, side: P3, n: number, start: number, swaying?: { pivot: [number, number]; angles: [number, number] }) => {
       for (let k = 0; k < n; k++) {
@@ -1011,16 +1130,16 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
       : punch ? heldAlong(hand3, HELD_BACK_WAY, reach)
       : flipped && offWeapon !== "baseline" ? heldAlong(hand3, HELD_BACK_WAY, reach)
       : flipped ? ((a: P3) => heldAlong(hand3, [-a[0], a[1], a[2]], reach))(poseWeaponAxis(ALL_POSES[pose]))
-      : weaponIn(rig, pose, reach);
+      : rightIn(rig, pose);
     // (its middle, between the neck and the pelvis: out of a swing the weapon's edge side faces away from it)
     const wielder: P3 | undefined = dead ? undefined : [0, 1, 2].map(i => (rig.joints.neck[i] + rig.joints.pelvis[i]) / 2) as unknown as P3;
     // (While the left hand is at work, the right's weapon is out of the swing, and of its flash.)
-    const gear = weaponParts(c, { weapon, model, reach, held, face: dead ? [0, 1, 0] : FACE, swing: dead || punch || thrown ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? undefined : eternalFlash });
+    const gear = weaponParts(c, { weapon, model, reach, held, slide: oneAt, face: dead ? [0, 1, 0] : FACE, swing: dead || punch || thrown ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? undefined : eternalFlash });
     parts.push(...gear);
-    if (gear0?.weaponItem === "sickle" && !dead) sickleBraid("braid-right", held, thrown && !leftArmed ? thrown.holder : undefined);
+    if (gear0?.weaponItem === "sickle" && !dead) sickleBraid("braid-right", held, thrown && !leftArmed ? thrown.holder : undefined, oneAt);
     // (A pose that holds the weapon in both hands holds it in the right alone while the left holds a weapon of its own.)
     const asDrawn = raw.for3d ? { ...raw, ...raw.for3d } : raw;
-    gripDots(gear, asDrawn.grip && !flipped && offWeapon === "baseline" ? ["R", "L"] : [rig.weaponHand === "right" ? "R" : "L"]);
+    gripDots(gear, (asDrawn.grip && !flipped && offWeapon === "baseline") || (gripping && !punch) ? ["R", "L"] : [rig.weaponHand === "right" ? "R" : "L"]);
   }
   // The left hand's weapon (the player's): held low and ahead, out of the way; swung as the mirror of the right hand's when the left hand is at work;
   // dead, dropped by the left hand.
@@ -1031,13 +1150,14 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
     const held = dead
       ? heldAlong([handL[0], 1.2 * U, handL[2]], way([-0.55, -0.83, 0]), offReach, 0.5)
       : thrown && leftArmed ? thrown.held
-      : punch || flipped ? mirroredIn(rig, pose, offReach)
+      : offPose ? mirroredIn(rig, offPose, offReach)
+      : punch || flipped ? leftIn(rig, pose)
       : heldAlong(handL, OFF_HELD_WAY, offReach);
     const wielder: P3 | undefined = dead ? undefined : [0, 1, 2].map(i => (rig.joints.neck[i] + rig.joints.pelvis[i]) / 2) as unknown as P3;
-    const gear = weaponParts(c, { weapon: offWeapon, model: offModel, reach: offReach, held, face: dead ? [0, 1, 0] : FACE_L, swing: dead || !punch || thrown ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? eternalFlash : undefined, key: "weapon-left" });
+    const gear = weaponParts(c, { weapon: offWeapon, model: offModel, reach: offReach, held, slide: offOneAt, face: dead ? [0, 1, 0] : FACE_L, swing: offPose ? offSwing?.edge : dead || !punch || thrown ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? eternalFlash : undefined, key: "weapon-left" });
     parts.push(...gear);
-    if (gear0?.offItem === "sickle" && !dead) sickleBraid("braid-left", held, thrown && leftArmed ? thrown.holder : undefined);
-    gripDots(gear, ["L"]);
+    if (gear0?.offItem === "sickle" && !dead) sickleBraid("braid-left", held, thrown && leftArmed ? thrown.holder : undefined, offOneAt);
+    gripDots(gear, gripping && punch ? ["L", "R"] : ["L"]);
   }
 
   /**

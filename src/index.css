@@ -356,6 +356,12 @@ kbd {
 .wheel-picture-box { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
 .wheel-picture-box .gear-icon .flat { fill: #fff; stroke: rgb(0 0 0 / 0.55); stroke-width: 2.5px; stroke-linejoin: round; paint-order: stroke; }
 .wheel-piece.is-highlighted .wheel-picture-box .gear-icon .flat { fill: #14131a; stroke: none; }
+/* Both hands' picture (ActionWheel.tsx `Picture`): two weapons crossed, the left hand's mirrored; or the one held in both over its own shadow, below and to the side. */
+.wheel-picture-box.is-both { position: relative; }
+.wheel-both-piece { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.wheel-both-piece.is-cross-left { transform: scaleX(-1); }
+.wheel-both-piece.is-held { transform: translate(-7%, -6%) scale(0.92); }
+.wheel-both-piece.is-shadow { transform: translate(9%, 8%) scale(0.92); filter: brightness(0); opacity: 0.4; }
 /* An opened part's cost and damage bar, along its inner edge, as the item card's (`.item-card-measure`). */
 .wheel-measure path { fill: none; stroke-linecap: butt; pointer-events: none; }
 .wheel-overlay:not(.is-open) .wheel-measure { visibility: hidden; }

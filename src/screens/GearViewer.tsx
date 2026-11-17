@@ -24,6 +24,8 @@ export function GearViewer({ id, onChange, onBack }: { id: GearId; onChange: (id
   const model = GEAR_WEAPONS.find(m => m.id === id) ?? GEAR_WEAPONS[0];
   const [yaw, setYaw] = useState(VIEWS[0].yaw), [pitch, setPitch] = useState(VIEWS[0].pitch);
   const [spin, setSpin] = useState(false);
+  /** The Grips debug: where a hand holds it alone (red) and where the second hand goes to hold it in both (purple), on its handle's line. */
+  const [grips, setGrips] = useState(false);
   const drag = useRef<{ x: number; y: number } | null>(null);
   useKeys(key => { if (key === "back" || key === "pause") onBack(); });
 
@@ -62,7 +64,7 @@ export function GearViewer({ id, onChange, onBack }: { id: GearId; onChange: (id
       const s = scale(v);
       return [+(W / 2 + v[0] * s).toFixed(2), +(H / 2 + v[1] * s).toFixed(2)];
     };
-    return drawGear(model.prims, { view, project, scale });
+    return { shapes: drawGear(model.prims, { view, project, scale }), dot: (x: number) => project(view([x, 0, 0])) };
   }, [model, yaw, pitch, frame]);
 
   const tier = WEAPONS[model.tier];
@@ -91,6 +93,13 @@ export function GearViewer({ id, onChange, onBack }: { id: GearId; onChange: (id
             <button className="chip viewer-toggle" aria-pressed={spin} onClick={() => setSpin(s => !s)}>{spin ? "Spin: on" : "Spin: off"}</button>
           </div>
         </div>
+        <div className="viewer-section">
+          <span className="picker-label">Debug</span>
+          <div className="picker-options">
+            <button className="chip viewer-toggle" aria-pressed={grips} onClick={() => setGrips(g => !g)}>{grips ? "Grips: on" : "Grips: off"}</button>
+          </div>
+        </div>
+        {grips && <p className="hint">Red: where one hand holds it ({model.grips.one}). Purple: where the second hand goes, held in both ({model.grips.two}).</p>}
         <p className="hint">Drag the weapon to turn it. {model.tier === "baseline" ? "" : `${tier.label} weight, reaches ${model.reach} from the grip.`}</p>
       </aside>
       <svg
@@ -112,7 +121,11 @@ export function GearViewer({ id, onChange, onBack }: { id: GearId; onChange: (id
         onPointerCancel={() => { drag.current = null; }}
       >
         <ellipse cx={W / 2} cy={H - 14} rx={W * 0.3} ry={4} className="fig-shadow" />
-        {drawn.map((d, i) => <GearShape key={i} d={d} />)}
+        {drawn.shapes.map((d, i) => <GearShape key={i} d={d} />)}
+        {grips && ([["two", "#a24bd6"], ["one", "#e0352b"]] as const).map(([k, fill]) => {
+          const [x, y] = drawn.dot(model.grips[k]);
+          return <circle key={k} cx={x} cy={y} r={2.6} fill={fill} stroke="#000" strokeWidth={0.5} />;
+        })}
       </svg>
     </main>
   );

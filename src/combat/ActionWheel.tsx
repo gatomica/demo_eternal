@@ -8,7 +8,7 @@
  *
  * An action with alternatives (Attack, Block) shows two shorter lines across its piece while it is the one selected. Pressing its direction
  * again opens it up: its parts take the whole wheel, one a quarter, by their own directions (A the left hand's, D the right hand's, S the one with
- * neither: the Kick; W for later), the actions' names and pictures fading out as the parts' fade in (`useOpening`). Only No closes it again.
+ * neither: the Kick; W the one with both), the actions' names and pictures fading out as the parts' fade in (`useOpening`). Only No closes it again.
  * An option made with a weapon (or the empty hand, or the Kick) is drawn as its picture instead of its name (`WheelOption.look`: the inventory's
  * sprite, the mitten, a boot), with its weapon's bar along its inner edge, as on the item card: white from its counter-clockwise end as long as
  * the Fatigue an attack with it costs, health's red from the other end as long as the damage it deals, in sixteenths of your health, and nothing
@@ -22,7 +22,7 @@
  */
 import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { pointedLine, polar, R_IN, R_OUT, RingFade, RingLines } from "../render/ring";
-import { blowShares, defenseOf, WEAPONS, weaponOf } from "../core/rules";
+import { blowShares, bothHands, dualWielding, type HeldWeapon, WEAPONS, weaponOf, type WeaponStats } from "../core/rules";
 import { BootIcon, GearIcon, GearSprite } from "../explore/GearIcons";
 import type { SubSlot, Wheel, WheelLook, WheelOption } from "./selection";
 import type { Dir } from "../ui/input";
@@ -87,18 +87,42 @@ const PICTURE = 30;
 /** The bar along an opened part's inner edge: how far out from the inner edge it runs, how thick, and how far in from the part's two edges (degrees). */
 const BAR_R = R_IN + 4, BAR_W = 4, BAR_GAP = 3;
 
-/** An option's picture, centred on `at` (ring units): its weapon's sprite (an empty hand, the mitten), or the Kick's boot. */
+/** One hand's picture: its weapon's sprite, slanted to fill the place, or (empty) its mitten. */
+function HandPicture({ held, side }: { held: HeldWeapon; side: "left" | "right" }) {
+  return held.tier === "baseline" ? <GearIcon slot="weapon" mirrored={side === "left"} faded={false} /> : <GearSprite slot="weapon" tier={held.tier} item={held.item} tilted />;
+}
+
+/**
+ * An option's picture, centred on `at` (ring units): its weapon's sprite (an empty hand, the mitten), the Kick's boot, or both hands': the two weapons
+ * crossed (the left hand's the mirror of its sprite), or the one weapon held in both (bare hands: the mitten) over a shadow of itself, below and to the
+ * side.
+ */
 function Picture({ look, at, style }: { look: WheelLook; at: [number, number]; style?: CSSProperties }) {
+  const both = look.kind === "both" ? look : null;
+  const dual = both && dualWielding(both.right, both.left);
+  /** Held in both hands: the weapon (the right hand's, unless only the left holds one), and the side whose picture it is. */
+  const single = both && !dual ? (both.right.tier === "baseline" && both.left.tier !== "baseline" ? { held: both.left, side: "left" as const } : { held: both.right, side: "right" as const }) : null;
   return (
     <foreignObject x={at[0] - PICTURE / 2} y={at[1] - PICTURE / 2} width={PICTURE} height={PICTURE} className="wheel-picture" style={style}>
-      <div className="wheel-picture-box">
+      <div className={`wheel-picture-box ${both ? "is-both" : ""}`}>
         {look.kind === "kick" ? <BootIcon />
-          : look.tier === "baseline" ? <GearIcon slot="weapon" mirrored={look.side === "left"} faded={false} />
-          : <GearSprite slot="weapon" tier={look.tier} item={look.item} tilted />}
+          : look.kind === "weapon" ? <HandPicture held={look} side={look.side} />
+          : dual ? <>
+            <span className="wheel-both-piece is-cross-right"><HandPicture held={look.right} side="right" /></span>
+            <span className="wheel-both-piece is-cross-left"><HandPicture held={look.left} side="right" /></span>
+          </>
+          : single && <>
+            <span className="wheel-both-piece is-shadow"><HandPicture held={single.held} side={single.side} /></span>
+            <span className="wheel-both-piece is-held"><HandPicture held={single.held} side={single.side} /></span>
+          </>}
       </div>
     </foreignObject>
   );
 }
+
+/** The weapon stats an option's bar is drawn from: its weapon's, bare hands' for the Kick, both hands' together for a two-handed one. */
+const statsOf = (look: WheelLook): WeaponStats =>
+  look.kind === "kick" ? WEAPONS.baseline : look.kind === "both" ? bothHands(look.right, look.left) : weaponOf(look.tier, look.item);
 
 /** An arc of the bar's circle, clockwise from one angle to another. */
 function barArc(from: number, to: number): string {
@@ -113,11 +137,11 @@ function barArc(from: number, to: number): string {
  * a blow that comes through, empty for the share it stops.
  */
 function MeasureArc({ look, a0, a1, opacity, block, blow }: { look: WheelLook; a0: number; a1: number; opacity: number; block?: boolean; /** A skill's own numbers, in place of its weapon's. */ blow?: ReturnType<typeof blowShares> }) {
-  const b = blow ?? blowShares(look.kind === "kick" ? WEAPONS.baseline : weaponOf(look.tier, look.item));
+  const b = blow ?? blowShares(statsOf(look), look.kind === "both");
   const s0 = a0 + BAR_GAP, s1 = a1 - BAR_GAP, span = s1 - s0;
   if (span <= 0) return null;
   const share = (n: number) => Math.max(0, Math.min(1, n)) * span;
-  const through = block ? 1 - (look.kind === "kick" ? WEAPONS.baseline.defense : defenseOf(look.tier, look.item)) : 0;
+  const through = block ? 1 - statsOf(look).defense : 0;
   return (
     <g className="wheel-measure" style={{ opacity }} aria-hidden="true">
       {block

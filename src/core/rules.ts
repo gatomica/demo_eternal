@@ -5,7 +5,7 @@
  * Units: weights and costs are written in sixteenths of the fighter's max health, matching the
  * design doc. `sixteenths(n, maxHP)` turns them into real numbers.
  */
-import type { ArmorTier, Fighter, Player, Tier, WeaponItem, WeaponTier } from "./types";
+import type { ArmorTier, Fighter, Player, Side, Tier, WeaponItem, WeaponTier } from "./types";
 
 /* ============================================================
  * Tuning tables (sixteenths of max health)
@@ -18,27 +18,38 @@ import type { ArmorTier, Fighter, Player, Tier, WeaponItem, WeaponTier } from ".
 export const ATTACK_BASE = 0.25;
 
 /**
+ * An attack made with both hands (the top part of Attack): a higher base, a third of its attacker's max health in damage, for half of it in Fatigue,
+ * moved by the two hands' modifiers averaged (`bothHands`).
+ */
+export const TWO_HANDED_BASE = { cost: 0.5, damage: 1 / 3 };
+
+/**
  * What a weapon does, besides the base every attack has (`ATTACK_BASE`), each a share of its attacker's max health, kept small so the weapons
  * are much alike:
  *  - `poise`: the attack costs that much more Fatigue, and puts as much Fatigue on its target, unless it is dodged (a hit or a Block alike).
  *  - `deadly`: the attack costs that much more Fatigue, and puts as much Death on its target, unless it is dodged.
  *  - `light`: the attack deals that much less damage, and costs twice that much less Fatigue.
  *  - `defense`: the share of a blow a Block made with it stops (0 to 1; see `strike` in resolve/attacks.ts).
+ *  - `subtype`: a kind of weapon that is handled apart. `pole`: a long haft (the Brick Hammer, the Barbarian's Axe): held alone about the middle of
+ *    its haft, the second hand near its end (its model's `grips` in render/gear3d.ts).
  */
-export interface WeaponStats { poise: number; deadly: number; light: number; defense: number }
+export interface WeaponStats { poise: number; deadly: number; light: number; defense: number; subtype?: WeaponSubtype }
+
+/** A kind of weapon handled apart (see `WeaponStats.subtype`). */
+export type WeaponSubtype = "pole";
 
 /** By weight, the weapon of that weight in this demo (`name`; its eternal version is "Eternal <name>") and its stats. Bare hands are the Kick's too. */
 export const WEAPONS: Record<WeaponTier, WeaponStats & { weight: number; label: string; name: string }> = {
   baseline: { weight: 0, poise: 0, deadly: 0, light: 0.1, defense: 0.2, label: "None", name: "Bare hands" },
   light:  { weight: 0.5, poise: 0, deadly: 0.2, light: 0.1, defense: 0.25, label: "Light", name: "Jagged Chisel" },
   normal: { weight: 1, poise: 0.2, deadly: 0, light: 0.1, defense: 0.25, label: "Normal", name: "Waxed Torch" },
-  heavy:  { weight: 1.5, poise: 0.1, deadly: 0, light: 0, defense: 0.5, label: "Heavy", name: "Brick Hammer" },
+  heavy:  { weight: 1.5, poise: 0.1, deadly: 0, light: 0, defense: 0.5, label: "Heavy", name: "Brick Hammer", subtype: "pole" },
 };
 
 /** The starting classes' own weapons' stats (not their weight's). */
 export const ITEM_WEAPONS: Record<WeaponItem, WeaponStats> = {
   shortsword: { poise: 0, deadly: 0, light: 0, defense: 0.5 },
-  axe: { poise: 0, deadly: 0.1, light: 0, defense: 0.25 },
+  axe: { poise: 0, deadly: 0.1, light: 0, defense: 0.25, subtype: "pole" },
   sickle: { poise: 0, deadly: 0, light: 0.05, defense: 0.25 },
 };
 
@@ -56,13 +67,42 @@ export type WeaponLike = keyof typeof WEAPON_LIKE;
 /** A weapon's stats: the class's own weapon's, or its weight's. */
 export const weaponOf = (weight: WeaponTier, item?: WeaponItem): WeaponStats => (item !== undefined ? ITEM_WEAPONS[item] : WEAPONS[weight]);
 
+/** A weapon with a long haft (`subtype` "pole": the Brick Hammer, the Barbarian's Axe). */
+export const isPole = (weight: WeaponTier, item?: WeaponItem): boolean => weaponOf(weight, item).subtype === "pole";
+
 /** A weapon's Defense: the share of a blow a Block made with it stops. */
 export const defenseOf = (weight: WeaponTier, item?: WeaponItem): number => weaponOf(weight, item).defense;
 
-/** What an attack with this weapon costs, and what it deals: shares of the attacker's max health (`poise`, `deadly`: as in `WeaponStats`). */
-export function blowShares(w: WeaponStats): { cost: number; damage: number; poise: number; deadly: number } {
-  return { cost: Math.max(0, ATTACK_BASE + w.poise + w.deadly - 2 * w.light), damage: Math.max(0, ATTACK_BASE - w.light), poise: w.poise, deadly: w.deadly };
+/**
+ * What an attack with this weapon costs, and what it deals: shares of the attacker's max health (`poise`, `deadly`: as in `WeaponStats`). `twoHanded`:
+ * made with both hands, from `TWO_HANDED_BASE` instead of `ATTACK_BASE`.
+ */
+export function blowShares(w: WeaponStats, twoHanded = false): { cost: number; damage: number; poise: number; deadly: number } {
+  const cost = twoHanded ? TWO_HANDED_BASE.cost : ATTACK_BASE, damage = twoHanded ? TWO_HANDED_BASE.damage : ATTACK_BASE;
+  return { cost: Math.max(0, cost + w.poise + w.deadly - 2 * w.light), damage: Math.max(0, damage - w.light), poise: w.poise, deadly: w.deadly };
 }
+
+/** A hand's weapon, as the wheel and the rules name it: its weight ("baseline": empty) and which class's own it is. */
+export interface HeldWeapon { tier: WeaponTier; item?: WeaponItem }
+
+/**
+ * The weapon both hands make together, for an Attack or Block made with both: two weapons' stats averaged (Poise, Deadly, Light and Defense alike);
+ * a weapon and an empty hand, that weapon's own (the free hand joins it on the grip); both empty, bare hands'.
+ */
+export function bothHands(right: HeldWeapon, left: HeldWeapon): WeaponStats {
+  const r = right.tier !== "baseline" ? weaponOf(right.tier, right.item) : null, l = left.tier !== "baseline" ? weaponOf(left.tier, left.item) : null;
+  if (!r || !l) return r ?? l ?? WEAPONS.baseline;
+  return { poise: (r.poise + l.poise) / 2, deadly: (r.deadly + l.deadly) / 2, light: (r.light + l.light) / 2, defense: (r.defense + l.defense) / 2 };
+}
+
+/**
+ * The hand that leads a two-handed Attack or Block: the right, unless only the left holds a weapon (then the right hand joins the left's grip, and the
+ * blow is drawn as the left hand's).
+ */
+export const bothHandsLead = (right: HeldWeapon, left: HeldWeapon): Side => (right.tier === "baseline" && left.tier !== "baseline" ? "left" : "right");
+
+/** Both hands hold a weapon: a two-handed blow swings both, each its own way (dual wielding), rather than one held in both hands. */
+export const dualWielding = (right: HeldWeapon, left: HeldWeapon) => right.tier !== "baseline" && left.tier !== "baseline";
 
 /** Whether the weapons' own effects work (the Chisel's, the Torch's, the class weapons'...). Off for now, while the weapons' stats are reworked. */
 export const WEAPON_EFFECTS = false;

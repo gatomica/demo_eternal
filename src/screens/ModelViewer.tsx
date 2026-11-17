@@ -479,7 +479,7 @@ function PlayerViewerFight({ wearing = {}, onBack, onRetry, onExit }: { wearing?
       shade={shade}
       debugLimbs={debug}
       playSignal={playSignal}
-      playerAction={scenario ? playerActionOf(scenario) : undefined}
+      playerAction={scenario ? playerActionOf(scenario, weapon, offWeapon) : undefined}
       // Once an action has played you stay in the stance it left you in (staggered: down on one knee), and its actions are offered next.
       onTurnPlayed={s => setHeld(s.player.staggered ? "staggered" : s.player.stance)}
       playerHold={model ? "t-pose" : undefined}

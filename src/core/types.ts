@@ -38,6 +38,12 @@ export interface PlayerAction {
    */
   kick?: true | Side;
   /**
+   * An Attack or Block made with both hands (the top part of their alternatives): two weapons' stats averaged (or the one weapon held in both hands, or
+   * both bare hands clasped), from a higher base (`TWO_HANDED_BASE` in rules.ts). `hand` is then the hand that leads it (`bothHandsLead`): the right,
+   * unless only the left holds a weapon. With a weapon in each, both swing at once, the other hand's as it would on its own from this stance.
+   */
+  both?: true;
+  /**
    * A weapon skill (see `core/skills.ts`), made with the weapon in `hand` that gives it: an Attack that is that skill, paid with Eternity as it is
    * made.
    */
@@ -273,6 +279,8 @@ export type CombatEvent =
       fire?: boolean;
       /** Your attack: how it swings (from your stance). */
       swing?: Swing;
+      /** Your two-handed attack with a weapon in each hand: how the other hand's swings at the same time (as it would on its own from your stance). */
+      offSwing?: Swing;
     }
   | { kind: "canceled"; who: string; action: ActionType; reason: "staggered" | "fallen" | "no target" }
   | { kind: "stagger"; who: string }

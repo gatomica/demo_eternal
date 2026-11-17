@@ -8,7 +8,7 @@
  * they hadn't done yet: their attack, a Block for later attacks, a Rest, a move.
  */
 import { kindOf } from "../bestiary";
-import { addDeath, BLOCK_SENDS_BACK, blowShares, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, ITEM_SHARE, resistance, spendEternity, WEAPON_EFFECTS, WEAPON_LIKE, weaponOf } from "../rules";
+import { addDeath, BLOCK_SENDS_BACK, blowShares, bothHands, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, ITEM_SHARE, resistance, spendEternity, WEAPON_EFFECTS, WEAPON_LIKE, weaponOf } from "../rules";
 import type { CombatEvent, Enemy, Fighter, Player, Rng, WeaponTier } from "../types";
 import { bodyOf } from "../body";
 import { canTarget, handHasSkill, SKILL_RATE, SKILLS, skillPrice, skillStats } from "../skills";
@@ -82,6 +82,11 @@ function weaponNow(t: Turn, f: Fighter) {
     const e = f as Enemy, like = e.intent.like ?? kindOf(e).blowLike?.(e), mods = e.intent.mods;
     if (like || mods) return { ...WEAPON_LIKE[like ?? "plain"], ...mods };
   }
+  // (both hands: the two weapons averaged, or the one held in both, or bare hands clasped)
+  if (f === t.p && (t.act?.type === "attack" || t.act?.type === "block") && t.act.both) {
+    const p = t.p;
+    return bothHands({ tier: p.weapon, item: p.weaponItem }, { tier: p.offhand.weapon, item: p.offhand.weaponItem });
+  }
   const weight = t.weightOf(f), hand = t.handOf(f);
   const w = weaponOf(weight, weight === hand.weapon ? hand.weaponItem : undefined);
   // (a skill of yours may have modifiers of its own, over the weapon's: the Hookshot's)
@@ -96,7 +101,8 @@ const blockDefense = (t: Turn, f: Fighter): number => weaponNow(t, f).defense;
  * weapon's (`blowShares`), shares of its attacker's max health. Every attack is built so, from the same base.
  */
 function blowOf(t: Turn, f: Fighter): { cost: number; damage: number; poise: number; deadly: number } {
-  const w = blowShares(weaponNow(t, f));
+  // (yours made with both hands: from the higher two-handed base)
+  const w = blowShares(weaponNow(t, f), f === t.p && t.act?.type === "attack" && !!t.act.both);
   return { cost: w.cost * f.maxHP, damage: w.damage * f.maxHP, poise: w.poise * f.maxHP, deadly: w.deadly * f.maxHP };
 }
 const damageOf = (t: Turn, f: Fighter) => blowOf(t, f).damage;
@@ -158,7 +164,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
     return;
   }
   // (How your own blow swings, from your stance.)
-  const swing = attacker === p ? t.swing : undefined;
+  const swing = attacker === p ? t.swing : undefined, offSwing = attacker === p ? t.offSwing : undefined;
   const weight = t.weightOf(attacker);
   const ranged = t.isRanged(attacker);
   const blow = blowOf(t, attacker);
@@ -212,14 +218,14 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
 
   if (t.isReviving(target)) {
     // The blow passes through someone reviving.
-    t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: 0, ranged, swing });
+    t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: 0, ranged, swing, offSwing });
     return;
   }
   if (t.isDodging(target, attacker)) {
     // Out of the way: no damage, only the effort of the dodge.
     const effort = dodgeFatigue(target, dmg);
     t.tire(target, effort);
-    t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: effort, ranged, swing });
+    t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: "dodged", damage: 0, fatigue: effort, ranged, swing, offSwing });
     skillLands(0);
     return;
   }
@@ -240,7 +246,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   t.tire(target, blow.poise);
   deathOn(t, target, blow.deadly);
   const self = attacker !== p ? (attacker as Enemy) : undefined;
-  t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: blocking ? sentBack : resisted + blow.poise, ranged, fire: !!self?.intent.tags?.includes("fire"), swing });
+  t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: blocking ? sentBack : resisted + blow.poise, ranged, fire: !!self?.intent.tags?.includes("fire"), swing, offSwing });
   // (the Hookshot, landed, blocked or not: its Fatigue, and it pulls its target to you. It is an attack: a direct hit breaks a Rest, though it deals
   // no damage.)
   skillLands(skillPaid?.tire ?? 0);

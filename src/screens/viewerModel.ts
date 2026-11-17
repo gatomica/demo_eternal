@@ -9,7 +9,7 @@ import { describeAction } from "../core/intents";
 import type { ActionDef } from "../core/patterns";
 import { createCombat } from "../core/setup";
 import { mirrorStance, swingFor } from "../core/stance";
-import { ARMOR, WEAPONS } from "../core/rules";
+import { ARMOR, bothHandsLead, type HeldWeapon, WEAPONS } from "../core/rules";
 import { type SkillId, SKILLS, skillsOfWeapon } from "../core/skills";
 import type { PoseName } from "../render/poses";
 import type { ArmorItem, ArmorTier, CombatState, HeadItem, Line, PlayerAction, Side, Stance, Swing, WeaponItem, WeaponTier } from "../core/types";
@@ -260,6 +260,8 @@ export interface PlayerScenario {
   foeLine?: Line;
   /** A weapon skill (made with the hand `punch` says): only offered while that hand holds a weapon that has it. */
   skill?: SkillId;
+  /** Made with both hands (the hand that leads it is worked out from what they hold: `bothHandsLead`). */
+  both?: boolean;
 }
 
 /** What a hand can hold in the viewer: a weapon of a weight (bare hands for "baseline"), or one of the starting classes' own weapons. */
@@ -270,6 +272,8 @@ const isItem = (pick: HeldPick): pick is WeaponItem => !(pick in WEAPONS);
 /** A held weapon's name ("None" for bare hands). */
 export const heldName = (pick: HeldPick): string => (isItem(pick) ? ITEMS[pick].name : pick === "baseline" ? "None" : WEAPONS[pick].name);
 /** A held weapon as the rules see it: its weight, and which class's own it is. */
+/** What a hand holds in the viewer, as the rules name a held weapon. */
+const heldWeapon = (pick: HeldPick): HeldWeapon => { const h = heldOf(pick); return { tier: h.weapon, item: h.weaponItem }; };
 export const heldOf = (pick: HeldPick): { weapon: WeaponTier; weaponItem?: WeaponItem } =>
   isItem(pick) ? { weapon: ITEMS[pick].tier as WeaponTier, weaponItem: pick } : { weapon: pick };
 /** The skills the weapons in your hands give you, each with its hand (the right hand's first). */
@@ -309,16 +313,20 @@ export function playerScenariosFrom(stance: PlayerViewStance, skills: { skill: S
     // (one that reaches only Far, the Hookshot, at a dummy on the back line)
     attacks.push({ id: `skill-${skill}-${hand}`, label: hand === "left" ? `${SKILLS[skill].name}, left hand` : SKILLS[skill].name, action: { type: "attack", target: "foe" }, foe: "rest", punch: hand === "left", skill, ...(SKILLS[skill].far ? { foeLine: "back" as Line } : {}) });
   }
+  // Both hands: two weapons swung at once (each its own way), or one held in both, or both fists clasped.
+  attacks.push({ id: "both", label: "Both hands", action: { type: "attack", target: "foe" }, foe: "rest", both: true });
   if (stance !== "idle") {
     attacks.push(
       { id: "attack-back", label: "Mainhand Overhead, at the back line", action: { type: "attack", target: "foe" }, foe: "rest", foeLine: "back" },
       { id: "punch-back", label: "Offhand Overhead, at the back line", action: { type: "attack", target: "foe" }, foe: "rest", foeLine: "back", punch: true },
+      { id: "both-back", label: "Both hands Overhead, at the back line", action: { type: "attack", target: "foe" }, foe: "rest", foeLine: "back", both: true },
     );
   }
   return [
     ...attacks,
     { id: "block", label: "Block, right hand", action: { type: "block", target: "foe" }, foe: "strike" },
     { id: "block-left", label: "Block, left hand", action: { type: "block", target: "foe" }, foe: "strike", punch: true },
+    { id: "block-both", label: "Block, both hands", action: { type: "block", target: "foe" }, foe: "strike", both: true },
     { id: "dodge-fwd", label: "Dodge forward", action: { type: "maneuver", target: "foe" }, foe: "strike" },
     { id: "dodge-back", label: "Dodge back", action: { type: "maneuver", target: "self" }, foe: "strike" },
     { id: "advance", label: "Advance", action: { type: "maneuver", target: "foe" }, foe: "rest" },
@@ -331,8 +339,10 @@ export function playerScenariosFrom(stance: PlayerViewStance, skills: { skill: S
 /** The dummy's id in the player viewer's fight. */
 const FOE_ID = "e0";
 
-export const playerActionOf = (sc: PlayerScenario): PlayerAction => ({
+/** The action a scenario plays (`right`, `left`: what the hands hold, for a two-handed one's leading hand). */
+export const playerActionOf = (sc: PlayerScenario, right: HeldPick = "baseline", left: HeldPick = "baseline"): PlayerAction => ({
   type: sc.action.type, target: sc.action.target === "foe" ? FOE_ID : "self", ...(sc.punch ? { hand: "left" as const } : {}),
+  ...(sc.both ? { both: true as const, hand: bothHandsLead(heldWeapon(right), heldWeapon(left)) } : {}),
   ...(sc.kick ? { weight: "baseline" as const, kick: sc.kick } : {}),
   ...(sc.skill ? { skill: sc.skill } : {}),
 });

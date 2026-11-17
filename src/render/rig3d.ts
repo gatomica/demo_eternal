@@ -59,7 +59,7 @@ const FLOOR = 5;
 /**
  * A two-bone arm in space from `shoulder` to a hand on `target` (as far as it reaches), the elbow bending toward `bend`.
  */
-function reach3(shoulder: P3, target: P3, upper: number, fore: number, bend: P3): { elbow: P3; hand: P3 } {
+export function reach3(shoulder: P3, target: P3, upper: number, fore: number, bend: P3): { elbow: P3; hand: P3 } {
   const d3: P3 = [target[0] - shoulder[0], target[1] - shoulder[1], target[2] - shoulder[2]];
   const d = Math.hypot(...d3) || 1;
   const u: P3 = [d3[0] / d, d3[1] / d, d3[2] / d];
@@ -91,7 +91,7 @@ export interface LiftOptions {
 const LEG_ADJUSTS = new Set(["leadThigh", "leadShin", "rearThigh", "rearShin"]);
 
 /** How far behind the weapon hand the other hand holds a weapon in both hands (figure units), as in the flat rig. */
-const GRIP_GAP = 4;
+export const GRIP_GAP = 4;
 
 /**
  * The way a pose's weapon points, in body space: as its `weapon3` says, or else its flat angle (0 = ahead, -90 = up) lifted into the side plane
