@@ -12,7 +12,7 @@
 import { ENEMY_KINDS } from "../core/bestiary";
 import { ARMOR, WEAPONS } from "../core/rules";
 import { type ItemId, ITEMS } from "./items";
-import type { ArmorItem, ArmorTier, EnemySetup, HeadItem, WeaponItem, WeaponTier } from "../core/types";
+import type { ArmorItem, ArmorTier, Arsenal, ArsenalWeapon, EnemySetup, HeadItem, Side as CombatSide, WeaponItem, WeaponTier } from "../core/types";
 import type { Loadout } from "../combat/fight";
 
 /** What kind of gear a piece is (a weapon goes in either hand). */
@@ -125,7 +125,55 @@ export function loadoutOf(inv: Inventory): Loadout {
     head: head?.slot === "head" ? head.tier : "none",
     headItem: head?.slot === "head" ? (head.item as HeadItem | undefined) : undefined,
     worn: wornWeightOf(inv),
+    back: backWeapons(inv, true),
+    arsenal: arsenalOf(inv),
   };
+}
+
+/**
+ * Your arsenal (see `Arsenal`): the eternal weapon set in each hand's eternal place (once read), and the ordinary weapons you carry, in their places on
+ * your back; each marked with the hand that holds it, if one does.
+ */
+export function arsenalOf(inv: Inventory): Arsenal {
+  const right = wornIn(inv, "weapon")?.id, left = wornIn(inv, "left")?.id;
+  const entry = (g: Gear | undefined): ArsenalWeapon | undefined => {
+    if (!g || g.slot !== "weapon") return undefined;
+    const held: CombatSide | undefined = g.id === right ? "right" : g.id === left ? "left" : undefined;
+    return { tier: g.tier, ...(g.item ? { item: g.item as WeaponItem } : {}), eternal: !!g.eternal, ...(held ? { held } : {}) };
+  };
+  const eternalIn = (place: "weapon" | "left") => {
+    const g = pieceAt(inv, place, "eternal");
+    return g?.read ? g : undefined;
+  };
+  const ordinary = inv.bag.filter(g => g.slot === "weapon" && !g.eternal);
+  const out: Arsenal = {};
+  const set = (slot: keyof Arsenal, g: Gear | undefined) => { const e = entry(g); if (e) out[slot] = e; };
+  set("right", eternalIn("weapon"));
+  set("left", eternalIn("left"));
+  set("up", ordinary[0]);
+  set("down", ordinary[1]);
+  return out;
+}
+
+/**
+ * The ordinary weapons on your back (two at most, as you carry no more), each in its place (the first from the right shoulder): every one you carry,
+ * or (`inFight`) those you do not hold, the place of one in your hand left empty (null). Eternal weapons are never there.
+ */
+export function backWeapons(inv: Inventory, inFight: boolean): ({ tier: WeaponTier; item?: WeaponItem } | null)[] {
+  const held = new Set(inFight ? [wornIn(inv, "weapon")?.id, wornIn(inv, "left")?.id] : []);
+  // (each in its own place, the first from the right shoulder: one in your hand leaves its place empty)
+  return inv.bag
+    .filter(g => g.slot === "weapon" && !g.eternal)
+    .map(g => (held.has(g.id) ? null : { tier: g.tier as WeaponTier, ...(g.item ? { item: g.item as WeaponItem } : {}) }));
+}
+
+/**
+ * You as you are seen between fights (the map, the inventory, a talk with the guide): what you wear, nothing in your hands (an ordinary weapon is on
+ * your back, held or not; an eternal one is not seen at all: it manifests in your hand only for a fight), every ordinary weapon on your back.
+ */
+export function lookBetweenFights(inv: Inventory): Loadout {
+  const { offhand: _offhand, ...worn } = loadoutOf(inv);
+  return { ...worn, weapon: "baseline", weaponItem: undefined, eternal: false, back: backWeapons(inv, false) };
 }
 
 /**

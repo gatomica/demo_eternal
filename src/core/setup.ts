@@ -53,6 +53,7 @@ export function createCombat(
     eternal: player.weapon !== "baseline",
     mortalWeapon: !player.eternal,
     offhand: handOf(player.offhand),
+    ...(player.arsenal ? { arsenal: structuredClone(player.arsenal) } : {}),
     maxEternity: player.maxEternity ?? player.maxHP,
     eternity: Math.min(player.maxEternity ?? player.maxHP, player.eternity ?? player.maxEternity ?? player.maxHP),
   };

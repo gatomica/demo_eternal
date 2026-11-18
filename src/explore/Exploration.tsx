@@ -31,7 +31,7 @@ import { ROOM } from "./rooms";
 import { type Conversation, DOORWAY, DREAMS_TALK, FINAL, LET_GO, MENU, PERSIST, STRING_TALK, WAKE } from "./dialogues";
 import { blobWeapons, drawBlob, drawFoldedLadder, drawPickup, drawKeeper, drawRemains, drawStringAura, drawStringPile, drawWalker, type Frame, MAP_FIGURES, MAP_REMAINS, playerLook } from "./figures";
 import { StringCounter, YarnBall } from "../render/StringCounter";
-import { gearName, type GearSpec, hasUnread, type Inventory as Bag, loadoutOf, readDreams, setEternal, take, drop as dropGear, wield } from "./gear";
+import { gearName, type GearSpec, hasUnread, type Inventory as Bag, loadoutOf, lookBetweenFights, readDreams, setEternal, take, drop as dropGear, wield } from "./gear";
 import { GearSprite } from "./GearIcons";
 import { DialogueScene } from "./DialogueScene";
 import { InventoryScreen } from "./InventoryScreen";
@@ -1157,8 +1157,8 @@ export function Exploration({ journey, onEncounter, onSave, onDie, onExit }: {
       // Each stretch of STRIDE lifts a foot, then lands it: right, stand, left, stand.
       const phase = Math.floor(me.walked / PLAYER_STRIDE) % 4;
       const frame: Frame = me.walked <= 0 ? "stand" : phase === 0 ? "stepR" : phase === 2 ? "stepL" : "stand";
-      // You wear what you have equipped.
-      const look = playerLook(loadoutOf(invRef.current));
+      // You wear what you have equipped; your hands are empty, every ordinary weapon you carry on your back.
+      const look = playerLook(lookBetweenFights(invRef.current));
       renderer.draw({
         camX: cam.x, camY: cam.y, x: me.x, y: me.y, alt: me.alt, seen, origin: origins, reached,
         actors: drawFoes,

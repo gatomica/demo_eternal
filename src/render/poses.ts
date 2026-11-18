@@ -244,7 +244,7 @@ export type PoseName =
   | "strike" | "fallen" | "kneel" | "punch"
   | "t-pose" | "t-pose-b" | "w-t" | "w-t-b"
   | "sw-windup" | "sw-brace" | "sw-flinch" | "sw-down" | "sw-idle" | "sw-charging" | "sw-struggling" | "sw-shoulder-in"
-  | "sw-overhead" | "sw-overhead-leap" | "sw-dead" | "p3-idle" | "p3-low" | "sw-chop" | "sw-overhead-strike" | "p3-overhead-leap" | "p3-overhead-strike" | "p3-flinch" | "p3-right-lead" | "p3-kick-up" | "p3-kick" | "p3-stab-up" | "p3-stab" | "p3-hook-up" | "p3-hook-throw" | "p3-chisel-up" | "p3-chisel" | "sw-swing-l-windup" | "sw-swing-l" | "sw-swing-r-windup" | "sw-swing-r" | "sw-parry" | "sw-charge" | "sw-backstep" | "p3-backstep" | "sw-despair"
+  | "sw-overhead" | "sw-overhead-leap" | "sw-dead" | "p3-idle" | "p3-low" | "sw-chop" | "sw-overhead-strike" | "p3-overhead-leap" | "p3-overhead-strike" | "p3-flinch" | "p3-right-lead" | "p3-kick-up" | "p3-kick" | "p3-stab-up" | "p3-stab" | "p3-hook-up" | "p3-hook-throw" | "p3-chisel-up" | "p3-chisel" | "p3-forearms" | "p3-draw-r" | "p3-draw-l" | "sw-swing-l-windup" | "sw-swing-l" | "sw-swing-r-windup" | "sw-swing-r" | "sw-parry" | "sw-charge" | "sw-backstep" | "p3-backstep" | "sw-despair"
   | "w-idle" | "w-hands" | "w-scratch" | "w-wax-hand" | "w-hurl"
   | "w-staggered" | "w-dead" | "w-cower" | "w-reared" | "w-hurl-windup" | "w-clutch-eat" | "w-brace" | "w-brace-block" | "w-overhead-windup" | "w-overhead-strike" | "w-crawl" | "w-low-windup" | "w-low-strike" | "w-drag" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
   | WardenPoseName
@@ -613,6 +613,59 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
     for3d: {
       arms3: { right: { dirs: [[0.16, -0.99, 0.02], [0.08, -0.93, 0.36]] }, left: { dirs: [[-0.16, -0.99, 0], [-0.08, -0.99, 0.1]] } },
       weapon3: [0.08, -0.55, 0.83],
+    },
+  },
+  // The forearms' Block (made with neither weapon), as the blow lands: Idle braced, the knees bent a little and the body dropped with them, the upper body
+  // leaning back from the blow; both forearms raised and crossed in front of the face, each hand over to the other side at the brow, the elbows low and
+  // out to the sides. Whatever the hands hold points out to that hand's side and down, clear of the face (the left hand's the mirror of the right's).
+  "p3-forearms": {
+    head: [50, 33], neck: [49, 44], hip: [49, 72],
+    weaponArm: { elbow: [58, 52], hand: [46, 34] },
+    freeArm: { elbow: [42, 52], hand: [54, 36] },
+    leadLeg: { knee: [55, 93], foot: [53, 114] },
+    rearLeg: { knee: [45, 93], foot: [46, 114] },
+    weapon: { at: [46, 34], angle: -150 },
+    for3d: {
+      pitch3: 8,
+      arms3: {
+        right: { aim: { dir: [-0.55, 0.55, 0.75], reach: 0.62, bend: [1, -1, 0.15] } },
+        left: { aim: { dir: [0.55, 0.45, 0.8], reach: 0.6, bend: [-1, -1, 0.15] } },
+      },
+      weapon3: [0.75, -0.6, -0.15],
+    },
+  },
+  // Reaching back over the right shoulder (3D only): Lowered (`p3-low`), the right arm raised, the elbow up and ahead and the hand behind the shoulder,
+  // where a weapon on the back has its handle; it draws a weapon from there, or puts one back (the skill of a weapon you do not hold). Whatever the hand
+  // holds lies as it does on the back, down across it to the other hip. Putting one back leaves you in Lowered.
+  "p3-draw-r": {
+    head: [52, 54], neck: [50, 65], hip: [48, 91],
+    adjust: { torso: 0.85 },
+    weaponArm: { elbow: [56, 58], hand: [46, 54] },
+    freeArm: { elbow: [44, 76], hand: [52, 70] },
+    leadLeg: { knee: [57, 101], foot: [49, 114] },
+    rearLeg: { knee: [57, 101], foot: [49, 114] },
+    weapon: { at: [46, 54], angle: 120 },
+    for3d: {
+      splay3: 12,
+      kneesOut3: 12,
+      arms3: { right: { to: [5, 58, -5], bend: [0.5, 1, 0.9] }, left: { dirs: [[-0.22, -0.97, 0.08], [-0.1, -0.95, 0.3]] } },
+      weapon3: [-0.5, -0.85, -0.25],
+    },
+  },
+  // The same over the left shoulder, the left hand reaching back (the right arm hanging as in Lowered).
+  "p3-draw-l": {
+    head: [52, 54], neck: [50, 65], hip: [48, 91],
+    adjust: { torso: 0.85 },
+    weaponArm: { elbow: [56, 74], hand: [62, 68] },
+    freeArm: { elbow: [56, 58], hand: [46, 54] },
+    leadLeg: { knee: [57, 101], foot: [49, 114] },
+    rearLeg: { knee: [57, 101], foot: [49, 114] },
+    weapon: { at: [62, 68], angle: -45 },
+    for3d: {
+      splay3: 12,
+      kneesOut3: 12,
+      arms3: { right: { dirs: [[0.22, -0.97, 0.08], [0.1, -0.93, 0.35]] }, left: { to: [5, 58, -5], bend: [0.5, 1, 0.9] } },
+      weapon3: [0.08, -0.5, 0.86],
     },
   },
   // The player's Flinch in 3D (a Rest broken by a blow): Idle recoiling. The knees give a little, bent and the body dropped with them; the arms come up,

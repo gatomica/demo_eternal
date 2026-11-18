@@ -5,7 +5,9 @@
  * brings your target to the front line and sends every other enemy back; an enemy's either
  * closes in on you or backs off. Each enemy's distance from you is settled on its own: if you
  * both Maneuvered and disagree, you both move but the distance stays. A melee attack closes in
- * on its target only if the target didn't Maneuver; a Knockback (the Brick Hammer's) drives its target back onto the back line instead, the same way. An enemy striking an ally on the other line tries to step onto it, settled like
+ * on its target only if the target didn't Maneuver; a Knockback (the Brick Hammer's) drives its target back onto the back line instead, the same way.
+ * An enemy's Knockback that lands on you knocks you back as if you had fallen back yourself (in place of your own Maneuver, if you made one): every
+ * enemy is sent to the back line, but for one that Maneuvers to close in on you, which follows you (you both move, the distance stays). An enemy striking an ally on the other line tries to step onto it, settled like
  * a Maneuver of its own. A Maneuver costs nothing in itself: only the
  * attacks it dodged tired you.
  */
@@ -21,7 +23,9 @@ export function resolveMovement(t: Turn) {
     e.line = line;
     movedBy.set(e.id, by);
   };
-  const youMove = act?.type === "maneuver" && !t.out.has(p.id);
+  // (knocked back, you fall back whatever else you did: staggered, or in the middle of a Maneuver of your own)
+  const knocked = !!t.knocked;
+  const youMove = !knocked && act?.type === "maneuver" && !t.out.has(p.id);
   if (youMove) t.emit({ kind: "maneuver", who: p.id, target: act!.target === "self" ? undefined : act!.target });
   for (const e of alive) {
     if (e.intent.type !== "maneuver") continue;
@@ -41,11 +45,12 @@ export function resolveMovement(t: Turn) {
     // only its leader (the middle one) moves the body with its own Maneuver.
     const mates = bodyOf(alive, e);
     const lead = leaderOf(mates.filter(m => !t.fallen.has(m.id)));
-    const yours: Line | null = youMove ? (mates.some(m => m.id === act!.target) ? "front" : "back") : null;
+    const yours: Line | null = knocked ? "back" : youMove ? (mates.some(m => m.id === act!.target) ? "front" : "back") : null;
     const its: Line | null = lead.intent.type === "maneuver" && !t.out.has(lead.id) && !t.cancelled.has(lead.id) ? (lead.intent.dir === "advance" ? "front" : "back") : (t.shifts.get(lead.id) ?? null);
     const pulled = mates.find(m => t.pulls.has(m.id)), pushed = mates.find(m => t.pushes.has(m.id));
-    if (yours && its) { if (yours === its) place(e, yours, p.id); }
-    else if (yours) place(e, yours, p.id);
+    const by = knocked ? t.knocked! : p.id;
+    if (yours && its) { if (yours === its) place(e, yours, by); }
+    else if (yours) place(e, yours, by);
     else if (its) place(e, its, lead.id);
     else if (pushed) place(e, "back", t.pushes.get(pushed.id)!);
     else if (pulled) place(e, "front", t.pulls.get(pulled.id)!);

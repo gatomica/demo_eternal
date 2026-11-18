@@ -3,7 +3,7 @@
  * one (the Warden taking a waxed's flame).
  */
 import { createCombat, openingOf } from "../core/setup";
-import type { ArmorItem, ArmorTier, CombatConfig, CombatState, EnemySetup, HeadItem, Opening, WeaponItem, WeaponTier } from "../core/types";
+import type { ArmorItem, ArmorTier, Arsenal, CombatConfig, CombatState, EnemySetup, HeadItem, Opening, WeaponItem, WeaponTier } from "../core/types";
 
 /** What you carry into a fight. */
 export interface Loadout {
@@ -21,6 +21,13 @@ export interface Loadout {
   worn?: number;
   /** What the left hand holds (nothing, if left out): its weapon, which class's own it is, and whether it is eternal. */
   offhand?: { weapon: WeaponTier; weaponItem?: WeaponItem; eternal?: boolean };
+  /**
+   * The ordinary weapons you carry on your back, crossed (a look only), in their places (the first from the right shoulder; null, a place whose weapon
+   * is in your hand): those you do not hold (the inventory). Eternal weapons are never there.
+   */
+  back?: ({ tier: WeaponTier; item?: WeaponItem } | null)[];
+  /** The weapons whose skills you can use (see `Arsenal`). */
+  arsenal?: Arsenal;
 }
 
 /** Your starting health (the tutorial's). */
@@ -31,6 +38,6 @@ const REVIVE_CHARGES = 2;
 
 /** A fight against these enemies, with its opening scene if it has one. `eternity`: what you bring of it (default: full); `stats`: your max health and max Eternity as you have raised them. */
 export function newFight(enemies: EnemySetup[], loadout: Loadout, charges = REVIVE_CHARGES, config: CombatConfig = {}, eternity?: number, stats?: { maxHP: number; maxEternity: number }): { state: CombatState; opening?: Opening } {
-  const state = createCombat({ maxHP: stats?.maxHP ?? PLAYER_MAX_HP, maxEternity: stats?.maxEternity, weapon: loadout.weapon, armor: loadout.armor, weaponItem: loadout.weaponItem, armorItem: loadout.armorItem, head: loadout.head, headItem: loadout.headItem, eternal: loadout.eternal, offhand: loadout.offhand, worn: loadout.worn, eternity, charges }, enemies, config);
+  const state = createCombat({ maxHP: stats?.maxHP ?? PLAYER_MAX_HP, maxEternity: stats?.maxEternity, weapon: loadout.weapon, armor: loadout.armor, weaponItem: loadout.weaponItem, armorItem: loadout.armorItem, head: loadout.head, headItem: loadout.headItem, eternal: loadout.eternal, offhand: loadout.offhand, arsenal: loadout.arsenal, worn: loadout.worn, eternity, charges }, enemies, config);
   return openingOf(state, enemies);
 }

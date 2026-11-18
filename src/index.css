@@ -416,6 +416,20 @@ kbd {
 .setup-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .picker { padding: 6px 10px; border: 1px solid transparent; border-radius: 8px; justify-items: center; }
 .picker.is-focused { border-color: var(--line); background: var(--panel); }
+/* Test combat: the gear (and the encounter) on the left, the enemies counted out on the right, side by side; stacked on a narrow screen. */
+.setup-columns { display: grid; gap: 16px 32px; justify-items: center; align-items: start; max-width: 100%; }
+.setup-columns.has-foes { grid-template-columns: auto minmax(0, 26rem); }
+.setup-gear { display: grid; gap: 16px; justify-items: center; }
+@media (max-width: 760px) { .setup-columns.has-foes { grid-template-columns: minmax(0, 1fr); } }
+.setup-foes { display: grid; gap: 6px; justify-items: center; width: 100%; }
+.setup-foes-list { display: grid; gap: 2px; width: 100%; max-height: 62vh; overflow-y: auto; padding: 2px; }
+.foe-count { display: grid; grid-template-columns: 1fr auto 2rem auto; align-items: center; gap: 8px; padding: 4px 10px; border: 1px solid transparent; border-radius: 8px; color: var(--muted); }
+.foe-count.is-picked { color: inherit; }
+.foe-count.is-focused { border-color: var(--line); background: var(--panel); }
+.foe-count-name { font-size: 0.9rem; }
+.foe-count-n { text-align: center; font-variant-numeric: tabular-nums; }
+.foe-count .chip { min-width: 1.8rem; padding-inline: 0; }
+.foe-count .chip:disabled { opacity: 0.35; cursor: default; }
 .menu-button.is-focused { border-color: var(--accent); }
 
 /* A won fight leaves the way the last string winds in: the scene fades to black. */
@@ -1298,3 +1312,22 @@ svg.wd-phase2 :is(.fig-neck-lining, .fig-skirt-inner) { stroke: url(#wd-p-wax88)
 .bar-flash.is-eternal { background: #bfe6ff; box-shadow: 0 0 8px rgb(170 224 255 / 0.9); animation-duration: 0.7s; }
 /* Paid in Death, the weapon's flash is dark red instead. */
 .fig-eternal-flash.is-death * { fill: #7a0c12; stroke: #a5121a; }
+
+/* An eternal weapon manifesting in your hand as a fight opens: it fades in out of a pale blue light (the colour of Eternity), the light dying
+   away once it is there. As long as MANIFEST_MS in CombatScreen.tsx. */
+.fig-manifest { animation: fig-manifest 1.6s ease-out both; }
+@keyframes fig-manifest {
+  0% { opacity: 0; filter: brightness(2.2) drop-shadow(0 0 2.5px #cfe6ff) drop-shadow(0 0 6px #9cc8ff); }
+  45% { opacity: 1; filter: brightness(1.8) drop-shadow(0 0 2px #cfe6ff) drop-shadow(0 0 5px #9cc8ff); }
+  100% { opacity: 1; filter: none; }
+}
+@media (prefers-reduced-motion: reduce) { .fig-manifest { animation-duration: 0.6s; } }
+/* An eternal weapon fading away from your hand (put away after its skill, or for another weapon's): the pale blue light, then nothing. */
+.fig-vanish { animation: fig-vanish 0.22s ease-in both; }
+@keyframes fig-vanish {
+  0% { opacity: 1; filter: none; }
+  40% { opacity: 1; filter: brightness(1.8) drop-shadow(0 0 2px #cfe6ff) drop-shadow(0 0 5px #9cc8ff); }
+  100% { opacity: 0; filter: brightness(2.2) drop-shadow(0 0 2.5px #cfe6ff) drop-shadow(0 0 6px #9cc8ff); }
+}
+/* Taken up for a skill: the same manifesting, but quick (the swap's half beat). */
+.fig-manifest.is-quick, .is-quick-manifest .fig-manifest { animation-duration: 0.3s; }

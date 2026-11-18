@@ -114,5 +114,10 @@ export function loadoutOfItems(p: Picks): Loadout {
     weaponItem: p.weaponItem, armorItem: p.armorItem, headItem: p.headItem,
     worn: (a && a.slot !== "weapon" ? a.weight : 0) + (h && h.slot !== "weapon" ? h.weight : 0),
     eternal: !!w,
+    // (the class's own weapons are eternal, each set in the hand that holds it)
+    arsenal: {
+      ...(w ? { right: { tier: w.tier as WeaponTier, item: p.weaponItem, eternal: true, held: "right" as const } } : {}),
+      ...(off ? { left: { tier: off.tier as WeaponTier, item: p.offItem, eternal: true, held: "left" as const } } : {}),
+    },
   };
 }

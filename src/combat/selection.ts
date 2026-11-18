@@ -20,7 +20,7 @@ export type SubSlot = Dir;
  * the side). Its cost and damage bar runs along the part's inner edge (`tier`'s; the Kick's, bare hands'; both hands', `bothHands` from the two-handed
  * base).
  */
-export type WheelLook = { kind: "weapon"; tier: WeaponTier; item?: WeaponItem; side: Side; flaming?: boolean } | { kind: "kick" } | { kind: "both"; right: HeldWeapon; left: HeldWeapon };
+export type WheelLook = { kind: "weapon"; tier: WeaponTier; item?: WeaponItem; side: Side; flaming?: boolean } | { kind: "kick" } | { kind: "forearms" } | { kind: "both"; right: HeldWeapon; left: HeldWeapon };
 
 /** An option on the action wheel. */
 export interface WheelOption {

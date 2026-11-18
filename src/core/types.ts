@@ -25,7 +25,7 @@ export type Status = "playing" | "won" | "lost";
 export interface PlayerAction {
   type: ActionType;
   target?: string;
-  /** An Attack with its own weight (for future weapon skills). Otherwise the weapon's. */
+  /** An Attack or Block with its own weight (the Kick's, the forearms' Block: bare hands). Otherwise the weapon's. */
   weight?: WeaponTier;
   /**
    * The hand an Attack or Block is made with (default the right): the left uses what the left hand holds (`Player.offhand`; bare hands if
@@ -44,10 +44,20 @@ export interface PlayerAction {
    */
   both?: true;
   /**
+   * A Block made with neither weapon (the bottom part of Block's alternatives): you brace behind your forearms, raised in front of your face, with bare
+   * hands' Defense, whatever the hands hold (`weight` "baseline"), as the Kick is an Attack made with neither.
+   */
+  forearms?: true;
+  /**
    * A weapon skill (see `core/skills.ts`), made with the weapon in `hand` that gives it: an Attack that is that skill, paid with Eternity as it is
    * made.
    */
   skill?: SkillId;
+  /**
+   * The place in your arsenal of the weapon whose skill it is (`Arsenal`). Not in your hands, it is taken into its hand for the turn (`hand` is then
+   * that hand), and put back as the turn ends.
+   */
+  from?: ArsenalSlot;
 }
 
 /** What an enemy telegraphs during planning. */
@@ -99,6 +109,8 @@ export interface Intent {
   mods?: Partial<WeaponStats>;
   /** A ranged attack: the attacker stays put, a Block sends nothing back, and it can always be dodged. */
   ranged?: boolean;
+  /** The weapon skill this attack is (`skill <id>` in its pattern), made with the weapon it holds and paid with its Eternity, as yours is. */
+  skill?: SkillId;
   /**
    * Aimed at an ally instead of you: that ally's id. A Maneuver moves toward them, which pushes you away like backing off; an attack
    * (Usurp Flame) strikes them, and its attacker tries to step onto their line.
@@ -217,6 +229,13 @@ export interface Player extends Fighter {
   maxEternity: number;
   /** Your right hand's weapon is not eternal: its effect still works, but it can't draw on Eternity, and every bit of it is paid in Death. */
   mortalWeapon?: boolean;
+  /** The weapons whose skills you can use (see `Arsenal`). Left out (the Model viewer): only what your hands hold. */
+  arsenal?: Arsenal;
+  /**
+   * A weapon of your arsenal taken into a hand for its skill (`PlayerAction.from`), in place of what that hand held: the hand, the arsenal place it
+   * came from, and the place of what it put away (none: the hand was empty). Put back as the turn ends, unless Reap still holds it up.
+   */
+  borrowed?: { hand: Side; from: ArsenalSlot; put?: ArsenalSlot };
   /** Your right hand's Waxed Torch is Flaming (see `Hand.flaming`; the left hand's is `offhand.flaming`). */
   flaming?: boolean;
   /**
@@ -360,6 +379,39 @@ export interface Step {
   after: Record<string, FighterView>;
 }
 
+/**
+ * Where a weapon of yours sits for its skill (the Skill menu's four parts): `right` and `left`, the eternal weapon set in that hand's eternal place;
+ * `up` and `down`, the first and second ordinary (picked-up) weapon you carry, in the order they hang on your back (`up` from the right shoulder,
+ * taken into the right hand; `down` from the left, into the left hand).
+ */
+export type ArsenalSlot = "right" | "left" | "up" | "down";
+
+/** A weapon of your arsenal: what it is, whether it is eternal, which hand holds it now (none: on your back, or not seen), and its torch's flame. */
+export interface ArsenalWeapon {
+  tier: WeaponTier;
+  item?: WeaponItem;
+  eternal: boolean;
+  held?: Side;
+  flaming?: boolean;
+}
+
+export type Arsenal = Partial<Record<ArsenalSlot, ArsenalWeapon>>;
+
+/** A weapon going into a hand or out of it, as the screen shows it: drawn from the back or put on it (ordinary), or manifesting or fading (eternal). */
+export interface WeaponSwap {
+  /** At the turn's start (the skill's weapon taken up) or its end (put back). */
+  when: "start" | "end";
+  hand: Side;
+  /** What leaves the hand, and what comes into it (none: an empty hand), each with its arsenal place (an ordinary one's is its place on your back). */
+  out?: SwapWeapon;
+  in?: SwapWeapon;
+  /** A put-back's: the stance the turn's action left you in, before putting the weapon away left you in Lowered. */
+  stance?: Stance;
+}
+
+/** A weapon going into a hand or out of it (`WeaponSwap`). */
+export interface SwapWeapon { tier: WeaponTier; item?: WeaponItem; eternal: boolean; slot: ArsenalSlot; flaming?: boolean }
+
 export interface CombatState {
   turn: number;
   player: Player;
@@ -368,6 +420,8 @@ export interface CombatState {
   config: CombatConfig;
   /** How the most recent turn played out, step by step. Empty before the first turn. */
   lastTurn: Step[];
+  /** The weapons the most recent turn took into your hands and put back (a skill of a weapon you did not hold). */
+  swaps?: WeaponSwap[];
 }
 
 /** Random source, injectable for tests and replays. Returns a number in [0, 1). */
@@ -422,6 +476,8 @@ export interface PlayerSetup {
   headItem?: HeadItem;
   /** What your armor and head gear weigh together (see `Fighter.worn`; left out: their classes'). */
   worn?: number;
+  /** The weapons whose skills you can use (see `Arsenal`). */
+  arsenal?: Arsenal;
 }
 
 export interface EnemySetup {

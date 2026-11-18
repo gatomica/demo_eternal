@@ -36,7 +36,7 @@ import { typeDelay } from "../combat/lesson";
 import { empowerCost, payment, type Stats } from "./empower";
 import { useKeys, wrapIndex, menuSound } from "../ui/input";
 import { Kbd, keyText } from "../ui/Kbd";
-import { type Gear, gearName, type Inventory as Bag, loadoutOf, memoriesFor, pieceAt, type Place, slotOf } from "./gear";
+import { type Gear, gearName, type Inventory as Bag, lookBetweenFights, memoriesFor, pieceAt, type Place, slotOf } from "./gear";
 import { GearIcon, GearSprite } from "./GearIcons";
 import { cardOfGear, ItemCard } from "./ItemCard";
 import { type Beat, CHAT, type Conversation, OFFER } from "./dialogues";
@@ -255,7 +255,7 @@ export function DialogueScene({ talk, instant = false, blocked = false, offer = 
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
       {/* You on the left and the guide on the right, large: the bottom strip comes up to the knees (as in a visual novel). */}
       <div className="inv-figure">
-        <PlayerFigure3D look={loadoutOf(inv)} title="You" swayId="dialogue" />
+        <PlayerFigure3D look={lookBetweenFights(inv)} title="You" swayId="dialogue" />
       </div>
       <div className="guide-figure">
         <StickFigure view="front" foe pose={(ENEMY_KINDS.guide.idlePose ?? "idle") as never} weapon="baseline" armor="none" variant="guide" title="The guide" />

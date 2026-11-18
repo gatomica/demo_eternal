@@ -30,6 +30,8 @@ export interface Look {
   offItem?: WeaponItem;
   armorItem?: ArmorItem;
   headItem?: HeadItem;
+  /** The ordinary weapons on your back, crossed (see `backWeapons` in gear.ts). */
+  back?: ({ tier: WeaponTier; item?: WeaponItem } | null)[];
   /** The Penitent Warden's pointed hood (a patrol warden): its point hangs behind, the face in shadow. */
   hood?: boolean;
   /** Howling, how far into it (0 to 1): standing tall, head back, arms and weapon thrown up, rings of sound. */
@@ -43,7 +45,7 @@ export interface Look {
 const PLAYER_LOOK: Look = { ink: COLORS.ink, eye: COLORS.eye };
 
 /** You on the map, wearing what you have equipped. */
-export const playerLook = ({ offhand, ...gear }: { weapon: WeaponTier; armor: ArmorTier; weaponItem?: WeaponItem; armorItem?: ArmorItem; headItem?: HeadItem; offhand?: { weapon: WeaponTier; weaponItem?: WeaponItem } }): Look =>
+export const playerLook = ({ offhand, ...gear }: { weapon: WeaponTier; armor: ArmorTier; weaponItem?: WeaponItem; armorItem?: ArmorItem; headItem?: HeadItem; offhand?: { weapon: WeaponTier; weaponItem?: WeaponItem }; back?: ({ tier: WeaponTier; item?: WeaponItem } | null)[] }): Look =>
   ({ ...PLAYER_LOOK, ...gear, ...(offhand && offhand.weapon !== "baseline" ? { offWeapon: offhand.weapon, offItem: offhand.weaponItem } : {}) });
 
 /** Gear colors, the same as in a fight (index.css: --metal, --grip, --armor). */

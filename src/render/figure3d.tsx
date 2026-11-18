@@ -283,6 +283,10 @@ export function weaponParts(c: Canvas3D, o: {
    * it finds where it really is on the screen every frame (Usurp Flame's wisps flying into the torch).
    */
   anchor?: string;
+  /** An eternal weapon manifesting in the hand as a fight opens: it fades in out of a pale blue light (`.fig-manifest` in index.css); `quick`, taken up for a skill. */
+  manifest?: boolean | "quick";
+  /** An eternal weapon fading away from the hand: the pale blue light, then nothing (`.fig-vanish`). */
+  vanish?: boolean;
 }): Part[] {
   const { see, X, Y, ux, uy, origin, scaleAt } = c;
   const { model, held, slide = 0, at, yaw, cam, w, h, scale, box, eternalFlash, key: k = "weapon" } = o;
@@ -308,7 +312,8 @@ export function weaponParts(c: Canvas3D, o: {
     // (a figure unit is a box unit at the figure's feet, and smaller the farther it is)
     const drawn = drawGear(model.prims, { view, project, scale: v => (origin.depth / Math.max(v[2] * U, 0.05)) * scale });
     // (Keyed by the weapon's own prefix: the parts are drawn side by side with everything else the figure has, a second weapon's shapes too.)
-    const shapes = drawn.map((d, i) => <GearShape key={`${k}-${i}`} d={d} />);
+    const fading = o.vanish ? "fig-vanish" : o.manifest === "quick" ? "fig-manifest is-quick" : o.manifest ? "fig-manifest" : undefined;
+    const shapes = drawn.map((d, i) => (fading ? <g key={`${k}-${model.id}-${fading}-${i}`} className={fading}><GearShape d={d} /></g> : <GearShape key={`${k}-${i}`} d={d} />));
     const nearest = (drawn.length ? Math.min(...drawn.map(d => d.depth)) * U : origin.depth);
     drawn.forEach((d, i) => out.push({ key: `${k}-${i}`, depth: d.depth * U - 0.005, node: shapes[i] }));
     if (o.anchor && FIRE_AT[model.id]) {

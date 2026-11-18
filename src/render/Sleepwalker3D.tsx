@@ -155,6 +155,17 @@ export interface Sleepwalker3DProps {
     fire?: boolean; offFire?: boolean;
     /** The hand whose Barbarian's Axe is in its scythe form (Reap: the joint straightened, `SCYTHE` in gear3d.ts). */
     scythe?: Side;
+    /**
+     * The ordinary weapons carried on the back (two at most), crossed: each handle by a shoulder, its far end by the other hip, as it is (no sheath).
+     * The first place from the right shoulder, the second from the left (null: an empty place, its weapon in a hand).
+     */
+    back?: readonly ({ tier: WeaponTier; item?: WeaponItem; flaming?: boolean } | null)[];
+    /** The hands whose weapon is an eternal one manifesting (as the fight opens, or taken up for a skill): it fades in out of a pale blue light. */
+    manifest?: readonly Side[];
+    /** The hands whose eternal weapon is fading away (put away after its skill, or for another weapon's): the light, then nothing. */
+    vanish?: readonly Side[];
+    /** `manifest` is quick: a weapon taken up for a skill, not the fight's opening. */
+    quick?: boolean;
   };
   /**
    * The whole figure turned this much further round (radians, a turn to its right positive) than it would face (Reap's spin: its wind-up turned on to
@@ -183,6 +194,11 @@ export interface Sleepwalker3DProps {
   title?: string;
   /** Which figure it is, so the sway of its cloth carries on from one drawing of it to the next (see sway.ts). */
   swayId?: string;
+  /**
+   * An enemy's Waxed Torch is Flaming (a Patrol Warden's, lit by its Usurp Flame), as yours is with `gear.fire`; its bulb's marker is drawn too,
+   * for the wisps to fly into.
+   */
+  torchFire?: boolean;
   cam: Cam;
   /** Where it stands on the floor, and the yaw it faces (rig3d.ts `facingYaw`). */
   at: Vec;
@@ -217,6 +233,8 @@ function punched(rig: Rig3): Rig3 {
 const HELD_BACK_WAY: P3 = [0.08, -0.8, 0.6];
 /** The left hand's weapon, when the left hand is not at work: the mirror of that, down and ahead, low, out of the way. */
 const OFF_HELD_WAY: P3 = [-0.08, -0.8, 0.6];
+/** Poses whose left hand holds its weapon as the mirror of the right hand's, not low and ahead (the forearms' Block: both out to the sides and down). */
+const MIRRORED_OFF_POSES = new Set<PoseName>(["p3-forearms"]);
 /** Both bare hands at work together: how far beside the working fist the other one is clasped (figure units, toward its own side). */
 const CLASP = 1.8;
 /** Both hands on the same spot of a handle (the free hand leading a two-handed swing): how far up it the second sits beside the first (figure units). */
@@ -337,7 +355,7 @@ function hull(ps: [number, number][]): [number, number][] {
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
-function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "baseline", punch: punching, both: bothGiven, bothLead, offPose: offGiven, mirror, hook, gearOnly, hooded: hoodedKind, encased, waxCaked, dead, gear, eternalFlash, title, swayId, cam, at, yaw: facing, scale = 1, w, h, box, spin = 0, spinFrom, swungFrom, aim }: Sleepwalker3DProps) {
+function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "baseline", punch: punching, both: bothGiven, bothLead, offPose: offGiven, mirror, hook, gearOnly, hooded: hoodedKind, encased, waxCaked, dead, gear, eternalFlash, title, swayId, torchFire, cam, at, yaw: facing, scale = 1, w, h, box, spin = 0, spinFrom, swungFrom, aim }: Sleepwalker3DProps) {
   // (turned on round by its spin, if it has one)
   const yaw = facing + spin;
   const openingId = useId(); // (the clip that cuts the face to the black hood's opening)
@@ -1234,13 +1252,31 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
     // (its middle, between the neck and the pelvis: out of a swing the weapon's edge side faces away from it)
     const wielder: P3 | undefined = dead ? undefined : [0, 1, 2].map(i => (rig.joints.neck[i] + rig.joints.pelvis[i]) / 2) as unknown as P3;
     // (While the left hand is at work, the right's weapon is out of the swing, and of its flash.)
-    const gear = weaponParts(c, { weapon, model, reach, held, slide: oneAt, face: dead ? [0, 1, 0] : FACE, swing: dead || punch || thrown ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? undefined : eternalFlash, fire: !!gear0?.fire && !dead, anchor: gear0 && swayId ? `${swayId}-right` : undefined });
+    const gear = weaponParts(c, { weapon, model, reach, held, slide: oneAt, face: dead ? [0, 1, 0] : FACE, swing: dead || punch || thrown ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? undefined : eternalFlash, fire: (!!gear0?.fire || !!torchFire) && !dead, anchor: (gear0 || torchFire !== undefined) && swayId ? `${swayId}-right` : undefined, manifest: gear0?.manifest?.includes("right") ? (gear0.quick ? "quick" : true) : false, vanish: !!gear0?.vanish?.includes("right") });
     parts.push(...gear);
     if (gear0?.weaponItem === "sickle" && !dead) sickleBraid("braid-right", held, thrown && !leftArmed ? thrown.holder : undefined, oneAt);
     // (A pose that holds the weapon in both hands holds it in the right alone while the left holds a weapon of its own.)
     const asDrawn = raw.for3d ? { ...raw, ...raw.for3d } : raw;
     gripDots(gear, (asDrawn.grip && !flipped && offWeapon === "baseline") || (gripping && work === "R") ? ["R", "L"] : [rig.weaponHand === "right" ? "R" : "L"]);
   }
+  // The ordinary weapons carried on the back (the player's), crossed behind the ribcage: the first's handle up by the right shoulder, its far end down
+  // by the left hip, the second's the other way; the broad face flat against the back. Not once fallen (it lies on them).
+  if (gear0?.back?.length && !dead) {
+    const rc = ribcageOf(rig), j = rig.joints, off = rc.halfDepth + 1.2 * U;
+    const behind = (p: P3, lift = 0): P3 => [p[0] - rc.fwd[0] * off + rc.up[0] * lift, p[1] - rc.fwd[1] * off + rc.up[1] * lift, p[2] - rc.fwd[2] * off + rc.up[2] * lift];
+    const ends: [Joint, Joint][] = [["shoulderR", "hipL"], ["shoulderL", "hipR"]];
+    gear0.back.slice(0, 2).forEach((b, i) => {
+      if (!b) return;
+      const model = modelOfWeapon(b.tier, b.item);
+      if (!model && b.tier === "baseline") return;
+      const from = behind(j[ends[i][0]], 3 * U), to = behind(j[ends[i][1]]);
+      const dir: P3 = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+      const length = model?.reach ?? WEAPON_REACH[b.tier];
+      const held = heldAlong(from, dir, length, -1e9);
+      parts.push(...weaponParts(c, { weapon: b.tier, model, reach: length, held, slide: 0, face: [-rc.fwd[0], -rc.fwd[1], -rc.fwd[2]], at, yaw, cam, w, h, scale, box, key: `weapon-back-${i}`, fire: !!b.flaming }));
+    });
+  }
+
   // The left hand's weapon (the player's): held low and ahead, out of the way; swung as the mirror of the right hand's when the left hand is at work;
   // dead, dropped by the left hand.
   if (offWeapon !== "baseline") {
@@ -1255,9 +1291,10 @@ function Sleepwalker3DView({ pose: shown, hand = "right", weapon, offWeapon = "b
       // (the left hand's weapon alone, in a stance with the right hand's weapon arm empty: held as the mirror of the right hand's weapon in the
       // mirrored stance, which points it as the stance points its weapon arm's)
       : weapon === "baseline" ? heldAlong(handL, poseWeaponAxis(ALL_POSES[pose]), offReach)
+      : MIRRORED_OFF_POSES.has(pose) ? mirroredIn(rig, pose, offReach)
       : heldAlong(handL, OFF_HELD_WAY, offReach));
     const wielder: P3 | undefined = dead ? undefined : [0, 1, 2].map(i => (rig.joints.neck[i] + rig.joints.pelvis[i]) / 2) as unknown as P3;
-    const gear = weaponParts(c, { weapon: offWeapon, model: offModel, reach: offReach, held, slide: offOneAt, face: dead ? [0, 1, 0] : FACE_L, swing: offPose ? offSwing?.edge : dead || !punch || thrown ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? eternalFlash : undefined, key: "weapon-left", fire: !!gear0?.offFire && !dead, anchor: gear0 && swayId ? `${swayId}-left` : undefined });
+    const gear = weaponParts(c, { weapon: offWeapon, model: offModel, reach: offReach, held, slide: offOneAt, face: dead ? [0, 1, 0] : FACE_L, swing: offPose ? offSwing?.edge : dead || !punch || thrown ? undefined : swing, wielder, at, yaw, cam, w, h, scale, box, eternalFlash: punch ? eternalFlash : undefined, key: "weapon-left", fire: !!gear0?.offFire && !dead, anchor: gear0 && swayId ? `${swayId}-left` : undefined, manifest: gear0?.manifest?.includes("left") ? (gear0.quick ? "quick" : true) : false, vanish: !!gear0?.vanish?.includes("left") });
     parts.push(...gear);
     if (gear0?.offItem === "sickle" && !dead) sickleBraid("braid-left", held, thrown && leftArmed ? thrown.holder : undefined, offOneAt);
     gripDots(gear, gripping && work === "L" ? ["L", "R"] : ["L"]);

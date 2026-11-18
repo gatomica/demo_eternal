@@ -68,7 +68,7 @@ export interface EnemyKind {
   armor: ArmorTier;
   /**
    * Its weapon is its own, not one of the demo's three (the Warden's flail): it carries no eternal effect. Every
-   * other enemy's weapon carries its effect (free for it), though it drops the ordinary weapon.
+   * other enemy's weapon gives it that weapon's skills, as it would you (core/skills.ts), though it drops the ordinary weapon.
    */
   ownWeapon?: boolean;
   /** It drops nothing when it falls (the Warden, for now). */

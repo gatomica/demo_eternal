@@ -13,7 +13,7 @@
  * Waxed does: in the free hand, Hurl Wax still thrown with the other). The middle one is unarmed.
  */
 import type { BodyDef, EnemyKind } from "../bestiary";
-import { WAXED, waxedPattern } from "./waxed";
+import { posesFor, WAXED, waxedPattern } from "./waxed";
 
 /** The whole body's Health: as much as the player's (20). */
 const BLOB_HP = 15;
@@ -37,12 +37,12 @@ export const BLOB_MID: EnemyKind = {
   ...WAXED,
   ...PART,
   name: "Wax Blob (middle)",
-  pattern: waxedPattern("Wax Blob (middle)", false),
+  pattern: waxedPattern("Wax Blob (middle)", "baseline"),
 };
 
 /**
  * A side one: the Waxed without its flame (no Cradle Flame, and so no Clutch Flame or Flame Immolation). With `hammer`, it wields a
- * Brick Hammer, as the Hammer Waxed does (its Low and Overhead Attacks are blows of it; the super blob's).
+ * Brick Hammer, as the Hammer Waxed does (its Low Attack a blow of it, its overhead the hammer's Knockback; the super blob's).
  */
 function side(name: string, hammer = false): EnemyKind {
   return {
@@ -56,9 +56,9 @@ function side(name: string, hammer = false): EnemyKind {
     flame: undefined,
     blazePoses: undefined,
     fatalActions: undefined,
-    pattern: waxedPattern(name, hammer, false),
+    pattern: waxedPattern(name, hammer ? "heavy" : "baseline", false),
     stancePoses: without(WAXED.stancePoses, [FLAME_STANCE]),
-    actionPoses: without(WAXED.actionPoses, FLAME_ACTIONS),
+    actionPoses: posesFor(without(WAXED.actionPoses, FLAME_ACTIONS), hammer ? "heavy" : "baseline"),
   };
 }
 

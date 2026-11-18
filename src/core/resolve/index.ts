@@ -19,6 +19,7 @@ import { endTurn } from "./endTurn";
 import { resolveMovement } from "./movement";
 import { settleRests } from "./rests";
 import { beginTurn, forcedAction } from "./turn";
+import { returnBorrowed } from "../skills";
 
 export { forcedAction, snapshotOf } from "./turn";
 
@@ -79,6 +80,14 @@ export function resolveSkip(prev: CombatState, rng: Rng = Math.random): CombatSt
 /** A resolved turn's last touches: its steps kept, the turn counted, and every enemy's next intent picked. */
 function finishTurn(t: ReturnType<typeof beginTurn>, rng: Rng): CombatState {
   const { s } = t;
+  // (a weapon taken up for a skill goes back as the turn ends, unless Reap still holds it up: the last thing you do that turn, so you are left in the
+  // stance putting it away leaves you in, Lowered, not the one the turn's action did)
+  const back = returnBorrowed(s.player);
+  if (back) {
+    s.swaps = [...(s.swaps ?? []), { ...back, stance: s.player.stance }];
+    s.player.stance = "low";
+    s.player.lastBoth = undefined;
+  }
   s.lastTurn = t.steps;
   s.turn += 1;
   if (s.status === "playing") chooseIntents(s, rng);

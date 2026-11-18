@@ -166,7 +166,7 @@ function figureCss(): string {
 
 /** Everything about a look that changes how its picture comes out. */
 const lookKey = (l: Look) =>
-  [l.ink, l.wax, l.weapon, l.armor, l.weaponItem, l.offWeapon, l.offItem, l.armorItem, l.headItem, l.hood, l.reach, l.howl !== undefined, l.chasing, l.lit].join("|");
+  [l.ink, l.wax, l.weapon, l.armor, l.weaponItem, l.offWeapon, l.offItem, l.armorItem, l.headItem, l.back?.map(b => (b ? `${b.tier}:${b.item ?? ""}` : "-")).join(","), l.hood, l.reach, l.howl !== undefined, l.chasing, l.lit].join("|");
 
 /** What one figure is drawn as, in the camera's pixels: its inside markup (a group placed where its box is) and the class of its root. */
 function figureInner(look: Look, pose: PoseName, yaw: number, at: Vec, encased = false): { inner: string; cls: string } | undefined {
@@ -177,7 +177,7 @@ function figureInner(look: Look, pose: PoseName, yaw: number, at: Vec, encased =
     : createElement(Sleepwalker3D, {
       pose, weapon, offWeapon: look.offWeapon, hooded: look.hood, cam: CAM, at, yaw, w: W, h: H, box,
       // (You, on the same body: your class's weapon (and the left hand's) and what you wear. The sleepwalkers wear nothing.)
-      gear: look.reach ? undefined : { weaponItem: look.weaponItem, offItem: look.offItem, armor: look.armor ?? "none", armorItem: look.armorItem, headItem: look.headItem },
+      gear: look.reach ? undefined : { weaponItem: look.weaponItem, offItem: look.offItem, armor: look.armor ?? "none", armorItem: look.armorItem, headItem: look.headItem, back: look.back },
     });
   const html = renderToStaticMarkup(element);
   const open = /^<svg[^>]*?class="([^"]*)"[^>]*>/.exec(html);

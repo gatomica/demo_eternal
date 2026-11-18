@@ -11,7 +11,7 @@ import { kindOf } from "../bestiary";
 import { addDeath, BLOCK_SENDS_BACK, blowShares, bothHands, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, flamed, ITEM_SHARE, resistance, spendEternity, WEAPON_EFFECTS, WEAPON_LIKE, weaponOf } from "../rules";
 import type { CombatEvent, Enemy, Fighter, Player, Rng, Side, WeaponTier } from "../types";
 import { bodyOf } from "../body";
-import { AREA_SHARE, bothHeld, canTarget, handHasSkill, type Skill, type SkillId, SKILL_RATE, SKILLS, skillPrice, skillStats } from "../skills";
+import { AREA_SHARE, bothHeld, canTarget, foeCanTarget, foeHasSkill, foeSkillPrice, handHasSkill, type Skill, type SkillId, SKILL_RATE, SKILLS, skillPrice, skillStats } from "../skills";
 import { waxOn } from "./statuses";
 import type { Turn } from "./turn";
 
@@ -97,8 +97,20 @@ function weaponNow(t: Turn, f: Fighter) {
   const own = weaponOf(weight, weight === hand.weapon ? hand.weaponItem : undefined);
   // (a Flaming Waxed Torch: its Poise and Deadly swapped)
   const w = weight === hand.weapon && hand.flaming ? flamed(own) : own;
-  // (a skill of yours may have modifiers of its own, over the weapon's: the Hookshot's)
-  return f === t.p && t.act?.type === "attack" && t.act.skill ? skillStats(w, t.act.skill) : w;
+  // (a skill, yours or an enemy's, may have modifiers of its own, over the weapon's: the Hookshot's, Usurp Flame's)
+  const skill = skillMade(t, f);
+  return skill ? skillStats(w, skill) : w;
+}
+
+/**
+ * The skill a fighter's attack this turn is, as far as its weapon's numbers go: yours, the one you chose; an enemy's, the one its intent names, if its
+ * weapon gives it (or once it has been made: a Flame Blast puts out the flame that gave it, but is still a Flame Blast).
+ */
+function skillMade(t: Turn, f: Fighter): SkillId | undefined {
+  if (f === t.p) return t.act?.type === "attack" ? t.act.skill : undefined;
+  const e = f as Enemy, skill = e.intent.skill;
+  if (e.intent.type !== "attack" || !skill) return undefined;
+  return t.skillsPaid.get(e.id)?.skill ?? (foeHasSkill(e, skill) ? skill : undefined);
 }
 
 /** The Defense of the weapon a fighter blocks with this turn (an enemy's Block may have its own: `defense` in its pattern). */
@@ -151,7 +163,11 @@ const enemyArea = (t: Turn, f: Fighter) => {
 function areaSplash(t: Turn, attacker: Fighter) {
   if (attacker === t.p || t.cancelled.has(attacker.id) || !enemyArea(t, attacker)) return;
   const self = attacker as Enemy, blow = blowOf(t, self);
-  const dmg = blow.damage * AREA_SHARE, poise = blow.poise * AREA_SHARE, deadly = blow.deadly * AREA_SHARE;
+  // (a skill's effect too, each its share: a Patrol Warden's Flame Blast puts its Death on its allies as well)
+  const paid = t.skillsPaid.get(self.id), effect = paid ? SKILLS[paid.skill].effect : undefined, worth = paid?.worth ?? 0;
+  const dmg = (blow.damage + (effect === "damage" ? worth * SKILL_RATE.damage : 0)) * AREA_SHARE;
+  const poise = (blow.poise + (effect === "tire" ? worth * SKILL_RATE.fatigue : 0)) * AREA_SHARE;
+  const deadly = (blow.deadly + (effect === "death" ? worth * SKILL_RATE.death : 0)) * AREA_SHARE;
   for (const ally of t.alive) {
     if (ally === self || !ally.alive || t.out.has(ally.id) || t.isReviving(ally)) continue;
     const resisted = dmg * resistance(ally);
@@ -165,12 +181,22 @@ function areaSplash(t: Turn, attacker: Fighter) {
   }
 }
 
-/** Your skill this turn, if your Attack is one and can be made at this target (its hand holds the weapon that gives it; Reap's: the axe held up). */
-function skillAt(t: Turn, target: Fighter): SkillId | undefined {
+/**
+ * The skill an attack is, if it is one and can be made at this target: yours, if its hand holds the weapon that gives it (Reap's: the axe held up);
+ * an enemy's, if its weapon gives it and the skill's rules let it be aimed at this target (`foeCanTarget`). Otherwise the attack is a plain blow.
+ */
+function skillAt(t: Turn, attacker: Fighter, target: Fighter): SkillId | undefined {
   const { p, act } = t;
+  if (attacker !== p) {
+    const e = attacker as Enemy, skill = e.intent.skill, made = t.skillsPaid.get(e.id);
+    if (e.intent.type !== "attack" || !skill) return undefined;
+    if (made) return made.skill;
+    return foeHasSkill(e, skill) && foeCanTarget(skill, e, target, t.s) ? skill : undefined;
+  }
   if (act?.type !== "attack" || !act.skill || target === p) return undefined;
   // (once it has been made, it is that skill for the rest of the turn: a Flame Blast puts out the flame that gave it, but still hits all it reaches)
-  if (t.skillPaid) return canTarget(t.skillPaid.skill, target as Enemy) ? t.skillPaid.skill : undefined;
+  const made = t.skillsPaid.get(p.id);
+  if (made) return canTarget(made.skill, target as Enemy) ? made.skill : undefined;
   const hand = act.hand ?? "right";
   const has = act.skill === "reap" ? p.reaping === hand && !!act.both && handHasSkill(p, hand, "reap") : handHasSkill(p, hand, act.skill);
   return has && canTarget(act.skill, target as Enemy) ? act.skill : undefined;
@@ -181,7 +207,7 @@ function skillAt(t: Turn, target: Fighter): SkillId | undefined {
  * enemy (`all`), as the turn started; one part of each body.
  */
 function areaTargets(t: Turn, aimed: Fighter): Enemy[] {
-  const skill = t.cancelled.has(t.p.id) ? undefined : skillAt(t, aimed);
+  const skill = t.cancelled.has(t.p.id) ? undefined : skillAt(t, t.p, aimed);
   const area = skill ? SKILLS[skill].area : undefined;
   if (!area) return [];
   const seen = new Set(bodyOf(t.s.enemies, aimed).map(m => m.id));
@@ -216,7 +242,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter, more = false) {
   const ranged = t.isRanged(attacker);
   // (An Area attack, yours or an enemy's: each target takes its share.)
   const act = attacker === p ? t.act : undefined;
-  const skill = attacker === p ? skillAt(t, target) : undefined, sk = skill ? SKILLS[skill] : undefined;
+  const skill = skillAt(t, attacker, target), sk = skill ? SKILLS[skill] : undefined;
   const area = sk?.area || enemyArea(t, attacker) ? AREA_SHARE : 1;
   const full = blowOf(t, attacker);
   const blow = { ...full, damage: full.damage * area, poise: full.poise * area, deadly: full.deadly * area };
@@ -239,33 +265,39 @@ function strike(t: Turn, attacker: Fighter, target: Fighter, more = false) {
   // attack's Fatigue cost by what was paid, one for one; the Hookshot's and Knockback's is put on the target as Fatigue as the blow lands (below),
   // unless it is dodged; Usurp Flame's, Reap's and Flame Blast's goes into the blow's Death, Chisel's (half) into its damage. A Flame Blast puts the
   // torch's flame out as it is made.
+  // (An enemy's skill is paid the same way, from its own Eternity: its max health's worth, and it never runs out, so it never pays in Death.)
   /** The skill's payment, and the Fatigue it is to put on the target (the Hookshot's, Knockback's), for when the blow lands. */
   let skillPaid: { spent: number; death: number; tire: number } | undefined;
+  /** The hand the skill is made with (an enemy's: its weapon hand). */
+  const skillHand: Side = attacker === p ? act?.hand ?? "right" : "right";
   if (skill && sk) {
-    if (!more || !t.skillPaid) {
-      const price = skillPrice(p, skill);
+    let made = t.skillsPaid.get(attacker.id);
+    if (!more || !made) {
+      const price = attacker === p ? skillPrice(p, skill) : foeSkillPrice(attacker as Enemy, skill);
       // (The Model viewer's dummy fight spends nothing, as it takes nothing.)
-      const paid = t.s.config.dummy ? { spent: price, death: 0 } : spendEternity(p, price, !!hand.mortal);
-      t.skillPaid = { skill, ...paid, worth: paid.spent + paid.death };
-      if (sk.flame === "spend") setFlaming(t, act?.hand ?? "right", false);
+      // (an ordinary weapon's skill draws on your Eternity too, as an eternal one's)
+      const paid = attacker !== p || t.s.config.dummy ? { spent: price, death: 0 } : spendEternity(p, price, false);
+      made = { skill, ...paid, worth: paid.spent + paid.death };
+      t.skillsPaid.set(attacker.id, made);
+      if (sk.flame === "spend") setFlaming(t, attacker, skillHand, false);
     }
-    const { worth } = t.skillPaid, paid = { spent: more ? 0 : t.skillPaid.spent, death: more ? 0 : t.skillPaid.death };
+    const { worth } = made, paid = { spent: more ? 0 : made.spent, death: more ? 0 : made.death };
     if (sk.effect === "cheaper") {
       cost = Math.max(0, cost - worth * SKILL_RATE.fatigue);
-      t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: skill, damage: 0, fatigue: worth, ...paid });
+      t.emit({ kind: "eternal", attacker: attacker.id, target: target.id, effect: skill, damage: 0, fatigue: worth, ...paid });
     } else if (sk.effect === "tire") skillPaid = { ...paid, tire: worth * SKILL_RATE.fatigue * area };
     else {
       if (sk.effect === "death") blow.deadly += worth * SKILL_RATE.death * area;
       else dmg += worth * SKILL_RATE.damage * area;
-      t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: skill, damage: 0, fatigue: 0, ...paid });
+      t.emit({ kind: "eternal", attacker: attacker.id, target: target.id, effect: skill, damage: 0, fatigue: 0, ...paid });
     }
   }
-  /** The Hookshot's effect, as its blow lands (`tire`: the Fatigue it puts on the target; none when it is dodged). */
+  /** The Hookshot's and Knockback's effect, as its blow lands (`tire`: the Fatigue it puts on the target; none when it is dodged). */
   const skillLands = (tire: number) => {
     if (!skill || !skillPaid) return;
     const burst = t.tire(target, tire);
     if (burst > 0) hurt(t, target);
-    t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: skill, damage: burst, fatigue: burst > 0 ? 0 : tire, spent: skillPaid.spent, death: skillPaid.death });
+    t.emit({ kind: "eternal", attacker: attacker.id, target: target.id, effect: skill, damage: burst, fatigue: burst > 0 ? 0 : tire, spent: skillPaid.spent, death: skillPaid.death });
   };
   /** A skill that pulls its target to you (the Hookshot), or knocks it away (Knockback), only does so if it lands. */
   const pulling = !!sk?.pull, pushing = !!sk?.push;
@@ -275,7 +307,7 @@ function strike(t: Turn, attacker: Fighter, target: Fighter, more = false) {
   // the front; not at all when they share one), which your Maneuver can undo.
   if (attacker === p) { if (!pulling && !pushing && !more && !ranged) t.pulls.set(target.id, p.id); }
   else if (target !== p) { if (!ranged && (target as Enemy).line !== (attacker as Enemy).line) t.shifts.set(attacker.id, (target as Enemy).line); }
-  else if (!ranged) t.pulls.set(attacker.id, attacker.id);
+  else if (!ranged && !pushing) t.pulls.set(attacker.id, attacker.id);
   // Whom it attacked with its weapon this turn, however the blow goes (for the Broken Shortsword, next turn; not a Hurl Wax).
   if (isWeaponBlow(t, attacker, weight) && !more) t.attacked.set(attacker.id, target.id);
 
@@ -316,9 +348,10 @@ function strike(t: Turn, attacker: Fighter, target: Fighter, more = false) {
   // no damage.)
   skillLands(skillPaid?.tire ?? 0);
   if (skill && !blocking) hurt(t, target);
-  if (pulling) t.pulls.set(target.id, p.id);
-  if (pushing) t.pushes.set(target.id, p.id);
-  if (sk) skillLanded(t, sk, target, act?.hand ?? "right");
+  if (pulling && target !== p) t.pulls.set(target.id, attacker.id);
+  // (an enemy's Knockback on you: you fall back, as your own Maneuver would)
+  if (pushing) { if (target === p) t.knocked = attacker.id; else t.pushes.set(target.id, attacker.id); }
+  if (sk) skillLanded(t, attacker, sk, target, skillHand);
   // The Waxed Torch waxes whatever it hits, blocked or not, and the Broken Shortsword what it hits directly, yours or an enemy's (as the Warden's flail
   // does: on wax already there, a direct hit adds a little more Fatigue); not a Chisel, which chips the wax off, nor one already dead.
   const waxes = waxingOf(t, attacker, weight);
@@ -364,20 +397,26 @@ function sealWhole(t: Turn, target: Fighter) {
   t.emit({ kind: "encased", who: e.id });
 }
 
-/** Your hand's Waxed Torch lit (Usurp Flame) or put out (Flame Blast). */
-function setFlaming(t: Turn, hand: Side, on: boolean) {
+/** A Waxed Torch lit (Usurp Flame) or put out (Flame Blast): yours, in that hand; an enemy's (its `flaming` flag). */
+function setFlaming(t: Turn, who: Fighter, hand: Side, on: boolean) {
+  if (who !== t.p) {
+    const e = who as Enemy;
+    if (!!e.flags.flaming === on) return;
+    e.flags.flaming = on;
+    t.emit({ kind: "flag", who: e.id, flag: "flaming", on });
+    return;
+  }
   if (hand === "left") t.p.offhand = { ...t.p.offhand, flaming: on || undefined };
   else t.p.flaming = on || undefined;
 }
 
 /**
- * What your skill does once its blow has landed (hit or blocked; not dodged): Usurp Flame lights the torch, and seals whole in wax one that is always
- * Waxed (dead on the spot); Chisel takes the Waxed status off, where it can come off.
+ * What a skill does once its blow has landed (hit or blocked; not dodged), whoever made it: Usurp Flame lights the torch, and seals whole in wax one
+ * that is always Waxed (dead on the spot); Chisel takes the Waxed status off, where it can come off (yours too).
  */
-function skillLanded(t: Turn, sk: Skill, target: Fighter, hand: Side) {
-  if (sk.flame === "light") setFlaming(t, hand, true);
-  if (target === t.p) return;
-  const always = !!kindOf(target as Enemy).alwaysWaxed;
+function skillLanded(t: Turn, attacker: Fighter, sk: Skill, target: Fighter, hand: Side) {
+  if (sk.flame === "light") setFlaming(t, attacker, hand, true);
+  const always = target !== t.p && !!kindOf(target as Enemy).alwaysWaxed;
   if (sk.seals && always && !t.s.config.dummy && !t.fallen.has(target.id)) sealWhole(t, target);
   if (sk.unwax && !always) {
     target.waxed = false;

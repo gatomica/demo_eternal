@@ -27,6 +27,9 @@
  *   for), `*Condition` (only available while that condition holds; `*!Condition` while it
  *   doesn't; several must all hold; `*A or *B` holds while either does), and `#tag` (a rule it triggers, e.g. `#area`: an Area
  *   attack; `#fire`: flames lick what it hits). Conditions: see conditions.ts.
+ *   `skill <id>` (`skill chisel`, `skill flameblast`...): the action is that weapon skill (core/skills.ts), made with the weapon it holds, exactly as
+ *   yours is: the skill's own conditions (Close, a Waxed target, a flame to take...) and its weapon (a Flaming torch's Flame Blast) come with it,
+ *   besides any written, and it is paid with Eternity (an enemy's never runs out).
  * - A stance line is `Comes from > Stance > Leads to`.
  *   - Comes from: action names (and `Recover`, or an event the kind declares, like the Warden's
  *     `Second Phase`: right after he enters it) separated by `/` or `,`, or `All`.
@@ -57,11 +60,15 @@
  *    Recovered and picks again from the Recover stances.
  */
 import { WEAPON_LIKE, type WeaponLike, type WeaponStats } from "./rules";
+import type { SkillId } from "./skills";
 import type { ActionType, WeaponTier } from "./types";
 
 export const ACTION_KINDS: ActionType[] = ["attack", "block", "maneuver", "rest"];
 
 const WEIGHTS: WeaponTier[] = ["baseline", "light", "normal", "heavy"];
+
+/** The skills an action can be (`skill <id>`). (Listed here, not read from skills.ts, which loads after the kinds' patterns are parsed.) */
+const SKILL_IDS: Record<SkillId, true> = { stab: true, hookshot: true, reap: true, knockback: true, usurp: true, flameblast: true, chisel: true };
 
 export interface ActionDef {
   name: string;
@@ -79,6 +86,8 @@ export interface ActionDef {
    * (`plain`) if it names none: every attack still starts at the same base (`ATTACK_BASE` in rules.ts).
    */
   mods?: Partial<WeaponStats>;
+  /** The weapon skill it is (`skill <id>`), made with the weapon the fighter holds (see `SKILL_IDS`). */
+  skill?: SkillId;
   /** For a Maneuver: closes in on you, backs off, or whichever its current line calls for. */
   dir?: "advance" | "retreat" | "by-line";
   /**
@@ -147,12 +156,18 @@ export function parsePattern(label: string, src: string, { events = [] }: { even
           const [stat, n] = w.split(/\s+/) as [keyof WeaponStats, string];
           def.mods = { ...def.mods, [stat]: Number(n) };
         }
+        else if (/^skill\s+\w+$/.test(w)) {
+          const id = w.split(/\s+/)[1];
+          if (!(id in SKILL_IDS)) fail(`action "${name}": no skill named "${id}" (use ${Object.keys(SKILL_IDS).join(", ")})`);
+          def.skill = id as SkillId;
+        }
         else if (w === "advance" || w === "retreat" || w === "by-line") def.dir = w;
         else if (w.startsWith("*")) def.needs.push(needOf(w));
         else if (w.startsWith("#")) def.tags.push(w.slice(1));
         else fail(`action "${name}": unknown modifier "${w}"`);
       }
       if (def.type === "maneuver" && !def.dir) fail(`Maneuver "${name}" needs a direction: advance, retreat or by-line`);
+      if (def.skill && def.type !== "attack") fail(`"${name}" is a skill, so it must be an attack`);
       if (def.type !== "maneuver" && def.dir) fail(`"${name}" isn't a Maneuver, so it can't have a direction`);
       if (actions.has(def.name.toLowerCase())) fail(`action "${name}" is defined twice`);
       actions.set(def.name.toLowerCase(), def);

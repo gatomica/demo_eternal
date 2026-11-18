@@ -52,6 +52,16 @@ export function BootIcon() {
   );
 }
 
+/** The forearms' Block's picture: both bare hands raised, crossed (the right one over), in the Kick's boot's style. */
+export function ForearmsIcon() {
+  return (
+    <svg viewBox="0 0 48 48" className="gear-icon" aria-hidden="true">
+      <g transform="translate(48 0) scale(-1 1) rotate(-28 24 30)"><FlatHand /></g>
+      <g transform="rotate(-28 24 30)"><FlatHand /></g>
+    </svg>
+  );
+}
+
 /** The flat icon of an empty place: a mitten for a hand (`mirrored`: the left one), a chestplate or a helmet, faded (unless `faded` is false). */
 export function GearIcon({ slot, mirrored, faded = true }: { slot: Slot; mirrored?: boolean; faded?: boolean }) {
   return (

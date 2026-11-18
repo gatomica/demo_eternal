@@ -5,7 +5,7 @@
  */
 import { bodyOf } from "../body";
 import { kickFor, mirrorStance, swingFor } from "../stance";
-import { type SkillId, SKILLS, skillSwing } from "../skills";
+import { type SkillId, SKILLS, skillSwing, swapIn } from "../skills";
 import { dualWielding, STAGGERED_FATIGUE } from "../rules";
 import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Hand, Line, Player, PlayerAction, Step, Swing, WeaponTier } from "../types";
 
@@ -23,7 +23,7 @@ export function forcedAction(state: CombatState): "rest" | "revive" | null {
 function reapingAction(p: Player, action: PlayerAction): PlayerAction {
   if (!p.reaping) return action;
   if (action.type === "attack" && !action.kick && !action.skill) return { type: "attack", target: action.target, both: true, hand: p.reaping, skill: "reap" };
-  if (action.type === "block") return { type: "block", target: action.target, both: true, hand: p.reaping };
+  if (action.type === "block" && !action.forearms) return { type: "block", target: action.target, both: true, hand: p.reaping };
   return action;
 }
 
@@ -68,10 +68,12 @@ export interface Turn {
   /** Knocked back onto the back line (Knockback): enemy id -> who knocked it. */
   pushes: Map<string, string>;
   /**
-   * Your skill's payment this turn, once your attack is made (its Eternity spent, the Death on you, and the effect it is worth): an Area attack pays it
-   * once, at its first target, and every other target it hits takes its share of the same.
+   * Each skill's payment this turn, by who made it (you or an enemy), once its attack is made (the Eternity spent, the Death on its maker, and the
+   * effect it is worth): an Area attack pays it once, at its first target, and every other target it hits takes its share of the same.
    */
-  skillPaid?: { skill: SkillId; spent: number; death: number; worth: number };
+  skillsPaid: Map<string, { skill: SkillId; spent: number; death: number; worth: number }>;
+  /** You were knocked back (an enemy's Knockback landed on you): its id. You fall back as your own Maneuver would (movement.ts). */
+  knocked?: string;
   /** Enemies trying to step onto an ally's line, to strike it (Usurp Flame): enemy id -> that line. Settled like a Maneuver of theirs. */
   shifts: Map<string, Line>;
   /** Actions cancelled before they happened. */
@@ -128,7 +130,15 @@ export function beginTurn(prev: CombatState, action: PlayerAction, rng: () => nu
   const fighters: Fighter[] = [p, ...alive];
   const reviving = p.reviving;
   const forced = forcedAction(s);
-  const act: PlayerAction | null = forced === "revive" ? null : forced === "rest" ? { type: "rest" } : reapingAction(p, action);
+  let act: PlayerAction | null = forced === "revive" ? null : forced === "rest" ? { type: "rest" } : reapingAction(p, action);
+  // A skill of a weapon of your arsenal you do not hold: it is taken into its hand for the turn (what that hand held put away), and the skill is made
+  // with that hand.
+  s.swaps = [];
+  if (act?.skill && act.from) {
+    const { hand, swap } = swapIn(p, act.from);
+    act = { ...act, hand };
+    if (swap) s.swaps.push(swap);
+  }
   const foeReviving = new Set(alive.filter(e => e.reviving).map(e => e.id));
   const resting = new Map<string, boolean>();
   if (act?.type === "rest") resting.set(p.id, p.staggered);
@@ -140,7 +150,7 @@ export function beginTurn(prev: CombatState, action: PlayerAction, rng: () => nu
     act, reviving, foeReviving, resting,
     wasFlags: new Map(alive.map(e => [e.id, { ...e.flags }])),
     wasStaggered: new Set(fighters.filter(f => f.staggered).map(f => f.id)),
-    hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(), pushes: new Map(), shifts: new Map(),
+    hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(), pushes: new Map(), shifts: new Map(), skillsPaid: new Map(),
     cancelled: new Set(), blocked: new Set(), attacked: new Map(), interrupted: new Set(), fellReviving: new Set(),
     swing: act?.type === "attack" && act.kick ? kickFor(p.stance, act.kick, rng) : act?.type === "attack" && act.skill && SKILLS[act.skill].swing ? skillSwing(act.skill, act.hand === "left" ? mirrorStance(p.stance) : p.stance) : act?.type === "attack" ? swingFor(act.hand === "left" ? mirrorStance(p.stance) : p.stance, alive.find(e => e.id === act.target)) : undefined,
     offSwing: act?.type === "attack" && act.both && !p.reaping && dualWielding({ tier: p.weapon, item: p.weaponItem }, { tier: p.offhand.weapon, item: p.offhand.weaponItem })
@@ -172,7 +182,7 @@ export function beginTurn(prev: CombatState, action: PlayerAction, rng: () => nu
     },
     pinStaggered: () => { for (const f of fighters) if (f.staggered) f.fatigue = Math.max(0, f.hp); },
     isReviving: f => (f === p ? reviving : foeReviving.has(f.id)),
-    weightOf: f => (f === p ? (act?.type === "attack" && act.weight ? act.weight : t.handOf(p).weapon) : (f as Enemy).intent.weight ?? f.weapon),
+    weightOf: f => (f === p ? ((act?.type === "attack" || act?.type === "block") && act.weight ? act.weight : t.handOf(p).weapon) : (f as Enemy).intent.weight ?? f.weapon),
     handOf: f => (f === p && act?.hand === "left" ? p.offhand
       : f === p ? { weapon: p.weapon, weaponItem: p.weaponItem, eternal: p.eternal, mortal: p.mortalWeapon, lastTarget: p.lastTarget, flaming: p.flaming }
       : { weapon: f.weapon, eternal: f.eternal, lastTarget: f.lastTarget, flaming: !!(f as Enemy).flags.flaming || undefined }),

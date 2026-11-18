@@ -8,6 +8,7 @@
  */
 import type { EnemyKind } from "./bestiary";
 import type { ActionDef } from "./patterns";
+import { foeCanUse, foeTargetsOf } from "./skills";
 import type { CombatState, Enemy } from "./types";
 
 export type Condition = (self: Enemy, state: CombatState) => boolean;
@@ -25,6 +26,8 @@ export const COMMON_CONDITIONS: Record<string, Condition> = {
   playerstaggered: (_, state) => state.player.staggered,
   playerreviving: (_, state) => state.player.reviving,
   playerwaxed: (_, state) => state.player.waxed,
+  /** A flame within reach of Usurp Flame (the Waxed Torch's skill): yours, staggered while Waxed, or an ally's (staggered while Waxed, or cradling it). */
+  usurpable: (self, state) => foeTargetsOf(state, self, "usurp").length > 0,
 };
 
 /** The rule behind a condition name (a leading `!` ignored), or undefined if there is none. */
@@ -34,9 +37,12 @@ export function conditionOf(kind: EnemyKind, need: string): Condition | undefine
   return kind.conditions?.[name] ?? COMMON_CONDITIONS[name] ?? (flag ? self => !!self.flags[flag] : undefined);
 }
 
-/** Whether all of an action's conditions hold for this enemy right now. */
+/**
+ * Whether all of an action's conditions hold for this enemy right now. A skill (`skill <id>`) also needs its own: its weapon gives it (a Flaming
+ * torch's Flame Blast), and someone it can be aimed at (`foeCanUse`).
+ */
 export function isAvailable(kind: EnemyKind, self: Enemy, state: CombatState, a: ActionDef): boolean {
-  return needsHold(kind, self, state, a.needs);
+  return (!a.skill || foeCanUse(state, self, a.skill)) && needsHold(kind, self, state, a.needs);
 }
 
 /** Whether all these needs (an action's, or a stance's bracketed conditions) hold for this enemy right now. */

@@ -22,7 +22,7 @@
  */
 import { type CSSProperties, useState } from "react";
 import { attackCost } from "../core/rules";
-import type { Player, WeaponItem } from "../core/types";
+import type { Player, Side, WeaponItem } from "../core/types";
 import { PlayerBars } from "../render/HealthBar";
 import { PlayerFigure3D } from "../render/PlayerFigure3D";
 import { useKeyHold, useKeys, menuSound } from "../ui/input";
@@ -172,7 +172,9 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, pick
     close();
   });
 
+  // You as the inventory shows you: holding what you hold, as in a fight (not as on the map, empty-handed).
   const look = loadoutOf(inv);
+  const manifest = [...(look.eternal ? ["right"] : []), ...(look.offhand?.eternal ? ["left"] : [])] as Side[];
   const pieceOf = (o: Option): Gear | null => (o === "unequip" ? null : inv.bag.find(g => g.id === o) ?? null);
   // The card: the option under the cursor, or what the slot holds (on the slot, or while its options are closed).
   const shownOption: Option | null = at ? options[at - 1] : null;
@@ -234,7 +236,8 @@ export function InventoryScreen({ inv, player, string, eternalString, knot, pick
       <div className="letterbox letterbox-bottom" aria-hidden="true" />
       {/* You, large, at the side: the bottom strip comes up to your knees (as in a visual novel). */}
       <div className="inv-figure">
-        <PlayerFigure3D look={look} title="You" swayId="inventory" />
+        {/* (as in a fight: what you hold in your hands, an eternal weapon fading into its hand; the ordinary weapons you do not hold on your back) */}
+        <PlayerFigure3D look={look} manifest={manifest} title="You" swayId="inventory" />
       </div>
       <PlayerBars player={player} preview={preview} string={string} eternalString={eternalString} knot={!!knot} />
       {/* Your Resistance, at the bottom left just above the strip (a change about to be made flickering on it). */}

@@ -1,7 +1,7 @@
 # Turn-based soulslike demo
 
 A Vite + React 19 + TypeScript browser game, hosted on Netlify (`npm run build`, publishes `dist/`).
-Screens from the main menu: **Test combat** (pick a loadout and an encounter), **Exploration**
+Screens from the main menu: **Test combat** (pick a loadout, then the enemies: every non-boss enemy with a count to raise, `TEST_FOES` in `core/encounters.ts`, or a ready-made boss or guide encounter, `SPECIAL_ENCOUNTERS`), **Exploration**
 (walk a multi-floor map; touching an enemy starts its fight), the **Model viewer** (one enemy, its
 stances and actions, played against a dummy that never gets hurt; an enemy's weapon and armor variants (the Waxbound's Chisel and Hammer; the Sleepwalker's bare hands, Hammer and Patrol Warden; the Wax Blob's Hammer, on both side parts: the Super Wax Blob) are statuses to turn on and off, one at a time (`VARIANTS` in `screens/viewerModel.ts`, named by label so a body's parts share them); the Lit waxbound and the Super Wax Blob are not listed of their own (the waxbound's Lit status, the Wax Blob's Hammer); an enemy with several targetable parts, like the Wax Blob, is shown as one body with all its parts at once, each with its own stance and actions; or "You": the player with any weapon
 and armor, in the stance you pick, and the actions you have from that stance played against a dummy Sleepwalker) and the **Map viewer**

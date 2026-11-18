@@ -256,6 +256,8 @@ export interface PlayerScenario {
   punch?: boolean;
   /** The Kick, with this leg (in a fight the stance picks it: see `kickFor` in core/stance.ts). */
   kick?: Side;
+  /** The forearms' Block (made with neither weapon). */
+  forearms?: boolean;
   /** The line the dummy stands on (default front): an attack at the back line always swings overhead. */
   foeLine?: Line;
   /** A weapon skill (made with the hand `punch` says): only offered while that hand holds a weapon that has it. */
@@ -346,6 +348,7 @@ export function playerScenariosFrom(stance: PlayerViewStance, skills: { skill: S
     { id: "block", label: "Block, right hand", action: { type: "block", target: "foe" }, foe: "strike" },
     { id: "block-left", label: "Block, left hand", action: { type: "block", target: "foe" }, foe: "strike", punch: true },
     { id: "block-both", label: "Block, both hands", action: { type: "block", target: "foe" }, foe: "strike", both: true },
+    { id: "block-forearms", label: "Block, forearms", action: { type: "block", target: "foe" }, foe: "strike", forearms: true },
     { id: "dodge-fwd", label: "Dodge forward", action: { type: "maneuver", target: "foe" }, foe: "strike" },
     { id: "dodge-back", label: "Dodge back", action: { type: "maneuver", target: "self" }, foe: "strike" },
     { id: "advance", label: "Advance", action: { type: "maneuver", target: "foe" }, foe: "rest" },
@@ -363,6 +366,7 @@ export const playerActionOf = (sc: PlayerScenario, right: HeldPick = "baseline",
   type: sc.action.type, target: sc.action.target === "foe" ? FOE_ID : "self", ...(sc.punch ? { hand: "left" as const } : {}),
   ...(sc.both ? { both: true as const, hand: bothHandsLead(heldWeapon(right), heldWeapon(left)) } : {}),
   ...(sc.kick ? { weight: "baseline" as const, kick: sc.kick } : {}),
+  ...(sc.forearms ? { weight: "baseline" as const, forearms: true as const } : {}),
   ...(sc.skill ? { skill: sc.skill } : {}),
   ...(sc.skill && SKILLS[sc.skill].type === "rest" ? { hand: (sc.punch ? "left" : "right") as Side } : {}),
 });

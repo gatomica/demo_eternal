@@ -5,21 +5,45 @@
  */
 import type { EnemyKind } from "../bestiary";
 import { parsePattern } from "../patterns";
+import type { WeaponTier } from "../types";
+
+/**
+ * What an armed waxed's overhead is: its weapon's skill (the Broken Shortsword's Chisel, the Brick Hammer's Knockback), drawn as the bare Overhead
+ * Attack is. Bare-handed, the Overhead Attack.
+ */
+const OVERHEAD_SKILL: Partial<Record<WeaponTier, { name: string; id: string }>> = {
+  light: { name: "Chisel", id: "chisel" },
+  heavy: { name: "Knockback", id: "knockback" },
+};
+
+/** The name of a waxed's overhead with this weapon: its weapon's skill, or the bare Overhead Attack. */
+export const overheadOf = (weapon: WeaponTier) => OVERHEAD_SKILL[weapon]?.name ?? "Overhead Attack";
+
+/** A waxed's action poses with its overhead named for its weapon (the bare Overhead Attack's poses, under its skill's name). */
+export function posesFor(poses: NonNullable<EnemyKind["actionPoses"]>, weapon: WeaponTier): NonNullable<EnemyKind["actionPoses"]> {
+  const name = overheadOf(weapon);
+  if (name === "Overhead Attack") return poses;
+  const { "Overhead Attack": overhead, ...rest } = poses;
+  return { ...rest, [name]: overhead };
+}
 
 /**
  * The Waxed's pattern, as text. Its two clawing attacks are blows of whatever it holds in its free hand
  * (Hurl Wax still tears the wax off with the other): barehanded, bare hands' blows (the weapon table's, `WEAPONS.baseline`); armed, its
- * weapon's. Hurl Wax is like the Waxed Torch (its Poise and all), whatever it holds. Flame Immolation is no weapon's blow: the base, with 0.25
- * Deadly.
+ * weapon's, and its overhead is the weapon's skill in place of the Overhead Attack (Chisel, only at you while you are Waxed; Knockback), with its
+ * Brace to fall back on. Hurl Wax is like the Waxed Torch (its Poise and all), whatever it holds. Flame Immolation is no weapon's blow: the base,
+ * with 0.25 Deadly.
  *
  * Stances lead by what just happened: a Brace that stopped an attack (`Brace`) takes it to
  * Crawling or Reared Back, one that stopped nothing (`!Brace`) to Wax on Hand or Cradle Flame.
  * Actions nothing follows (Hurl Wax, Overhead Attack) go back to the Recover stances.
  */
-export const waxedPatternText = (armed: boolean, flame = true) => [
+export const waxedPatternText = (weapon: WeaponTier, flame = true) => [
   "    actions:",
-  `      Low Attack:      attack${armed ? "" : ", baseline"}   // a low blow, from the crawl`,
-  `      Overhead Attack: attack${armed ? "" : ", baseline"}, *Close   // only within reach`,
+  `      Low Attack:      attack${weapon !== "baseline" ? "" : ", baseline"}   // a low blow, from the crawl`,
+  OVERHEAD_SKILL[weapon]
+    ? `      ${OVERHEAD_SKILL[weapon]!.name}: attack, skill ${OVERHEAD_SKILL[weapon]!.id}   // its weapon's skill, by the skill's own rules`
+    : `      Overhead Attack: attack${weapon !== "baseline" ? "" : ", baseline"}, *Close   // only within reach`,
   "      Hurl Wax:     attack, torch, ranged   // like the Waxed Torch",
   "      Brace:        block, baseline",
   "      Drag Forward: maneuver, advance, *Far   // crawls in only when far away",
@@ -34,14 +58,14 @@ export const waxedPatternText = (armed: boolean, flame = true) => [
   "      Slither Back, !Brace                 > Wax on Hand > Hurl Wax",
   // (Without its flame, a Brace that stopped nothing only leads to Wax on Hand.)
   ...(flame ? ["      Recover, Slither Back, !Brace        > Cradle Flame > Flame Immolation, Clutch Flame"] : []),
-  "      Low Attack, Brace                    > Reared Back > Overhead Attack, Brace",
+  `      Low Attack, Brace                    > Reared Back > ${overheadOf(weapon)}, Brace`,
 ].join("\n");
 
 /**
- * The Waxed's pattern (see `waxedPatternText`). `flame`: with its Cradle Flame stance (and Clutch Flame, its Rest, and Flame Immolation);
- * the Wax Blob's side parts have none.
+ * The Waxed's pattern (see `waxedPatternText`), for the weapon it holds. `flame`: with its Cradle Flame stance (and Clutch Flame, its Rest, and Flame
+ * Immolation); the Wax Blob's side parts have none.
  */
-export const waxedPattern = (name: string, armed: boolean, flame = true) => parsePattern(name, waxedPatternText(armed, flame));
+export const waxedPattern = (name: string, weapon: WeaponTier, flame = true) => parsePattern(name, waxedPatternText(weapon, flame));
 
 export const WAXED: EnemyKind = {
   name: "Waxbound",
@@ -55,7 +79,7 @@ export const WAXED: EnemyKind = {
   flags: { lit: false },
   statuses: [{ key: "lit", off: "Unlit", on: "Lit" }],
   // Its blows hurt and tire as much as a light one, barehanded.
-  pattern: waxedPattern("Waxbound", false),
+  pattern: waxedPattern("Waxbound", "baseline"),
   modelPoses: { front: "w-t", back: "w-t-b" },
   stancePoses: {
     Idle: "w-idle",
@@ -95,16 +119,16 @@ export const WAXED: EnemyKind = {
 };
 
 /**
- * A waxed carrying a weapon in its free hand: the same kneeling wretch, but its two clawing
- * attacks are blows of the weapon (its weight's numbers, and its effect, free for it),
- * and beaten, it drops the ordinary weapon. Hurl Wax is thrown with its other hand, as ever, and
- * carries no effect; its Brace is still bare. (No Waxed Torch: that is the wardens' own.)
+ * A waxed carrying a weapon in its free hand: the same kneeling wretch, but its Low Attack is a blow of the weapon (its weight's numbers), its
+ * overhead the weapon's skill (Chisel, Knockback), paid with its Eternity as yours is; beaten, it drops the ordinary weapon. Hurl Wax is thrown with
+ * its other hand, as ever; its Brace is still bare. (No Waxed Torch: that is the wardens' own.)
  */
 const armedWaxed = (name: string, weapon: "light" | "heavy"): EnemyKind => ({
   ...WAXED,
   name,
   weapon,
-  pattern: waxedPattern(name, true),
+  pattern: waxedPattern(name, weapon),
+  actionPoses: posesFor(WAXED.actionPoses!, weapon),
 });
 
 export const WAXED_CHISEL = armedWaxed("Chisel Waxbound", "light");

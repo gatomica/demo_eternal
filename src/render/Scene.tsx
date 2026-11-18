@@ -103,9 +103,20 @@ export interface SceneFigure {
   bothLead?: Side;
   offPose?: PoseName;
   offItem?: WeaponItem;
-  /** The player's Waxed Torch in the right (`fire`) or left (`offFire`) hand is Flaming (Sleepwalker3D's `gear.fire`, `gear.offFire`). */
+  /**
+   * The player's Waxed Torch in the right (`fire`) or left (`offFire`) hand is Flaming (Sleepwalker3D's `gear.fire`, `gear.offFire`); an enemy's
+   * (`fire`: a Patrol Warden's, Sleepwalker3D's `torchFire`).
+   */
   fire?: boolean;
   offFire?: boolean;
+  /** The ordinary weapons on the player's back, crossed (Sleepwalker3D's `gear.back`). */
+  back?: readonly ({ tier: WeaponTier; item?: WeaponItem; flaming?: boolean } | null)[];
+  /** The player's hands whose eternal weapon is manifesting (as the fight opens, or taken up for a skill: Sleepwalker3D's `gear.manifest`). */
+  manifest?: readonly Side[];
+  /** The player's hands whose eternal weapon is fading away (Sleepwalker3D's `gear.vanish`). */
+  vanish?: readonly Side[];
+  /** `manifest` is a quick one (a weapon taken up for a skill). */
+  quickManifest?: boolean;
   /** The hand whose Barbarian's Axe is a scythe (Reap; Sleepwalker3D's `gear.scythe`). */
   scythe?: Side;
   /** The player turned further round as it swings, and its wind-up's turn (Reap's spin; Sleepwalker3D's `spin`, `spinFrom`). */
@@ -414,7 +425,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
    * the same as on the last beat and has no effect on it (no hit, step or break class) is the same picture: it is kept, instead of rebuilding its whole drawing.
    */
   const wrapKey = (f: SceneFigure) => {
-    const sig = `${f.pose}|${f.dead}|${f.arm}|${f.lingerFrom}|${f.flailFire}|${f.waxCaked}|${f.eternalFlash}|${f.encased}|${f.headFlame}|${f.holdsString}|${f.smokeSince}|${f.phase2Look}|${f.charred}|${f.hand}|${f.hooded}|${JSON.stringify(f.trail)}`;
+    const sig = `${f.pose}|${f.dead}|${f.arm}|${f.lingerFrom}|${f.flailFire}|${f.waxCaked}|${f.eternalFlash}|${f.encased}|${f.headFlame}|${f.holdsString}|${f.smokeSince}|${f.phase2Look}|${f.charred}|${f.hand}|${f.hooded}|${f.manifest?.join(",")}|${f.vanish?.join(",")}|${f.back?.map(b => (b ? `${b.tier}${b.flaming ? "*" : ""}` : "-")).join(",")}|${JSON.stringify(f.trail)}`;
     const was = wrapKeys.current.get(f.id);
     if (was && was.sig === sig && !f.classes.length) return was.key;
     wrapKeys.current.set(f.id, { sig, key: f.stepKey });
@@ -749,7 +760,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         >
           {f.holdsString && !f.dead && <StringAura layer="back" spread={f.body ? 2.4 : 1} />}
           <div key={wrapKey(f)} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" && !((f.sleepwalker3d || f.player3d) && w > 0) ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.warden3d && w > 0 ? <Warden3D pose={f.pose} lingerFrom={f.lingerFrom} arm={f.arm} phase2Look={f.phase2Look} flailFire={f.flailFire} dead={!!f.dead} charred={f.charred} {...drawOf(f, at, box)} scale={f.scale} rise={riseOf(f)} w={w} h={h} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : (f.sleepwalker3d || f.player3d) && w > 0 ? <Sleepwalker3D pose={f.pose} hand={f.hand} punch={f.punch} both={f.both} bothLead={f.bothLead} offPose={f.offPose} mirror={f.mirror} hook={f.hook} weapon={f.weapon} offWeapon={f.offWeapon} gear={f.player3d ? { weaponItem: f.weaponItem, offItem: f.offItem, armor: f.armor, armorItem: f.armorItem, headItem: f.headItem, fire: f.fire, offFire: f.offFire, scythe: f.scythe } : undefined} spin={f.spin} spinFrom={f.spinFrom} swungFrom={f.swungFrom} aim={aimOf(f)} hooded={f.hooded} encased={f.encased} waxCaked={f.waxCaked && !f.dead} dead={!!f.dead} eternalFlash={f.eternalFlash} swayId={f.id} {...drawOf(f, at, box)} scale={f.scale} w={w} h={h} /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} {...drawOf(f, at, box)} scale={f.scale} w={w} h={h} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
+            {f.dead === "pieces" && !((f.sleepwalker3d || f.player3d) && w > 0) ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.warden3d && w > 0 ? <Warden3D pose={f.pose} lingerFrom={f.lingerFrom} arm={f.arm} phase2Look={f.phase2Look} flailFire={f.flailFire} dead={!!f.dead} charred={f.charred} {...drawOf(f, at, box)} scale={f.scale} rise={riseOf(f)} w={w} h={h} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : (f.sleepwalker3d || f.player3d) && w > 0 ? <Sleepwalker3D pose={f.pose} hand={f.hand} punch={f.punch} both={f.both} bothLead={f.bothLead} offPose={f.offPose} mirror={f.mirror} hook={f.hook} weapon={f.weapon} offWeapon={f.offWeapon} gear={f.player3d ? { weaponItem: f.weaponItem, offItem: f.offItem, armor: f.armor, armorItem: f.armorItem, headItem: f.headItem, fire: f.fire, offFire: f.offFire, scythe: f.scythe, back: f.back, manifest: f.manifest, vanish: f.vanish, quick: f.quickManifest } : undefined} spin={f.spin} spinFrom={f.spinFrom} swungFrom={f.swungFrom} aim={aimOf(f)} hooded={f.hooded} encased={f.encased} waxCaked={f.waxCaked && !f.dead} dead={!!f.dead} eternalFlash={f.eternalFlash} swayId={f.id} torchFire={f.player3d ? undefined : f.fire} {...drawOf(f, at, box)} scale={f.scale} w={w} h={h} /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} {...drawOf(f, at, box)} scale={f.scale} w={w} h={h} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {headFlames.has(f.id) && <FlameAnchor id={f.id} x={headFlames.get(f.id)![0] - box.x} y={headFlames.get(f.id)![1] - box.y} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}

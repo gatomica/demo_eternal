@@ -2,15 +2,19 @@
  * skills.ts — weapon skills: actions a weapon gives you, paid with Eternity, taking the place of the weapons' old always-on effects.
  *
  * A skill has an Eternity scaling (0 to 1): it spends that share of your max Eternity, in full, the moment its action is made, however much
- * its effect turns out to help; what your Eternity can't pay becomes Death on you (all of it, with an ordinary weapon). Its effect is as big as
+ * its effect turns out to help; what your Eternity can't pay becomes Death on you (an ordinary, picked-up weapon's skill too: it draws on your Eternity
+ * as an eternal one's does). Its effect is as big as
  * what was paid (Eternity and Death alike): one for one in Fatigue or Death, half that in damage or healing.
  *
  * An **Area** attack (`Skill.area`; an enemy's `#area` tag) hits everything in its range, each at half: half the damage, half the Poise and Deadly,
  * half the skill's effect. Its cost is paid once, in full.
+ *
+ * Enemies use the very same skills, by the same rules (`skill <id>` on an action of their pattern): the weapon they hold gives them, each has its own
+ * conditions, and each is paid with Eternity. An enemy's max Eternity is its max health, and it never runs out: it never pays in Death.
  */
 import { kindOf } from "./bestiary";
 import { blowShares, type HeldWeapon, heldStats, type WeaponStats } from "./rules";
-import type { CombatState, Enemy, Hand, Player, Side, Stance, Swing, WeaponItem, WeaponTier } from "./types";
+import type { ArsenalSlot, ArsenalWeapon, CombatState, Enemy, Fighter, Hand, Player, Side, Stance, Swing, WeaponItem, WeaponSwap, WeaponTier } from "./types";
 
 export type SkillId = "stab" | "hookshot" | "reap" | "knockback" | "usurp" | "flameblast" | "chisel";
 
@@ -138,9 +142,88 @@ export const bothHeld = (p: Player): [HeldWeapon, HeldWeapon] => {
   return [heldOn(p, "right"), heldOn(p, "left")];
 };
 
-/** Every skill you can use, and the hand whose weapon gives it: the right hand's first. (Reap's attack is not one: it is the Attack you make while it lasts.) */
-export function skillsOf(p: Player): { skill: SkillId; hand: Side }[] {
-  return (["right", "left"] as const).flatMap(hand => skillsOfWeapon(heldOn(p, hand)).map(skill => ({ skill, hand })));
+/**
+ * Every skill you can use, the hand it is made with, and (with an arsenal) the place of the weapon that gives it. With an arsenal (`Player.arsenal`),
+ * every weapon in it, held or not: one you do not hold is taken into its hand for the turn (`swapIn`). Without (the Model viewer), what your hands
+ * hold, the right hand's first. (Reap's attack is not one: it is the Attack you make while it lasts.)
+ */
+export function skillsOf(p: Player): { skill: SkillId; hand: Side; from?: ArsenalSlot }[] {
+  if (!p.arsenal) return (["right", "left"] as const).flatMap(hand => skillsOfWeapon(heldOn(p, hand)).map(skill => ({ skill, hand })));
+  return ARSENAL_SLOTS.flatMap(from => {
+    const w = p.arsenal![from];
+    return w ? skillsOfWeapon(arsenalHeld(p, w)).map(skill => ({ skill, hand: w.held ?? HAND_OF_SLOT[from], from })) : [];
+  });
+}
+
+/** The arsenal's places, in the Skill menu's order of preference. */
+export const ARSENAL_SLOTS: ArsenalSlot[] = ["right", "left", "up", "down"];
+
+/** The hand a weapon of each place is taken into for its skill: an eternal one its own; an ordinary one the hand on its side of your back. */
+export const HAND_OF_SLOT: Record<ArsenalSlot, Side> = { right: "right", left: "left", up: "right", down: "left" };
+
+/** A weapon of your arsenal as the rules name it (`HeldWeapon`): a torch in your hand Flaming as that hand is, one not held as it was left. */
+export const arsenalHeld = (p: Player, w: ArsenalWeapon): HeldWeapon =>
+  ({ tier: w.tier, item: w.item, flaming: w.held ? handOn(p, w.held).flaming : w.flaming });
+
+/**
+ * The weapons on your back in a fight, in their places (the first from the right shoulder): the ordinary ones of your arsenal you do not hold (a
+ * Flaming torch burning there too).
+ */
+export const backOf = (p: Player): ({ tier: WeaponTier; item?: WeaponItem; flaming?: boolean } | null)[] =>
+  (["up", "down"] as const).map(s => {
+    const w = p.arsenal?.[s];
+    return w && !w.held ? { tier: w.tier, item: w.item, ...(w.flaming ? { flaming: true } : {}) } : null;
+  });
+
+/** Puts a hand's rules (`Hand`) on you: your right hand's own fields, or `offhand`. */
+function setHand(p: Player, side: Side, h: Hand) {
+  if (side === "left") { p.offhand = h; return; }
+  p.weapon = h.weapon;
+  p.weaponItem = h.weaponItem;
+  p.eternal = h.weapon !== "baseline";
+  p.mortalWeapon = h.mortal;
+  p.flaming = h.flaming;
+}
+
+/** A weapon of your arsenal as a hand holds it (every weapon carries its effect; an ordinary one is `mortal`). */
+const handFor = (w: ArsenalWeapon): Hand =>
+  ({ weapon: w.tier, ...(w.item ? { weaponItem: w.item } : {}), eternal: true, mortal: !w.eternal, ...(w.flaming ? { flaming: true } : {}) });
+
+/** A weapon as a swap shows it, with its arsenal place. */
+const swapLook = (w: ArsenalWeapon, slot: ArsenalSlot) => ({ tier: w.tier, ...(w.item ? { item: w.item } : {}), eternal: w.eternal, slot, ...(w.flaming ? { flaming: true } : {}) });
+
+/**
+ * Takes the weapon in this arsenal place into its hand for a skill, if no hand holds it: what that hand held goes back where it came from (an ordinary
+ * weapon to its place on your back; an eternal one out of sight), the torch's flame staying with its torch. Returns the hand it is in, and the swap
+ * the screen plays (none, if it was already held).
+ */
+export function swapIn(p: Player, from: ArsenalSlot): { hand: Side; swap?: WeaponSwap } {
+  const w = p.arsenal?.[from];
+  if (!w) return { hand: HAND_OF_SLOT[from] };
+  if (w.held) return { hand: w.held };
+  const hand = HAND_OF_SLOT[from], was = handOn(p, hand);
+  const put = ARSENAL_SLOTS.find(s => p.arsenal![s]?.held === hand), old = put ? p.arsenal![put] : undefined;
+  if (old) { old.held = undefined; old.flaming = was.flaming || undefined; }
+  w.held = hand;
+  setHand(p, hand, handFor(w));
+  p.borrowed = { hand, from, ...(put ? { put } : {}) };
+  return { hand, swap: { when: "start", hand, ...(old && put ? { out: swapLook(old, put) } : {}), in: swapLook(w, from) } };
+}
+
+/**
+ * The weapon taken up for a skill put back as the turn ends (unless Reap still holds it up in both hands): to its place on your back, or out of sight,
+ * and the hand takes up again what it held. Returns the swap the screen plays, if there was one.
+ */
+export function returnBorrowed(p: Player): WeaponSwap | undefined {
+  const b = p.borrowed;
+  if (!b || p.reaping || !p.arsenal) return undefined;
+  const w = p.arsenal[b.from], old = b.put ? p.arsenal[b.put] : undefined;
+  const now = handOn(p, b.hand);
+  if (w) { w.held = undefined; w.flaming = now.flaming || undefined; }
+  if (old) old.held = b.hand;
+  setHand(p, b.hand, old ? handFor(old) : { weapon: "baseline" });
+  p.borrowed = undefined;
+  return { when: "end", hand: b.hand, ...(w ? { out: swapLook(w, b.from) } : {}), ...(old && b.put ? { in: swapLook(old, b.put) } : {}) };
 }
 
 /** Whether the hand holds a weapon with this skill. */
@@ -150,12 +233,12 @@ export const handHasSkill = (p: Player, hand: Side, skill: SkillId) => skillsOfW
 export const skillPrice = (p: Player, skill: SkillId) => SKILLS[skill].scaling * p.maxEternity;
 
 /**
- * What a skill would be paid with right now (for the previews): the Eternity spent, and the Death on you for what it can't pay (all of it with an
- * ordinary weapon, `mortal`).
+ * What a skill would be paid with right now (for the previews): the Eternity spent, and the Death on you for what it can't pay. Whatever weapon
+ * gives it, eternal or picked up, it draws on your Eternity first.
  */
-export function skillPayment(p: Player, skill: SkillId, mortal = false): { spent: number; death: number; price: number } {
+export function skillPayment(p: Player, skill: SkillId): { spent: number; death: number; price: number } {
   const price = skillPrice(p, skill);
-  const spent = mortal ? 0 : Math.min(Math.max(0, p.eternity), price);
+  const spent = Math.min(Math.max(0, p.eternity), price);
   return { spent, death: price - spent, price };
 }
 
@@ -176,6 +259,43 @@ export const canTarget = (skill: SkillId, e: Enemy) => {
   if (sk.aim === "usurpable") return (e.staggered && e.waxed) || cradling(e);
   return true;
 };
+
+/** An enemy's weapon as the rules name it (a Waxed Torch Flaming while its `flaming` flag is on). */
+export const heldByFoe = (e: Enemy): HeldWeapon => ({ tier: e.weapon, flaming: !!e.flags.flaming });
+
+/** Whether an enemy's weapon gives this skill, as the same weapon would give it you (not the Warden's own flail, one of no demo weapon). */
+export const foeHasSkill = (e: Enemy, skill: SkillId) => !kindOf(e).ownWeapon && skillsOfWeapon(heldByFoe(e)).includes(skill);
+
+/** What a skill spends for an enemy, in Eternity points: its share of the enemy's max Eternity, which is its max health. */
+export const foeSkillPrice = (e: Enemy, skill: SkillId) => SKILLS[skill].scaling * e.maxHP;
+
+/**
+ * Whether an enemy's skill can be aimed at this target, by the skill's own rules as yours are. At you: Close or Far measured from where the enemy
+ * stands (Close: it is on the front line), Chisel only while you are Waxed, Usurp Flame only while you are staggered and Waxed (never on your revive).
+ * At an ally, only Usurp Flame, as the Warden's: one staggered while Waxed, or a waxed cradling its flame.
+ */
+export function foeCanTarget(skill: SkillId, self: Enemy, target: Fighter, state: CombatState): boolean {
+  const sk = SKILLS[skill];
+  const p = state.player;
+  if (target === p || target.id === p.id) {
+    if (p.reviving || (sk.close && self.line !== "front") || (sk.far && self.line !== "back")) return false;
+    if (sk.aim === "waxed") return p.waxed;
+    if (sk.aim === "usurpable") return p.staggered && p.waxed;
+    return true;
+  }
+  const ally = target as Enemy;
+  if (sk.aim !== "usurpable" || ally.id === self.id || !ally.alive) return false;
+  return (ally.staggered && ally.waxed) || cradling(ally);
+}
+
+/** Whom an enemy's skill can be aimed at now: `"player"` (first, if it can), then the ids of the allies it can. */
+export const foeTargetsOf = (state: CombatState, self: Enemy, skill: SkillId): string[] => [
+  ...(foeCanTarget(skill, self, state.player, state) ? [state.player.id] : []),
+  ...state.enemies.filter(e => e.id !== self.id && foeCanTarget(skill, self, e, state)).map(e => e.id),
+];
+
+/** Whether an enemy can make this skill now: its weapon gives it, and there is someone to aim it at. */
+export const foeCanUse = (state: CombatState, self: Enemy, skill: SkillId) => foeHasSkill(self, skill) && foeTargetsOf(state, self, skill).length > 0;
 
 /** The enemies a skill can be aimed at now (a Rest's, Reap: you, so it can always be made). */
 export const targetsOf = (s: CombatState, skill: SkillId) => s.enemies.filter(e => canTarget(skill, e));

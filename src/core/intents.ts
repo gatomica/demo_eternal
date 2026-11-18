@@ -4,6 +4,7 @@
 import { ENEMY_KINDS, type KindId } from "./bestiary";
 import { isAvailable, needsHold } from "./conditions";
 import { type ActionDef, choose } from "./patterns";
+import { foeTargetsOf, SKILLS } from "./skills";
 import type { ActionType, CombatState, Enemy, Intent, Line, Rng } from "./types";
 
 /** The intent for an enemy of this kind doing this action, shown in this stance (or none). */
@@ -17,7 +18,15 @@ export function describeAction(kindName: KindId, line: Line, stance: string | un
     pose: stance ? kind.stancePoses[stance] ?? poses?.act : poses?.act,
     actPose: poses?.act, strikePose: poses?.strike, projectile: poses?.projectile, restPose: poses?.rest, windupPose: (stance && poses?.windupFrom?.[stance]) || poses?.windup, guardPose: poses?.guard, afterPose: poses?.after, prepPose: poses?.prep, landPose: poses?.land, dodgeDash: poses?.dash, leap: poses?.leap, landSlide: poses?.slide,
     weight: a.weight, like: a.like, mods: a.mods, ranged: a.ranged || undefined, tags: a.tags.length ? a.tags : undefined,
+    ...(a.skill ? skillIntent(a) : {}),
   };
+}
+
+/** What a skill brings to its action's intent: the skill, and its range and Area (a Flame Blast is a ranged Area attack, as yours is). */
+function skillIntent(a: ActionDef): Partial<Intent> {
+  const sk = SKILLS[a.skill!];
+  const tags = sk.area && !a.tags.includes("area") ? [...a.tags, "area"] : a.tags;
+  return { skill: a.skill, ranged: a.ranged || sk.ranged || undefined, tags: tags.length ? tags : undefined };
 }
 
 /**
@@ -51,7 +60,13 @@ function chooseIntent(e: Enemy, state: CombatState, rng: Rng): Intent {
   e.stanceHistory = [...(e.stanceHistory ?? []), picked.stance.name].slice(-16);
   const intent = describe(picked.stance.name, picked.action);
   // Some actions are aimed at an ally: a Maneuver moves toward them, which pushes you away; an attack strikes them instead of you.
-  const target = kind.aim?.(e, state, picked.action.name, rng);
+  // (a skill: at you if it can be, else at an ally it can be aimed at, even odds; Usurp Flame at a waxed cradling its flame)
+  const skillTarget = () => {
+    const ids = foeTargetsOf(state, e, picked.action.skill!);
+    if (!ids.length || ids[0] === state.player.id) return undefined;
+    return ids[Math.floor(rng() * ids.length)];
+  };
+  const target = picked.action.skill ? skillTarget() : kind.aim?.(e, state, picked.action.name, rng);
   if (target && target !== "player") {
     intent.target = target;
     if (picked.action.type === "maneuver") intent.dir = "retreat";

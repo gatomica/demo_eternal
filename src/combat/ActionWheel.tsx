@@ -23,7 +23,7 @@
 import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { pointedLine, polar, R_IN, R_OUT, RingFade, RingLines } from "../render/ring";
 import { blowShares, bothHands, dualWielding, type HeldWeapon, heldStats, STAGGERED_FATIGUE, WEAPONS, type WeaponStats } from "../core/rules";
-import { BootIcon, GearIcon, GearSprite } from "../explore/GearIcons";
+import { BootIcon, ForearmsIcon, GearIcon, GearSprite } from "../explore/GearIcons";
 import type { SubSlot, Wheel, WheelLook, WheelOption } from "./selection";
 import type { Dir } from "../ui/input";
 import { Kbd } from "../ui/Kbd";
@@ -106,6 +106,7 @@ function Picture({ look, at, style }: { look: WheelLook; at: [number, number]; s
     <foreignObject x={at[0] - PICTURE / 2} y={at[1] - PICTURE / 2} width={PICTURE} height={PICTURE} className="wheel-picture" style={style}>
       <div className={`wheel-picture-box ${both ? "is-both" : ""}`}>
         {look.kind === "kick" ? <BootIcon />
+          : look.kind === "forearms" ? <ForearmsIcon />
           : look.kind === "weapon" ? <HandPicture held={look} side={look.side} />
           : dual ? <>
             <span className="wheel-both-piece is-cross-right"><HandPicture held={look.right} side="right" /></span>
@@ -122,7 +123,7 @@ function Picture({ look, at, style }: { look: WheelLook; at: [number, number]; s
 
 /** The weapon stats an option's bar is drawn from: its weapon's, bare hands' for the Kick, both hands' together for a two-handed one. */
 const statsOf = (look: WheelLook): WeaponStats =>
-  look.kind === "kick" ? WEAPONS.baseline : look.kind === "both" ? bothHands(look.right, look.left) : heldStats(look);
+  look.kind === "kick" || look.kind === "forearms" ? WEAPONS.baseline : look.kind === "both" ? bothHands(look.right, look.left) : heldStats(look);
 
 /** An arc of the bar's circle, clockwise from one angle to another. */
 function barArc(from: number, to: number): string {
