@@ -5,7 +5,7 @@ import { drawLostString } from "../render/lostString";
 import { ENEMY_KINDS, type KindId } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, EnemySetup, HeadItem, WeaponItem, WeaponTier } from "../core/types";
 import { paintSealed } from "./props";
-import { drawBlobSprite, drawSprite, drawWardenSprite, UNITS_PER_TILE } from "./sprites";
+import { drawBlobSprite, drawDeadWardenSprite, drawSprite, drawWardenSprite, UNITS_PER_TILE } from "./sprites";
 import { COLORS } from "./tuning";
 import type { Dir } from "./world";
 
@@ -155,7 +155,7 @@ export function drawWalker(
       seg(GRIP, 0.032, at(-0.04), at(0.06));
       // (A crescent moon: its two tips on the handle's line, the arch bulging out to the side.)
       fill("#8f93a3", [at(0.06, 0), at(0.065, -0.06), at(0.09, -0.115), at(0.13, -0.14), at(0.17, -0.115), at(0.195, -0.06), at(0.2, 0), at(0.185, -0.055), at(0.165, -0.1), at(0.13, -0.122), at(0.095, -0.1), at(0.075, -0.055)]);
-    } else if (tier === "light") { // the Jagged Chisel: a broad short sword snapped off and ground square
+    } else if (tier === "light") { // the Broken Shortsword: a broad short sword snapped off and ground square
       seg(GRIP, 0.035, at(-0.04), at(0.02));
       seg("#5e9a78", 0.03, at(0.02, -0.04), at(0.02, 0.04));
       fill("#5e9a78", [at(0.03, -0.028), at(0.135, -0.028), at(0.145, -0.018), at(0.145, 0.028), at(0.03, 0.028)]);
@@ -648,7 +648,8 @@ export const MAP_REMAINS: Record<KindId, (g: CanvasRenderingContext2D, x: number
   blobRight: () => {},
   blobLeftHammer: () => {},
   blobRightHammer: () => {},
-  warden: drawCloakRemains,
+  // (her 3D figure as the fight leaves her; the flat cloak only until its picture is ready)
+  warden: (g, x, y, T) => { if (!drawDeadWardenSprite(g, x, y, T)) drawCloakRemains(g, x, y, T); },
   guide: drawGuideRemains,
 };
 

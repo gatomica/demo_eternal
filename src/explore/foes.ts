@@ -142,7 +142,7 @@ export const MAP_FOES: MapFoe[] = [
   // The labyrinth (level 0).
   // At the entrance of the north room's corridor, where it leaves the ring's north side.
   { id: "wax-north", kind: "waxed", home: { x: 26.5, y: 11.5, z: 0 }, fight: [{ kind: "waxed" }] },
-  // Inside the little east room: a waxed with a Jagged Chisel (it drops an ordinary one).
+  // Inside the little east room: a waxed with a Broken Shortsword (it drops an ordinary one).
   { id: "wax-east", kind: "waxedChisel", home: { x: 38, y: 17.5, z: 0 }, fight: [{ kind: "waxedChisel" }] },
   // At the west junction, where the ring's west side meets the corridor into the shaft room.
   { id: "wax-west", kind: "waxed", home: { x: 21.5, y: 18.5, z: 0 }, fight: [{ kind: "waxed" }] },

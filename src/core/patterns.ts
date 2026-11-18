@@ -25,8 +25,8 @@
  *   weapon modifiers of its own (`poise N`, `deadly N`, `light N`, `defense N`, shares of max health: over its `like` weapon, or over none), `ranged`, a Maneuver direction
  *   (`advance` closes in on you, `retreat` backs off, `by-line` does whichever its line calls
  *   for), `*Condition` (only available while that condition holds; `*!Condition` while it
- *   doesn't; several must all hold; `*A or *B` holds while either does), and `#tag` (a rule it triggers, e.g. `#waxing`: a direct
- *   hit leaves the target Waxed). Conditions: see conditions.ts.
+ *   doesn't; several must all hold; `*A or *B` holds while either does), and `#tag` (a rule it triggers, e.g. `#area`: an Area
+ *   attack; `#fire`: flames lick what it hits). Conditions: see conditions.ts.
  * - A stance line is `Comes from > Stance > Leads to`.
  *   - Comes from: action names (and `Recover`, or an event the kind declares, like the Warden's
  *     `Second Phase`: right after he enters it) separated by `/` or `,`, or `All`.

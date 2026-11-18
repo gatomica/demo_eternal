@@ -31,7 +31,11 @@ const WISP = Array.from({ length: WISPS }, (_, i) => ({
  * A stream of wisps: from `from` to `to` (screen pixels in the scene), starting `at` ms after the canvas is drawn. `peak`: they arch up through the air
  * first, as high as this (a screen y), and come down to `to` from above, as the old 2D Usurp Flame's trail of fire arched over him; without it, they go straight.
  */
-export interface WispRoute { from: Pt; to: Pt; at?: number; peak?: number }
+export interface WispRoute {
+  from: Pt; to: Pt; at?: number; peak?: number;
+  /** `to` is where this marker inside a figure (`data-fire-anchor`: the player's torch's bulb) really is on the screen, found every frame (`to` until it is). */
+  toAnchor?: string;
+}
 
 /**
  * The line a route's wisps wind round: straight, or arched (a curve whose highest point is `peak`, never below either end). Its point and its direction
@@ -73,9 +77,10 @@ export function WispStreams({ routes, ms, count = WISPS }: { routes: WispRoute[]
       g.lineJoin = "round";
       g.shadowColor = "rgba(255, 40, 30, 0.85)";
       g.shadowBlur = 6;
-      for (const { from, to, at: begin = 0, peak } of routes) {
+      for (const { from, to: given, at: begin = 0, peak, toAnchor } of routes) {
         const p = (Math.max(0, now - start) - begin) / ms;
         if (p <= 0 || p >= 1.3) continue;
+        const to = toAnchor ? anchorOn(cv, toAnchor) ?? given : given;
         const line = routeLine(from, to, peak), len = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1;
         // (how far wide of the line the widest wisp goes: a share of the distance, but never too little to see when they are close; narrower round an arch,
         // so the arch reads)
@@ -102,12 +107,20 @@ export function WispStreams({ routes, ms, count = WISPS }: { routes: WispRoute[]
   return <canvas ref={canvas} className="usurp-wisps" aria-hidden="true" />;
 }
 
+/** Where a figure's `data-fire-anchor` marker is, in the canvas's pixels (the canvas covers the scene), if it is drawn. */
+function anchorOn(cv: HTMLCanvasElement, name: string): Pt | undefined {
+  const mark = cv.parentElement?.querySelector(`[data-fire-anchor="${CSS.escape(name)}"]`);
+  if (!mark) return undefined;
+  const r = mark.getBoundingClientRect(), c = cv.getBoundingClientRect();
+  return [r.left + r.width / 2 - c.left, r.top + r.height / 2 - c.top];
+}
+
 /**
- * `from` (screen pixels in the scene) to `to`: the flame taken, and the hand taking it. `ms`: how long the wisps take from leaving the flame to reaching the hand.
+ * `from` (screen pixels in the scene) to `to`: the flame taken, and the hand taking it (`toAnchor`: a marker to fly into instead, see `WispRoute`). `ms`: how long the wisps take from leaving the flame to reaching the hand.
  * `peak`: they fly up first, as high as this (a screen y: above the Warden's head), then come down to the hand. A canvas over the whole scene.
  */
-export function UsurpWisps({ from, to, ms, peak }: { from: Pt; to: Pt; ms: number; peak?: number }) {
-  return <WispStreams routes={[{ from, to, peak }]} ms={ms} />;
+export function UsurpWisps({ from, to, ms, peak, toAnchor }: { from: Pt; to: Pt; ms: number; peak?: number; toAnchor?: string }) {
+  return <WispStreams routes={[{ from, to, peak, toAnchor }]} ms={ms} />;
 }
 
 /**

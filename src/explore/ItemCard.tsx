@@ -53,14 +53,14 @@ export function cardOfGear(g: GearSpec): CardInfo {
   const effect = !WEAPON_EFFECTS && g.slot === "weapon" ? undefined : base && !g.eternal ? `${base} Not eternal: paid in Death.` : base;
   const note = !dreams ? "Its dreams are unread." : g.eternal && !lore && !effect ? "Its dreams are faint." : undefined;
   // (A weapon's skills show once its dreams are read, as its lore does.)
-  const skills = g.slot === "weapon" && dreams ? skillsOfWeapon(g.item as WeaponItem | undefined) : [];
+  const skills = g.slot === "weapon" && dreams ? skillsOfWeapon({ tier: g.tier as WeaponTier, item: g.item as WeaponItem | undefined }) : [];
   return { slot: g.slot, tier: g.tier, item: g.item, name: gearName(g), type: typeOf(g.slot, g.tier), lore, effect, note, ...(g.slot !== "weapon" ? { weight: pieceWeight(g) } : { defense: defenseOf(g.tier, g.item as WeaponItem | undefined), skills }) };
 }
 
 /** The card of a starting class's own piece (always eternal). */
 export function cardOfItem(id: ItemId): CardInfo {
   const info = ITEMS[id];
-  return { slot: info.slot, tier: info.tier, item: id, name: info.name, type: typeOf(info.slot, info.tier), lore: info.lore, effect: info.slot === "weapon" && WEAPON_EFFECTS ? info.effect : undefined, ...(info.slot !== "weapon" ? { weight: info.weight } : { defense: defenseOf(info.tier, id as WeaponItem), skills: skillsOfWeapon(id as WeaponItem) }) };
+  return { slot: info.slot, tier: info.tier, item: id, name: info.name, type: typeOf(info.slot, info.tier), lore: info.lore, effect: info.slot === "weapon" && WEAPON_EFFECTS ? info.effect : undefined, ...(info.slot !== "weapon" ? { weight: info.weight } : { defense: defenseOf(info.tier, id as WeaponItem), skills: skillsOfWeapon({ tier: info.tier as WeaponTier, item: id as WeaponItem }) }) };
 }
 
 /**

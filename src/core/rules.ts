@@ -41,7 +41,7 @@ export type WeaponSubtype = "pole";
 /** By weight, the weapon of that weight in this demo (`name`; its eternal version is "Eternal <name>") and its stats. Bare hands are the Kick's too. */
 export const WEAPONS: Record<WeaponTier, WeaponStats & { weight: number; label: string; name: string }> = {
   baseline: { weight: 0, poise: 0, deadly: 0, light: 0.1, defense: 0.2, label: "None", name: "Bare hands" },
-  light:  { weight: 0.5, poise: 0, deadly: 0.2, light: 0.1, defense: 0.25, label: "Light", name: "Jagged Chisel" },
+  light:  { weight: 0.5, poise: 0, deadly: 0.2, light: 0.1, defense: 0.25, label: "Light", name: "Broken Shortsword" },
   normal: { weight: 1, poise: 0.2, deadly: 0, light: 0.1, defense: 0.25, label: "Normal", name: "Waxed Torch" },
   heavy:  { weight: 1.5, poise: 0.1, deadly: 0, light: 0, defense: 0.5, label: "Heavy", name: "Brick Hammer", subtype: "pole" },
 };
@@ -82,15 +82,27 @@ export function blowShares(w: WeaponStats, twoHanded = false): { cost: number; d
   return { cost: Math.max(0, cost + w.poise + w.deadly - 2 * w.light), damage: Math.max(0, damage - w.light), poise: w.poise, deadly: w.deadly };
 }
 
-/** A hand's weapon, as the wheel and the rules name it: its weight ("baseline": empty) and which class's own it is. */
-export interface HeldWeapon { tier: WeaponTier; item?: WeaponItem }
+/**
+ * A hand's weapon, as the wheel and the rules name it: its weight ("baseline": empty), which class's own it is, and whether it is a Waxed Torch
+ * that is Flaming (see `flamed`).
+ */
+export interface HeldWeapon { tier: WeaponTier; item?: WeaponItem; flaming?: boolean }
+
+/**
+ * A Flaming Waxed Torch (lit by Usurp Flame, until the fight ends or its Flame Blast spends it): its Poise and Deadly swap places, so the torch's
+ * 0.2 Poise becomes 0.2 Deadly.
+ */
+export const flamed = (w: WeaponStats): WeaponStats => ({ ...w, poise: w.deadly, deadly: w.poise });
+
+/** A held weapon's stats: its own (`weaponOf`), Flaming or not. */
+export const heldStats = (h: HeldWeapon): WeaponStats => (h.flaming ? flamed(weaponOf(h.tier, h.item)) : weaponOf(h.tier, h.item));
 
 /**
  * The weapon both hands make together, for an Attack or Block made with both: two weapons' stats averaged (Poise, Deadly, Light and Defense alike);
  * a weapon and an empty hand, that weapon's own (the free hand joins it on the grip); both empty, bare hands'.
  */
 export function bothHands(right: HeldWeapon, left: HeldWeapon): WeaponStats {
-  const r = right.tier !== "baseline" ? weaponOf(right.tier, right.item) : null, l = left.tier !== "baseline" ? weaponOf(left.tier, left.item) : null;
+  const r = right.tier !== "baseline" ? heldStats(right) : null, l = left.tier !== "baseline" ? heldStats(left) : null;
   if (!r || !l) return r ?? l ?? WEAPONS.baseline;
   return { poise: (r.poise + l.poise) / 2, deadly: (r.deadly + l.deadly) / 2, light: (r.light + l.light) / 2, defense: (r.defense + l.defense) / 2 };
 }
@@ -151,6 +163,25 @@ export const DODGE_BASE = 8;
 /** A blocked melee blow tires its attacker by this many times the damage that came through the Block. */
 export const BLOCK_SENDS_BACK = 2;
 
+
+/**
+ * Fatigue put on a fighter already staggered (its bar pinned at full) is not lost: this share of it is dealt as damage instead (a weapon's Poise, the
+ * share of a blow its armor turns into Fatigue, a skill's Fatigue...).
+ */
+export const STAGGERED_FATIGUE = 1 / 2;
+
+/**
+ * Death decays before every turn is planned (the last beat of the turn before): half of it is lost (`DEATH_DECAY.share`), but never less than `least` (raw Health, not a share: all of it,
+ * when there is less), and half of what is lost (`DEATH_DECAY.damage`) is dealt as damage, which no armor stops (see `deathDecay`).
+ */
+export const DEATH_DECAY = { share: 1 / 2, least: 0.5, damage: 1 / 2 } as const;
+
+/** What a fighter's Death would lose to its decay at the start of a turn (see `DEATH_DECAY`), and the damage that deals. */
+export function deathDecay(death: number): { lost: number; damage: number } {
+  if (death <= 1e-9) return { lost: 0, damage: 0 };
+  const lost = Math.min(death, Math.max(DEATH_DECAY.least, death * DEATH_DECAY.share));
+  return { lost, damage: lost * DEATH_DECAY.damage };
+}
 
 /** Rest clears this much Fatigue. */
 export const REST_CLEARS = 8;

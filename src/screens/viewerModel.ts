@@ -260,6 +260,13 @@ export interface PlayerScenario {
   foeLine?: Line;
   /** A weapon skill (made with the hand `punch` says): only offered while that hand holds a weapon that has it. */
   skill?: SkillId;
+  /** Played with Reap holding the axe up in both hands (`Player.reaping`): the hand that holds it. */
+  reaping?: Side;
+  /** Played with the Waxed Torch in this hand Flaming (for its Flame Blast). */
+  flaming?: Side;
+  /** The dummy is Waxed (for Chisel), and staggered while Waxed, sealed in wax (for Usurp Flame), so the skill can be made at it. */
+  foeWaxed?: boolean;
+  foeStaggered?: boolean;
   /** Made with both hands (the hand that leads it is worked out from what they hold: `bothHandsLead`). */
   both?: boolean;
 }
@@ -278,7 +285,7 @@ export const heldOf = (pick: HeldPick): { weapon: WeaponTier; weaponItem?: Weapo
   isItem(pick) ? { weapon: ITEMS[pick].tier as WeaponTier, weaponItem: pick } : { weapon: pick };
 /** The skills the weapons in your hands give you, each with its hand (the right hand's first). */
 export const heldSkills = (right: HeldPick, left: HeldPick): { skill: SkillId; hand: Side }[] =>
-  ([["right", right], ["left", left]] as const).flatMap(([hand, pick]) => skillsOfWeapon(heldOf(pick).weaponItem).map(skill => ({ skill, hand })));
+  ([["right", right], ["left", left]] as const).flatMap(([hand, pick]) => skillsOfWeapon(heldWeapon(pick)).map(skill => ({ skill, hand })));
 
 /**
  * An attack's name in the viewer: a sideways swing from a leading stance is an Openhand Swing (a Swing Left, or the left hand's mirror of it) or a
@@ -310,8 +317,20 @@ export function playerScenariosFrom(stance: PlayerViewStance, skills: { skill: S
   }
   // The skills of the weapons you hold (Stab, while a hand holds the Bronze Shortsword), each with its hand.
   for (const { skill, hand } of skills) {
+    const named = (name: string) => (hand === "left" ? `${name}, left hand` : name);
+    const sk = SKILLS[skill], foe = { ...(sk.aim ? { foeWaxed: true } : {}), ...(sk.aim === "usurpable" ? { foeStaggered: true } : {}) };
+    // Reap: its Rest, and the attack it readies (the axe held up in both hands, at every Close enemy).
+    if (skill === "reap") {
+      attacks.push(
+        { id: `skill-reap-${hand}`, label: named("Reap"), action: { type: "rest", target: "self" }, foe: "rest", skill, punch: hand === "left" },
+        { id: `skill-reap-attack-${hand}`, label: named("Reap's attack"), action: { type: "attack", target: "foe" }, foe: "rest", both: true, reaping: hand },
+      );
+      continue;
+    }
+    // (a Waxed Torch's Flame Blast, once Usurp Flame has set it Flaming)
+    if (skill === "usurp") attacks.push({ id: `skill-flameblast-${hand}`, label: named("Flame Blast (Flaming)"), action: { type: "attack", target: "foe" }, foe: "rest", punch: hand === "left", skill: "flameblast", flaming: hand });
     // (one that reaches only Far, the Hookshot, at a dummy on the back line)
-    attacks.push({ id: `skill-${skill}-${hand}`, label: hand === "left" ? `${SKILLS[skill].name}, left hand` : SKILLS[skill].name, action: { type: "attack", target: "foe" }, foe: "rest", punch: hand === "left", skill, ...(SKILLS[skill].far ? { foeLine: "back" as Line } : {}) });
+    attacks.push({ id: `skill-${skill}-${hand}`, label: hand === "left" ? `${SKILLS[skill].name}, left hand` : SKILLS[skill].name, action: { type: "attack", target: "foe" }, foe: "rest", punch: hand === "left", skill, ...foe, ...(SKILLS[skill].far ? { foeLine: "back" as Line } : {}) });
   }
   // Both hands: two weapons swung at once (each its own way), or one held in both, or both fists clasped.
   attacks.push({ id: "both", label: "Both hands", action: { type: "attack", target: "foe" }, foe: "rest", both: true });
@@ -345,6 +364,7 @@ export const playerActionOf = (sc: PlayerScenario, right: HeldPick = "baseline",
   ...(sc.both ? { both: true as const, hand: bothHandsLead(heldWeapon(right), heldWeapon(left)) } : {}),
   ...(sc.kick ? { weight: "baseline" as const, kick: sc.kick } : {}),
   ...(sc.skill ? { skill: sc.skill } : {}),
+  ...(sc.skill && SKILLS[sc.skill].type === "rest" ? { hand: (sc.punch ? "left" : "right") as Side } : {}),
 });
 
 /** The armor and head gear the viewer puts on you: the starting classes' own pieces, worn (none: plain armor of the picked tier, bare-headed). */
@@ -372,7 +392,10 @@ export function applyPlayerShow(s: CombatState, weapon: HeldPick, armor: ArmorTi
   const right = heldOf(weapon);
   v.player.weapon = right.weapon;
   v.player.weaponItem = right.weaponItem;
-  v.player.offhand = heldOf(offWeapon);
+  v.player.offhand = { ...heldOf(offWeapon), flaming: scenario?.flaming === "left" || undefined };
+  v.player.flaming = scenario?.flaming === "right" || undefined;
+  v.player.reaping = scenario?.reaping;
+  v.player.lastBoth = scenario?.reaping;
   // What you wear: a class's own armor (its tier is the item's) or plain armor of a tier, and its head gear (or none).
   v.player.armorItem = wear.armor;
   v.player.armor = wear.armor ? (ITEMS[wear.armor].tier as ArmorTier) : armor;
@@ -391,6 +414,8 @@ export function applyPlayerShow(s: CombatState, weapon: HeldPick, armor: ArmorTi
   e.reviving = false;
   e.hp = e.maxHP;
   e.fatigue = 0;
+  e.waxed = !!scenario?.foeWaxed;
+  if (scenario?.foeStaggered) { e.staggered = true; e.fatigue = e.hp; }
   e.line = scenario?.foeLine ?? "front";
   const strike = scenario?.foe === "strike";
   const foeStance = strike ? "Charging" : "Struggling";

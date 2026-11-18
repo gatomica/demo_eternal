@@ -24,8 +24,14 @@ export type Prim =
    * at one end of it); none: that middle.
    */
   | { k: "poly"; pts: V3[]; color: string; marks?: { pts: V3[]; w: number; color: string }[]; seamless?: boolean; out?: V3; at?: V3 }
-  /** A thick line with round ends: a haft, a bar, `r` the radius. */
-  | { k: "line"; a: V3; b: V3; r: number; color: string }
+  /**
+   * A thick line with round ends: a haft, a bar, `r` the radius. `flat`: which of its ends (at `a`, at `b`) are cut flat across instead, where it meets
+   * another rod end to end, as the limbs' cut ends are: it stops square and the ellipse of the circle across it is laid over its end, in its own colour;
+   * the nearer rod is drawn over the other. `edgeless`: no outline (it melds into what it
+   * meets in its own colour, a round end into another's in a single round point). `whole`: drawn as one shape, not in pieces (a short rod that passes
+   * nothing along its length: the axe's post).
+   */
+  | { k: "line"; a: V3; b: V3; r: number; color: string; flat?: [boolean, boolean]; edgeless?: boolean; whole?: boolean }
   /** A cylinder from `a` to `b`, `r` the radius: straight sides and flat ends (a grip). */
   | { k: "cyl"; a: V3; b: V3; r: number; color: string; edgeless?: boolean }
   /** An ellipsoid with these half-sizes along x, y and z: drawn as the ellipse it looks like from where it is seen. */
@@ -33,7 +39,23 @@ export type Prim =
   /** A flat circle, its normal `n`: a stamp, a wrap round a haft (`ring`: only its outline, that wide). */
   | { k: "disc"; c: V3; n: V3; r: number; color: string; ring?: number; edgeless?: boolean }
   /** A thin line lying on a face: cord, a crack, a fuller, a streak. */
-  | { k: "stroke"; pts: V3[]; w: number; color: string };
+  | { k: "stroke"; pts: V3[]; w: number; color: string }
+  /**
+   * A face whose edges are true curves: from `start`, along each piece in turn, a straight line (`to`) or an arc of an ellipse (`on`, from one angle
+   * to another), back to `start`. Each arc is drawn as smooth curves (not a run of points), found on the ellipse in 3D and put on the page through the
+   * view (see `drawGear`): a blade's curved edges. `out`, `at` and `seamless` as a `poly`'s.
+   */
+  | { k: "curved"; start: V3; segs: Seg[]; color: string; seamless?: boolean; out?: V3; at?: V3 };
+
+/**
+ * An ellipse in weapon space: centre `c` and two half-axes `u`, `v` (conjugate: any two, square or not, that sweep it), its points c + u cos θ + v sin θ.
+ * Lying in a slanted plane, it is still one (a blade's side that thins to nothing at its point).
+ */
+export interface Ell { c: V3; u: V3; v: V3 }
+/** One piece of a `curved` face's edge: a straight line to a point, or an arc of an ellipse from angle `from` to angle `to` (radians). */
+export type Seg = { to: V3 } | { on: Ell; from: number; to: number };
+/** A point on an ellipse, at angle `a`. */
+export const ellAt = (e: Ell, a: number): V3 => [0, 1, 2].map(i => e.c[i] + e.u[i] * Math.cos(a) + e.v[i] * Math.sin(a)) as unknown as V3;
 
 export interface GearModel {
   id: string;
@@ -57,6 +79,8 @@ export interface GearModel {
    * striking ends, the torch's side with the mark carved in it. None: it has no side to strike with, and it is held as it always was.
    */
   edge?: V3;
+  /** Another form of a weapon (`scythe`: the Barbarian's Axe with its joint straightened, held so while Reap lasts), not the one a hand holds by default. */
+  form?: "scythe";
   /** A line about it, for the viewer. */
   note: string;
   prims: Prim[];
@@ -134,7 +158,7 @@ function seeded(seed: number): () => number {
  * ============================================================ */
 
 /**
- * The Jagged Chisel (light), in bronze: a ball pommel and a plain cylinder of a grip, an oval guard, and a broad blade, nicked along its edges, that stops
+ * The Broken Shortsword (light), in bronze: a ball pommel and a plain cylinder of a grip, an oval guard, and a broad blade, nicked along its edges, that stops
  * where it is broken off: it does not sharpen to a tip, and its end is a flat cut that shows its diamond section, filled with wax.
  *
  * The blade is a solid with flat faces and sharp edges: on each side of it, two flat strips run from its middle line (the ridge, where it is thickest)
@@ -305,7 +329,7 @@ function torchParts(): Prim[] {
 }
 
 /**
- * The Bronze Shortsword (the Soldier's): the Jagged Chisel made whole, its base: the same ball pommel, plain cylinder of a grip and oval guard, and the
+ * The Bronze Shortsword (the Soldier's): the Broken Shortsword made whole, its base: the same ball pommel, plain cylinder of a grip and oval guard, and the
  * same blade of flat strips from a middle ridge down to sharp side edges, but clean (no nicks, no wax) and long, running on past where the chisel's breaks
  * off and narrowing at its end, ridge and edges together, to a point.
  *
@@ -336,95 +360,135 @@ function shortsword(): Prim[] {
 }
 
 /**
- * The Nomadic Sickle's crescent, in the sickle's own space (the handle along x, the collar at x = 6): the blade's two curves and its thickness. The
- * Barbarian's Axe wears the same crescent as its edge, so both are made here.
- *
- * Its middle line is an arch from the collar (going straight up from it) over to near the far end of the moon's curve. The sickle's is `W` across at
- * the collar, narrowing all the way to nothing at its point; with `thickEnds` (the axe's) it keeps its full width and thickness all the way, and ends
- * in a flat cut at both ends. `back` is its outer, rounded curve, `edge` its inner, hollow one, both from the collar (index 0) to the far end (index
- * `N`). `thick(i)` is half its thickness along `back` there.
+ * A blade's side that thins from `T` (half its thickness, at angle `thick`) to nothing (at angle `thin`), along an ellipse in the weapon's flat plane
+ * (centre `cx`, `cy`, half-sizes `rx`, `ry`): the ellipse raised out of that plane by a slant, so it is still one ellipse, `sgn` the side (+z or -z).
+ * Its thickness at each point is a straight share of how far along it is in x, from the thin end to the thick one.
  */
-function crescent(thickEnds = false): { back: P2[]; edge: P2[]; thick: (i: number) => number; T: number; N: number } {
-  const W = 2.6, N = 32, A0 = Math.PI, A1 = 0.06, T = 0.6;
-  const mid = (t: number): P2 => [12.9 + 6.9 * Math.cos(t), 8.6 * Math.sin(t)];
-  const out = (t: number): P2 => { const n: P2 = [Math.cos(t) / 6.9, Math.sin(t) / 8.6], l = Math.hypot(...n); return [n[0] / l, n[1] / l]; };
-  const ts = Array.from({ length: N + 1 }, (_, i) => A0 + ((A1 - A0) * i) / N);
-  const taper = (i: number) => (thickEnds ? 1 : 1 - i / N);
-  const side = (k: 1 | -1) => ts.map((t, i) => {
-    const w = (W / 2) * taper(i) ** 0.85, m = mid(t), n = out(t);
-    return [m[0] + k * n[0] * w, m[1] + k * n[1] * w] as P2;
+function slanted(cx: number, cy: number, rx: number, ry: number, thin: number, thick: number, T: number, sgn: number): Ell {
+  // z = a + b x along it, none at the thin end's x, T at the thick end's; x = cx + rx cos θ.
+  const x0 = cx + rx * Math.cos(thin), x1 = cx + rx * Math.cos(thick), b = (sgn * T) / (x1 - x0), a = -b * x0;
+  return { c: [cx, cy, a + b * cx], u: [rx, 0, b * rx], v: [0, ry, 0] };
+}
+
+/** An ellipse lying in the weapon's flat plane (z = 0): a sharp edge. */
+const flat = (cx: number, cy: number, rx: number, ry: number): Ell => ({ c: [cx, cy, 0], u: [rx, 0, 0], v: [0, ry, 0] });
+
+/**
+ * The Barbarian's Axe: a long haft of dark wood, one plain rod, and a head on its end, cut off square a haft's radius past the haft's end (`HAFT_END`), flush with its black post. The head is drawn
+ * from true curves (`curved`), every one an arc of the same ellipse's shape, only as tall as it needs (the same centre, straight up from the haft's end,
+ * and the same length along the haft; `AXE_ARCS`), so they all meet at one point toward the grip and the cut takes each at its top: from the top down,
+ * a gray edge, sharp along its outer curve, thick where it meets the black; a black band, four times as wide; and a second gray edge, the first turned in, sharp
+ * along its inner curve. All three thin to nothing at the point, and each ends at the cut in a flat face. The haft goes on past its end in black iron,
+ * a post as wide, straight up to the black band at the cut; the inner edge stops short of it.
+ */
+/** Where the axe's haft ends, along x: its head is cut off square there (see `axe`). */
+const HAFT_END = 43;
+/**
+ * The axe head's curves: the centre of their ellipse (x, a haft's radius past its end, so the cut is flush with the post's far side and the post lies
+ * wholly under the head; y, above the haft), its half-length along the haft, and the height of each:
+ * the outer edge's sharp curve, where it meets the black, where the black meets the inner edge, and the inner edge's sharp curve. At the cut, each edge is
+ * a quarter as wide as the black (1.05 and 4.2), the whole head as tall as it was. `T`: half its thickness at the cut, the haft's own (as thick as the haft is wide).
+ */
+const AXE_ARCS = { cx: HAFT_END + 1.5, cy: 6.5, rx: 20, outer: 9.65, lip: 8.6, low: 4.4, inner: 3.35, T: 1.5 };
+
+/**
+ * The axe's head, post and all, turned a quarter turn about the corner where the haft meets the post (`scythe`): the joint straightened, the post
+ * carried straight on along the haft and the blade standing square to it, its point out across it (+y), as a scythe's.
+ */
+function straightened(prims: Prim[], pivot: V3): Prim[] {
+  // (a quarter turn about z through the pivot, taking the post's way, +y, onto the haft's, +x)
+  const pt = (q: V3): V3 => [pivot[0] + (q[1] - pivot[1]), pivot[1] - (q[0] - pivot[0]), q[2]];
+  const dir = (d: V3): V3 => [d[1], -d[0], d[2]];
+  const ell = (e: Ell): Ell => ({ c: pt(e.c), u: dir(e.u), v: dir(e.v) });
+  return prims.map((p): Prim => {
+    switch (p.k) {
+      case "poly": return { ...p, pts: p.pts.map(pt), out: p.out && dir(p.out), at: p.at && pt(p.at), marks: p.marks?.map(m => ({ ...m, pts: m.pts.map(pt) })) };
+      case "curved": return { ...p, start: pt(p.start), segs: p.segs.map(g => ("on" in g ? { ...g, on: ell(g.on) } : { to: pt(g.to) })), out: p.out && dir(p.out), at: p.at && pt(p.at) };
+      case "line": case "cyl": return { ...p, a: pt(p.a), b: pt(p.b) };
+      case "ball": return { ...p, c: pt(p.c), rx: p.ry, ry: p.rx };
+      case "disc": return { ...p, c: pt(p.c), n: dir(p.n) };
+      case "stroke": return { ...p, pts: p.pts.map(pt) };
+    }
   });
-  return { back: side(1), edge: side(-1), thick: (i: number) => T * Math.sqrt(taper(i)), T, N };
 }
 
-/**
- * The Barbarian's Axe: a long haft of dark wood, one plain rod, and a head of black iron set on it near the end, the haft showing past it. Its edge is
- * the Nomadic Sickle's crescent (`crescent`), ground gray, but thick at both ends, each a flat cut; set on the head's edge side (+y), its root toward
- * the grip. As an axe's, it is sharp along its outer, rounded curve, where it cuts, and thick along its hollow one, where the black head meets it: its
- * two faces slope from there down to that sharp curve, meeting along all of it. The black head narrows from the crescent's two ends down to a neck
- * on the haft; the neck's foot sits in the haft and has no face of its own.
- *
- * Kept to a few faces, as the sickle is: each broad face is one face however many points its curve runs through.
- */
-function axe(): Prim[] {
-  const { back, edge, thick, N } = crescent(true);
-  // (the crescent moved, not turned or resized: its baseline, the sickle's handle line, `Y0` above the haft, its middle over the head's)
-  const DX = 22.1, Y0 = 6.5, T = 0.8; // (T: half the head's thickness at the neck)
-  const at = ([x, y]: P2, z: number): V3 => [x + DX, y + Y0, z];
-  const lip = edge.map((q, i) => ({ q, t: thick(i) })); // the hollow curve, where the black head meets the crescent, at the crescent's thickness
-  const ROOT = lip[0], END = lip[N];
-  // The black head: its neck against the haft (the sprite's, turned as the old head was), at full thickness, out to the crescent's two ends.
-  const neck: P2[] = [[31.6, 4.7], [33, 1.2], [37, 1.2], [38.4, 4.7]];
-  const W = (q: P2, z: number): V3 => [q[0], q[1], z];
-  // Each broad face: round the neck from the root's end to the far end, and back along the crescent's hollow curve. It is sorted by where the neck
-  // stands on the haft, the top of the haft under its middle: seen from the head's side (from above, the head up) the neck is in front of the haft behind
-  // it, and from the other side the haft is in front of the neck, and that point's depth against the haft's centre line says which. (By the middle of
-  // all its points, mostly up along the crescent, it would be drawn over the haft seen from a little below too, or under it from a little above.)
-  const head: Prim[] = [1, -1].map(sgn => ({ ...facet([
-    at(ROOT.q, sgn * ROOT.t), ...neck.map(q => W(q, sgn * T)), at(END.q, sgn * END.t), ...lip.slice(1, -1).reverse().map(l => at(l.q, sgn * l.t)),
-  ], BLACK_IRON, [0, 0, sgn]), at: [35, 1.5, 0] as V3 }));
-  // Its sides, round the neck from the root's end to the far end: each a band through the thickness. The neck's foot (from its second corner to its
-  // third), down in the haft, has none.
-  const rim: [V3, V3][] = [
-    [at(ROOT.q, ROOT.t), at(ROOT.q, -ROOT.t)], ...neck.map(q => [W(q, T), W(q, -T)] as [V3, V3]), [at(END.q, END.t), at(END.q, -END.t)],
+/** The Barbarian's Axe (`scythe`: in its scythe form, the joint straightened: see `straightened`). */
+function axe(scythe = false): Prim[] {
+  const { cx, cy, rx, outer, lip, low, inner, T } = AXE_ARCS;
+  // (from the point, angle π, to the cut at the top, angle π/2)
+  const P = Math.PI, H = Math.PI / 2;
+  const point: V3 = [cx - rx, cy, 0];
+  const sharp = (ry: number) => flat(cx, cy, rx, ry), side = (ry: number, sgn: number) => slanted(cx, cy, rx, ry, P, H, T, sgn);
+  /**
+   * A band between two of the curves, on one side: out along the first from the point (to the cut, or to angle `end`), across, and back along the second.
+   */
+  const band = (a: Ell, b: Ell, color: string, sgn: number, end = H): Prim => ({
+    k: "curved", start: point, segs: [{ on: a, from: P, to: end }, { to: ellAt(b, end) }, { on: b, from: end, to: P }], color, seamless: true, out: [0, 0, sgn],
+  });
+  const R = 1.5; // the haft's radius
+  // The post: the haft carried on in black iron, a cylinder as wide, from the haft's end straight up (square to it) to the black band's lower curve, where
+  // it meets the cut. The inner edge stops where it would run into it: at the post's near side, toward the grip (`stop`, its angle there).
+  const stop = Math.acos((HAFT_END - R - cx) / rx);
+  // The haft in quarters: black iron at each end, the dark wood between (the middle half), the wood and the iron each cut flat where they meet (the
+  // nearer drawn over). The iron has no outline, so it melds with the black head: the top quarter and the post meet in one round point, both ends round.
+  const BUTT = -6, q1 = BUTT + (HAFT_END - BUTT) / 4, q3 = BUTT + (3 * (HAFT_END - BUTT)) / 4, corner: V3 = [HAFT_END, 0, 0], postTop: V3 = [HAFT_END, cy + low, 0];
+  const haft: Prim[] = [
+    { k: "line", a: [BUTT, 0, 0], b: [q1, 0, 0], r: R, color: BLACK_IRON, flat: [false, true], edgeless: true },
+    { k: "line", a: [q1, 0, 0], b: [q3, 0, 0], r: R, color: DARK_WOOD, flat: [true, true] },
+    { k: "line", a: [q3, 0, 0], b: corner, r: R, color: BLACK_IRON, flat: [true, false], edgeless: true },
   ];
-  const middle: P2 = [35, 5];
-  for (let i = 0; i + 1 < rim.length; i++) {
-    if (i === 2) continue; // (the foot)
-    const [a, a2] = rim[i], [b, b2] = rim[i + 1];
-    head.push(facet([a, b, b2, a2], BLACK_IRON_DARK, [(a[0] + b[0]) / 2 - middle[0], (a[1] + b[1]) / 2 - middle[1], 0]));
+  // (the head, post and all: what turns about the corner in the scythe form)
+  const prims: Prim[] = [
+    // The post: the haft carried on round the corner, from its end straight up (square to it) to the black band's lower curve, where it meets the cut.
+    { k: "line", a: corner, b: postTop, r: R, color: BLACK_IRON, flat: [false, true], edgeless: true, whole: true },
+  ];
+  for (const sgn of [1, -1]) {
+    prims.push(
+      band(sharp(outer), side(lip, sgn), IRON, sgn), // the outer edge
+      band(side(lip, sgn), side(low, sgn), BLACK_IRON, sgn), // the black
+      band(sharp(inner), side(low, sgn), IRON, sgn, stop), // the inner edge, up to the post
+    );
   }
-  // The crescent: each face along its hollow curve at its thickness, and back along its rounded curve at none, sharp; and at each end a flat triangle.
-  const blade: Prim[] = [1, -1].map(sgn => facet([...lip.map(l => at(l.q, sgn * l.t)), ...[...back].reverse().map(q => at(q, 0))], IRON, [0, 0, sgn]));
-  for (const [l, b] of [[ROOT, back[0]], [END, back[N]]] as const) blade.push(facet([at(l.q, l.t), at(l.q, -l.t), at(b, 0)], IRON_DARK, [0, -1, 0]));
-  return [
-    { k: "line", a: [-6, 0, 0], b: [43, 0, 0], r: 1.5, color: DARK_WOOD },
-    ...head,
-    ...blade,
-  ];
+  // The cut, flat, facing the way the haft points: across the outer edge a triangle (its thickness to its sharp curve); across the black a band, that face
+  // alone carried on down the post's far side to the haft's line (as wide as the black is thick there); and where the inner edge stops at the post, a
+  // triangle the same way.
+  const at = (e: Ell, a = H) => ellAt(e, a);
+  const cutX = cx, lipTop = at(side(lip, 1))[1];
+  prims.push(
+    facet([at(sharp(outer)), at(side(lip, 1)), at(side(lip, -1))], IRON_DARK, [1, 0, 0]),
+    facet([[cutX, lipTop, T], [cutX, 0, T], [cutX, 0, -T], [cutX, lipTop, -T]], BLACK_IRON_DARK, [1, 0, 0]),
+    facet([at(sharp(inner), stop), at(side(low, 1), stop), at(side(low, -1), stop)], IRON_DARK, [1, 0, 0]),
+  );
+  return [...haft, ...(scythe ? straightened(prims, corner) : prims)];
 }
 
 /**
- * The Nomadic Sickle: a short handle with a round end, a small round iron collar no wider than the handle, and an iron blade curved like a crescent moon
- * (`crescent`): thickest where it leaves the collar, it arches up and forward and thins steadily to a single point on the handle's line; in section a
- * wedge, its inner edge sharp. The handle goes into the round end and the collar only as far as it must (as the chisel's grip does its pommel and
- * guard): none of its ends shows.
+ * The Nomadic Sickle: a short handle with a round end, a small round iron collar no wider than the handle, and an iron blade curved like a crescent moon:
+ * two arcs of ellipses (`curved`), its outer, back curve and its inner edge, rising from the collar and meeting at a single point on the handle's line;
+ * thickest at the collar, it thins steadily to that point; in section a wedge, its inner edge sharp. The handle goes into the round end and the collar
+ * only as far as it must (as the chisel's grip does its pommel and guard): none of its ends shows.
  */
 function sickle(): Prim[] {
   const R = 1.7, r = 1.3; // the round end, the handle
   const collar = { x: 6, rx: 1.2, ry: r, rz: r }; // (round, no wider than the handle)
   const gripBack = -4.8 + Math.sqrt(R * R - r * r);
   const gripFront = collar.x - collar.rx * Math.sqrt(1 - Math.max((r / collar.ry) ** 2, (r / collar.rz) ** 2));
-  const { back, edge, thick, T } = crescent(); // the outer, back of the blade; the inner, its edge
-  const at = (q: P2, z: number): V3 => [q[0], q[1], z];
-  // Each face one smooth shape (along the back at its thickness, back along the edge at none), and the back one narrow band round the outside of the
-  // curve, drawn under the faces.
+  // The blade's two curves: half-ellipses on the handle's line, from the collar (angle π) to the point they share (angle 0): the back, outside, the edge,
+  // inside it. Its thickness, `T` at the collar, thins along the back to nothing at the point (`slanted`).
+  const TIP = 19.76, T = 0.6, back = { x: 4.7, ry: 9.3 }, edge = { x: 7.3, ry: 7.9 };
+  const arc = (x: number, ry: number) => ({ cx: (x + TIP) / 2, rx: (TIP - x) / 2, ry });
+  const B = arc(back.x, back.ry), E = arc(edge.x, edge.ry), P = Math.PI;
+  const backSide = (sgn: number) => slanted(B.cx, 0, B.rx, B.ry, 0, P, T, sgn), sharpEdge = flat(E.cx, 0, E.rx, E.ry);
   const blade: Prim[] = [
-    facet([...back.map((q, i) => at(q, thick(i))), ...back.map((q, i) => at(q, -thick(i))).reverse()], IRON_DARK),
-    ...[1, -1].map(sgn => facet([...back.map((q, i) => at(q, sgn * thick(i))), ...[...edge].reverse().map(q => at(q, 0))], IRON, [0, 0, sgn])),
+    // The back, one narrow band round the outside of the curve, from one face's side to the other's, drawn under the faces.
+    { k: "curved", start: [back.x, 0, T], segs: [{ on: backSide(1), from: P, to: 0 }, { on: backSide(-1), from: 0, to: P }], color: IRON_DARK, seamless: true },
+    // Each face: along the back at its thickness, back along the edge at none.
+    ...[1, -1].map((sgn): Prim => ({
+      k: "curved", start: [back.x, 0, sgn * T], segs: [{ on: backSide(sgn), from: P, to: 0 }, { on: sharpEdge, from: 0, to: P }], color: IRON, seamless: true, out: [0, 0, sgn],
+    })),
   ];
   // (where it leaves the collar: the root's end, a flat triangle, inside the collar)
-  blade.push(facet([at(back[0], T), at(back[0], -T), at(edge[0], 0)], IRON_DARK, [0, -1, 0]));
+  blade.push(facet([[back.x, 0, T], [back.x, 0, -T], [edge.x, 0, 0]], IRON_DARK, [0, -1, 0]));
   return [
     { k: "ball", c: [-4.8, 0, 0], rx: R, ry: R, rz: R, color: WOOD },
     { k: "cyl", a: [gripBack, 0, 0], b: [gripFront, 0, 0], r, color: WOOD },
@@ -438,11 +502,13 @@ function sickle(): Prim[] {
  * the shortsword's +y edge, the axe's bit (its head stands out along +y), the sickle's inner, hollow edge (toward -y, the handle's line), the torch's side with the carved mark (+y).
  */
 export const GEAR_WEAPONS: GearModel[] = [
-  { id: "chisel", name: "Jagged Chisel", tier: "light", reach: 15, damage: 11.4, edge: [0, 1, 0], grips: { one: 0, two: -3.2 }, note: "Light. Bronze, rusted green: a ridged grip, an oval guard, a broad blade ground square, nicked and chipped, waxed from the carving.", prims: chisel() },
+  { id: "chisel", name: "Broken Shortsword", tier: "light", reach: 15, damage: 11.4, edge: [0, 1, 0], grips: { one: 0, two: -3.2 }, note: "Light. Bronze, rusted green: a ridged grip, an oval guard, a broad blade ground square, nicked and chipped, waxed from the carving.", prims: chisel() },
   { id: "hammer", name: "Brick Hammer", tier: "heavy", reach: 41, damage: 11.5, edge: [0, 1, 0], grips: { one: 20.5, two: -4.5 }, note: "Heavy. A straight haft and a head of bricks, laid in a running bond.", prims: hammer() },
   { id: "torch", name: "Waxed Torch", tier: "normal", reach: 35, damage: 12.4, edge: [0, 1, 0], grips: { one: 3, two: -2 }, note: "Normal. A torch sealed in a bulb of wax, the sealing king's mark carved into it, the wax run down its handle.", prims: torch() },
   { id: "shortsword", name: "Bronze Shortsword", tier: "normal", item: "shortsword", reach: 34, damage: 29.6, edge: [0, 1, 0], grips: { one: 0, two: -3.2 }, note: "The Soldier's. The chisel made whole: a ball pommel, a plain grip, an oval guard and a long ridged blade coming to a point.", prims: shortsword() },
-  { id: "axe", name: "Barbarian's Axe", tier: "heavy", item: "axe", reach: 43, damage: 13, edge: [0, 1, 0], grips: { one: 23, two: -4.5 }, note: "The Barbarian's. A long dark haft, a broad two-lobed head of black iron set on its side, its edge ground gray.", prims: axe() },
+  { id: "axe", name: "Barbarian's Axe", tier: "heavy", item: "axe", reach: 44.5, damage: 13, edge: [0, 1, 0], grips: { one: 23, two: -4.5 }, note: "The Barbarian's. A long dark haft, a broad two-lobed head of black iron set on its side, its edge ground gray.", prims: axe() },
+  // (the axe in its scythe form, Reap's: the joint straightened, the blade square to the haft past its end, its point leading a swing)
+  { id: "scythe", name: "Barbarian's Axe (scythe)", tier: "heavy", item: "axe", form: "scythe", reach: 59, damage: 8, edge: [0, 1, 0], grips: { one: 23, two: -4.5 }, note: "The Barbarian's Axe, its joint straightened by Reap: the head carried straight on past the haft, the blade standing square to it.", prims: axe(true) },
   { id: "sickle", name: "Nomadic Sickle", tier: "light", item: "sickle", reach: 20, damage: 12, edge: [0, -1, 0], grips: { one: 1.8, two: -2.2 }, note: "The Nomad's. A short handle, an iron collar and a crescent blade, thickest at the collar and thinning to its point.", prims: sickle() },
 ];
 
@@ -450,7 +516,10 @@ export type GearId = (typeof GEAR_WEAPONS)[number]["id"];
 
 /** The 3D model of a weapon in the game: a tier, or one of the classes' own. */
 export const modelOfWeapon = (tier: WeaponTier, item?: WeaponItem): GearModel | undefined =>
-  GEAR_WEAPONS.find(m => (item ? m.item === item : !m.item && m.tier === tier));
+  GEAR_WEAPONS.find(m => !m.form && (item ? m.item === item : !m.item && m.tier === tier));
+
+/** The Barbarian's Axe in its scythe form (Reap). */
+export const SCYTHE: GearModel = GEAR_WEAPONS.find(m => m.form === "scythe")!;
 
 /** The box a model fits in (low and high corners), to centre and fit it. */
 export function boundsOf(prims: readonly Prim[]): { lo: V3; hi: V3 } {
@@ -459,6 +528,11 @@ export function boundsOf(prims: readonly Prim[]): { lo: V3; hi: V3 } {
     if (p.k === "poly" || p.k === "stroke") pts.push(...p.pts);
     else if (p.k === "line" || p.k === "cyl") pts.push([p.a[0] - p.r, p.a[1] - p.r, p.a[2] - p.r], [p.b[0] + p.r, p.b[1] + p.r, p.b[2] + p.r]);
     else if (p.k === "ball") pts.push([p.c[0] - p.rx, p.c[1] - p.ry, p.c[2] - p.rz], [p.c[0] + p.rx, p.c[1] + p.ry, p.c[2] + p.rz]);
+    else if (p.k === "curved") {
+      pts.push(p.start);
+      // (an arc: the points along it, every few degrees, are enough to box it)
+      for (const g of p.segs) if ("on" in g) { for (let j = 0; j <= 12; j++) pts.push(ellAt(g.on, g.from + ((g.to - g.from) * j) / 12)); } else pts.push(g.to);
+    }
     else pts.push([p.c[0] - p.r, p.c[1] - p.r, p.c[2] - p.r], [p.c[0] + p.r, p.c[1] + p.r, p.c[2] + p.r]);
   }
   const lo = [0, 1, 2].map(i => Math.min(...pts.map(q => q[i]))), hi = [0, 1, 2].map(i => Math.max(...pts.map(q => q[i])));
@@ -472,14 +546,23 @@ export function boundsOf(prims: readonly Prim[]): { lo: V3; hi: V3 } {
 /** A shape as it is drawn on the page, with how far it is (larger: farther). */
 export type Drawn =
   | { k: "poly"; points: string; fill: string; stroke: string; depth: number }
+  /** A face with curved edges (a `curved` prim): an SVG path of lines and smooth curves (cubic Béziers). */
+  | { k: "path"; d: string; fill: string; stroke: string; depth: number }
   | { k: "cyl"; body: string; sides: [string, string]; far: End; near: End; fill: string; stroke: string; depth: number }
   /**
    * A piece of a rod. `ends`: which of its two ends are the rod's own (round); the others meet the next piece, square, its fill reaching `overlap`
    * past them (on the page) so the pieces join without a seam.
    */
-  | { k: "line"; x1: number; y1: number; x2: number; y2: number; width: number; fill: string; stroke: string; depth: number; ends: [boolean, boolean]; overlap: number }
+  | {
+    k: "line"; x1: number; y1: number; x2: number; y2: number; width: number; fill: string; stroke: string; depth: number; ends: [boolean, boolean]; overlap: number;
+    /** Its ends cut flat across (a rod's `flat`): the ellipse each looks like, laid over that end as a squashed round end is. */
+    cut?: [Cap | undefined, Cap | undefined];
+  }
   | { k: "ellipse"; cx: number; cy: number; rx: number; ry: number; angle: number; fill: string; stroke: string; ring?: number; depth: number }
   | { k: "stroke"; points: string; width: number; color: string; depth: number };
+
+/** A rod's flat-cut end as drawn: the ellipse the circle across it looks like (centre, half-sizes, tilt in degrees). */
+export interface Cap { cx: number; cy: number; rx: number; ry: number; angle: number }
 
 /** One end of a cylinder as drawn: the ellipse a flat circle looks like. `facing`: it turns toward the viewer (we see the end itself, lighter). */
 export interface End { cx: number; cy: number; rx: number; ry: number; angle: number; fill: string; facing: boolean }
@@ -552,17 +635,66 @@ export function drawGear(prims: readonly Prim[], cam: GearView): Drawn[] {
         }
         break;
       }
+      case "curved": {
+        if (p.out && dirOf(p.start, p.out)[2] > 1e-6) break;
+        const page = (q: V3) => cam.project(cam.view(q)), f = (n: number) => +n.toFixed(2);
+        const [sx, sy] = page(p.start);
+        let d = `M${f(sx)} ${f(sy)}`;
+        // (points along its edge, in view space: to light it by which way it faces, and to sort it by its middle)
+        const seen: V3[] = [cam.view(p.start)];
+        for (const g of p.segs) {
+          if (!("on" in g)) {
+            const [x, y] = page(g.to);
+            d += ` L${f(x)} ${f(y)}`;
+            seen.push(cam.view(g.to));
+            continue;
+          }
+          // An arc: smooth curves (cubic Béziers), each a short stretch of it (an eighth of a turn at most), their control points found on the ellipse in 3D
+          // (where a Bézier follows an ellipse all but exactly) and each put on the page through the view as any point is. So every point of the curve
+          // goes with the camera exactly as the rest of the model does: no ellipse guessed on the page, no arc flags to flip, nothing to jitter.
+          const e = g.on, span = g.to - g.from, n = Math.max(1, Math.ceil(Math.abs(span) / (Math.PI / 4))), step = span / n, k = (4 / 3) * Math.tan(step / 4);
+          const tangent = (a: number): V3 => [0, 1, 2].map(i => -e.u[i] * Math.sin(a) + e.v[i] * Math.cos(a)) as unknown as V3;
+          for (let j = 0; j < n; j++) {
+            const a = g.from + step * j, b = a + step, pa = ellAt(e, a), pb = ellAt(e, b), ta = tangent(a), tb = tangent(b);
+            const c1 = page([pa[0] + ta[0] * k, pa[1] + ta[1] * k, pa[2] + ta[2] * k]), c2 = page([pb[0] - tb[0] * k, pb[1] - tb[1] * k, pb[2] - tb[2] * k]), [ex, ey] = page(pb);
+            d += ` C${f(c1[0])} ${f(c1[1])} ${f(c2[0])} ${f(c2[1])} ${f(ex)} ${f(ey)}`;
+            seen.push(cam.view(pb));
+          }
+        }
+        let n: V3 = [0, 0, 0];
+        for (let i = 0; i < seen.length; i++) {
+          const a = seen[i], b = seen[(i + 1) % seen.length];
+          n = [n[0] + (a[1] - b[1]) * (a[2] + b[2]), n[1] + (a[2] - b[2]) * (a[0] + b[0]), n[2] + (a[0] - b[0]) * (a[1] + b[1])];
+        }
+        const k = Math.abs(unit3(n)[2]) > 0.55 ? 1 : 0.8, depth = p.at ? cam.view(p.at)[2] : seen.reduce((t, v) => t + v[2], 0) / seen.length;
+        out.push({ k: "path", d: `${d} Z`, fill: tone(p.color, k), stroke: tone(p.color, p.seamless ? k : k * 0.55), depth });
+        break;
+      }
       case "line": {
         // A long rod (the axe's haft) passes things at very different depths along its length: sorted as one shape, by its middle, it would be drawn
         // wholly behind or wholly in front of a head near its end. So it is drawn in short pieces, each sorted by its own depth, at its centre line.
-        const pieces = Math.max(1, Math.ceil(Math.hypot(...sub3(p.b, p.a)) / LINE_PIECE));
+        const pieces = p.whole ? 1 : Math.max(1, Math.ceil(Math.hypot(...sub3(p.b, p.a)) / LINE_PIECE));
         const along = (t: number): V3 => [p.a[0] + (p.b[0] - p.a[0]) * t, p.a[1] + (p.b[1] - p.a[1]) * t, p.a[2] + (p.b[2] - p.a[2]) * t];
+        // A flat end, cut across the rod (where it meets another rod end to end): as the limbs' cut ends are (`bones` in figure3d.tsx), the rod stops square
+        // there and the circle across it is laid over its end, the ellipse it looks like, in the rod's own colour and outline, a squashed round end. It goes
+        // with the piece it ends, so of two rods meeting there the nearer one (its piece's middle nearer the viewer) is drawn over the other, and the line
+        // between them is the near half of that circle.
+        const [flatA, flatB] = p.flat ?? [false, false], fill = tone(p.color, 1), stroke = tone(p.color, p.edgeless ? 1 : 0.55);
+        const [u, w] = planeOf(sub3(p.b, p.a));
+        const cap = (end: V3): Cap => {
+          const v = cam.view(end), [cx, cy] = cam.project(v), k = cam.scale(v);
+          const sil = silhouette([dirOf(end, [u[0] * p.r, u[1] * p.r, u[2] * p.r]), dirOf(end, [w[0] * p.r, w[1] * p.r, w[2] * p.r])]);
+          return { cx, cy, rx: sil.rx * k, ry: sil.ry * k, angle: sil.angle };
+        };
         for (let i = 0; i < pieces; i++) {
           const a = cam.view(along(i / pieces)), b = cam.view(along((i + 1) / pieces)), m: V3 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
           const [x1, y1] = cam.project(a), [x2, y2] = cam.project(b), s = cam.scale(m);
+          // (a rod's own end is round, unless it is cut flat; a flat one does not reach past itself, as the joins between its pieces do; its ellipse is drawn
+          // with its piece, never apart from it)
+          const cut: [Cap | undefined, Cap | undefined] = [i === 0 && flatA ? cap(p.a) : undefined, i === pieces - 1 && flatB ? cap(p.b) : undefined];
           out.push({
-            k: "line", x1, y1, x2, y2, width: 2 * p.r * s, fill: tone(p.color, 1), stroke: tone(p.color, 0.55), depth: m[2],
-            ends: [i === 0, i === pieces - 1], overlap: 0.1 * s,
+            k: "line", x1, y1, x2, y2, width: 2 * p.r * s, fill, stroke, depth: m[2],
+            ends: [i === 0 && !flatA, i === pieces - 1 && !flatB], overlap: 0.1 * s, cut,
           });
         }
         break;

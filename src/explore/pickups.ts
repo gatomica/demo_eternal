@@ -39,7 +39,7 @@ export const PICKUPS: Pickup[] = [
   // The second floor, the Gallery (level 10).
   // The north wall of the wax-covered room, north of the east room: the memory of the Waxed Torch.
   { id: "memory-b-torch", at: { x: 45.5, y: 7.5, z: 10 }, gear: { slot: "weapon", tier: "normal", eternal: true } },
-  // A corner of the south room (the south-west one): the memory of the Jagged Chisel.
+  // A corner of the south room (the south-west one): the memory of the Broken Shortsword.
   { id: "memory-b-chisel", at: { x: 24.5, y: 32.5, z: 10 }, gear: { slot: "weapon", tier: "light", eternal: true } },
 ];
 

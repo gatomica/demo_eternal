@@ -22,7 +22,7 @@
  */
 import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { pointedLine, polar, R_IN, R_OUT, RingFade, RingLines } from "../render/ring";
-import { blowShares, bothHands, dualWielding, type HeldWeapon, WEAPONS, weaponOf, type WeaponStats } from "../core/rules";
+import { blowShares, bothHands, dualWielding, type HeldWeapon, heldStats, STAGGERED_FATIGUE, WEAPONS, type WeaponStats } from "../core/rules";
 import { BootIcon, GearIcon, GearSprite } from "../explore/GearIcons";
 import type { SubSlot, Wheel, WheelLook, WheelOption } from "./selection";
 import type { Dir } from "../ui/input";
@@ -87,14 +87,14 @@ const PICTURE = 30;
 /** The bar along an opened part's inner edge: how far out from the inner edge it runs, how thick, and how far in from the part's two edges (degrees). */
 const BAR_R = R_IN + 4, BAR_W = 4, BAR_GAP = 3;
 
-/** One hand's picture: its weapon's sprite, slanted to fill the place, or (empty) its mitten. */
-function HandPicture({ held, side }: { held: HeldWeapon; side: "left" | "right" }) {
-  return held.tier === "baseline" ? <GearIcon slot="weapon" mirrored={side === "left"} faded={false} /> : <GearSprite slot="weapon" tier={held.tier} item={held.item} tilted />;
+/** One hand's picture: its weapon's sprite, slanted to fill the place (`turned`: seen from its other side, pointing the other way), or (empty) its mitten. */
+function HandPicture({ held, side, turned }: { held: HeldWeapon; side: "left" | "right"; turned?: boolean }) {
+  return held.tier === "baseline" ? <GearIcon slot="weapon" mirrored={side === "left"} faded={false} /> : <GearSprite slot="weapon" tier={held.tier} item={held.item} tilted turned={turned} />;
 }
 
 /**
  * An option's picture, centred on `at` (ring units): its weapon's sprite (an empty hand, the mitten), the Kick's boot, or both hands': the two weapons
- * crossed (the left hand's the mirror of its sprite), or the one weapon held in both (bare hands: the mitten) over a shadow of itself, below and to the
+ * crossed (the left hand's seen from its other side, pointing the other way: the same solid, not a mirror image), or the one weapon held in both (bare hands: the mitten) over a shadow of itself, below and to the
  * side.
  */
 function Picture({ look, at, style }: { look: WheelLook; at: [number, number]; style?: CSSProperties }) {
@@ -109,7 +109,7 @@ function Picture({ look, at, style }: { look: WheelLook; at: [number, number]; s
           : look.kind === "weapon" ? <HandPicture held={look} side={look.side} />
           : dual ? <>
             <span className="wheel-both-piece is-cross-right"><HandPicture held={look.right} side="right" /></span>
-            <span className="wheel-both-piece is-cross-left"><HandPicture held={look.left} side="right" /></span>
+            <span className="wheel-both-piece is-cross-left"><HandPicture held={look.left} side="right" turned /></span>
           </>
           : single && <>
             <span className="wheel-both-piece is-shadow"><HandPicture held={single.held} side={single.side} /></span>
@@ -122,7 +122,7 @@ function Picture({ look, at, style }: { look: WheelLook; at: [number, number]; s
 
 /** The weapon stats an option's bar is drawn from: its weapon's, bare hands' for the Kick, both hands' together for a two-handed one. */
 const statsOf = (look: WheelLook): WeaponStats =>
-  look.kind === "kick" ? WEAPONS.baseline : look.kind === "both" ? bothHands(look.right, look.left) : weaponOf(look.tier, look.item);
+  look.kind === "kick" ? WEAPONS.baseline : look.kind === "both" ? bothHands(look.right, look.left) : heldStats(look);
 
 /** An arc of the bar's circle, clockwise from one angle to another. */
 function barArc(from: number, to: number): string {
@@ -136,8 +136,17 @@ function barArc(from: number, to: number): string {
  * Fatigue it puts on its target in white just before that (the Kick's: bare hands'). A Block's (`block`): its weapon's Defense, as on the item card: missing health's dark red from the counter-clockwise end for the share of
  * a blow that comes through, empty for the share it stops.
  */
-function MeasureArc({ look, a0, a1, opacity, block, blow }: { look: WheelLook; a0: number; a1: number; opacity: number; block?: boolean; /** A skill's own numbers, in place of its weapon's. */ blow?: ReturnType<typeof blowShares> }) {
-  const b = blow ?? blowShares(statsOf(look), look.kind === "both");
+function MeasureArc({ look, a0, a1, opacity, block, blow, staggered }: {
+  look: WheelLook; a0: number; a1: number; opacity: number; block?: boolean; /** A skill's own numbers, in place of its weapon's. */ blow?: ReturnType<typeof blowShares>;
+  /** At a staggered enemy (see `WheelOption.staggered`): its Fatigue turns to half as much damage. */
+  staggered?: { resistance: number };
+}) {
+  const raw = blow ?? blowShares(statsOf(look), look.kind === "both");
+  // At a staggered enemy, the Fatigue the blow would put on it (the share its armor turns into Fatigue, and the Poise) is half as much damage, its own
+  // part of the bar (`burst`), between the damage and the Death; no white Fatigue is left.
+  const resisted = staggered ? raw.damage * Math.min(1, staggered.resistance) : 0;
+  const burst = staggered ? (resisted + raw.poise) * STAGGERED_FATIGUE : 0;
+  const b = staggered ? { ...raw, damage: raw.damage - resisted, poise: 0 } : raw;
   const s0 = a0 + BAR_GAP, s1 = a1 - BAR_GAP, span = s1 - s0;
   if (span <= 0) return null;
   const share = (n: number) => Math.max(0, Math.min(1, n)) * span;
@@ -149,7 +158,8 @@ function MeasureArc({ look, a0, a1, opacity, block, blow }: { look: WheelLook; a
         : <>
           <path d={barArc(s0, s0 + share(b.cost))} className="wheel-measure-cost" style={{ strokeWidth: BAR_W }} />
           {b.deadly > 0 && <GlowArc kind="death" d={barArc(s1 - share(b.deadly), s1)} width={BAR_W} />}
-          {b.damage > 0 && <GlowArc kind="missing" d={barArc(s1 - share(b.deadly + b.damage), s1 - share(b.deadly))} width={BAR_W} />}
+          {burst > 0 && <path d={barArc(s1 - share(b.deadly + burst), s1 - share(b.deadly))} className="wheel-measure-burst" style={{ strokeWidth: BAR_W }} />}
+          {b.damage > 0 && <GlowArc kind="missing" d={barArc(s1 - share(b.deadly + burst + b.damage), s1 - share(b.deadly + burst))} width={BAR_W} />}
           {b.poise > 0 && <path d={barArc(s1 - share(b.deadly + b.damage + b.poise), s1 - share(b.deadly + b.damage))} className="wheel-measure-cost" style={{ strokeWidth: BAR_W }} />}
         </>}
       <path d={bandOutline(BAR_R, BAR_W, s0, s1)} className="wheel-measure-edge" />
@@ -397,7 +407,7 @@ export function ActionWheel({ wheel, open, highlight, opened, sub, center, ancho
     const style = opacity === undefined ? undefined : { opacity };
     return (
       <>
-        {o.look && <MeasureArc look={o.look} a0={a0} a1={a1} opacity={opacity ?? 1} block={o.action.type === "block"} blow={o.skill?.blow} />}
+        {o.look && <MeasureArc look={o.look} a0={a0} a1={a1} opacity={opacity ?? 1} block={o.action.type === "block"} blow={o.skill?.blow} staggered={o.action.type === "attack" ? o.staggered : undefined} />}
         {o.skill && <EternityArc eternity={o.skill.eternity} death={o.skill.death} a0={a0} a1={a1} opacity={opacity ?? 1} />}
         {o.look && <Picture look={o.look} at={at} style={style} />}
         {(!o.look || o.alternatives) && <text x={at[0]} y={at[1]} className="wheel-piece-label" style={style}>{o.label}</text>}

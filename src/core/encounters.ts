@@ -63,10 +63,10 @@ export const ENCOUNTERS: Encounter[] = [
     enemies: [
       // The three waxed start on the front line, he on the back one, Sealed, in Wax Arm Raised. Waxed C (the offering) is about to Clutch Flame in the first turn, so that she
       // takes Wax Arm Back and Usurp Flame at once: its flame is taken in that turn, as in any fight.
-      { kind: "waxed", name: "Waxed A", line: "front" },
-      { kind: "waxed", name: "Waxed C", line: "front", offering: true },
+      { kind: "waxed", name: "Waxbound A", line: "front" },
+      { kind: "waxed", name: "Waxbound C", line: "front", offering: true },
       { kind: "warden", name: "Penitent Warden" },
-      { kind: "waxed", name: "Waxed B", line: "front" },
+      { kind: "waxed", name: "Waxbound B", line: "front" },
     ],
   },
 ];

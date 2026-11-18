@@ -2,13 +2,15 @@
  * GearShape.tsx — one drawn shape of a 3D weapon (render/gear3d.ts `drawGear`) as SVG: flat, with round ends and joins, like the sprites. Used by the Gear
  * viewer and by the 3D rig, which draws the weapon in the Waxed's hand.
  */
-import type { Drawn, End } from "./gear3d";
+import type { Cap, Drawn, End } from "./gear3d";
 
 /** One shape of a weapon on the page: flat, with round ends and joins, like the sprites. */
 export function GearShape({ d }: { d: Drawn }) {
   switch (d.k) {
     case "poly":
       return <polygon points={d.points} fill={d.fill} stroke={d.stroke} strokeWidth={0.4} strokeLinejoin="round" />;
+    case "path":
+      return <path d={d.d} fill={d.fill} stroke={d.stroke} strokeWidth={0.4} strokeLinejoin="round" />;
     case "cyl":
       // The end that turns away first (only the curve of its edge past the body shows), then the body, its two straight sides, and the end we see.
       return (
@@ -23,17 +25,25 @@ export function GearShape({ d }: { d: Drawn }) {
     case "line": {
       // A piece of a rod: a darker line a little wider underneath is its outline. Its ends are square, so the pieces meet edge to edge, its fill reaching
       // a little past where it meets the next one (over the next piece's fill, never its outline's end, so no seam shows); the rod's own two ends are
-      // round, a disc each.
+      // round, a disc each, or cut flat (`cut`), an ellipse each: a squashed round end, its outline under the fill as a round end's is, so only its rim
+      // past the rod shows.
       const len = Math.hypot(d.x2 - d.x1, d.y2 - d.y1) || 1, ux = (d.x2 - d.x1) / len, uy = (d.y2 - d.y1) / len;
-      const [r1, r2] = d.ends, o1 = r1 ? 0 : d.overlap, o2 = r2 ? 0 : d.overlap;
+      const [r1, r2] = d.ends, [c1, c2] = d.cut ?? [undefined, undefined], o1 = r1 || c1 ? 0 : d.overlap, o2 = r2 || c2 ? 0 : d.overlap;
+      const capOf = (c: Cap, grow: number, fill: string) => (
+        <ellipse cx={c.cx} cy={c.cy} rx={Math.max(c.rx + grow, 0.01)} ry={Math.max(c.ry + grow, 0.01)} transform={`rotate(${c.angle} ${c.cx} ${c.cy})`} fill={fill} />
+      );
       return (
         <g strokeLinecap="butt">
           <line x1={d.x1} y1={d.y1} x2={d.x2} y2={d.y2} stroke={d.stroke} strokeWidth={d.width + 0.8} />
           {r1 && <circle cx={d.x1} cy={d.y1} r={d.width / 2 + 0.4} fill={d.stroke} />}
           {r2 && <circle cx={d.x2} cy={d.y2} r={d.width / 2 + 0.4} fill={d.stroke} />}
+          {c1 && capOf(c1, 0.4, d.stroke)}
+          {c2 && capOf(c2, 0.4, d.stroke)}
           <line x1={d.x1 - ux * o1} y1={d.y1 - uy * o1} x2={d.x2 + ux * o2} y2={d.y2 + uy * o2} stroke={d.fill} strokeWidth={d.width} />
           {r1 && <circle cx={d.x1} cy={d.y1} r={d.width / 2} fill={d.fill} />}
           {r2 && <circle cx={d.x2} cy={d.y2} r={d.width / 2} fill={d.fill} />}
+          {c1 && capOf(c1, 0, d.fill)}
+          {c2 && capOf(c2, 0, d.fill)}
         </g>
       );
     }

@@ -127,10 +127,11 @@ export interface EnemyKind {
   /** It attacks straight out of the stance it showed, with no wind-up pose of its own. */
   attacksFromStance?: boolean;
   /**
-   * Its attacks tagged `#shockwave` (a flaming slam, a flame blast) send a shockwave through the whole fight: it hits its
-   * allies too, as a direct hit, while this holds (default: always).
+   * Its attacks tagged `#area` (a lit waxed's Flame Immolation, the Warden's flaming slam, her flame blast) are Area attacks while this holds
+   * (default: always): they hit its allies too, as a direct hit with no Block or dodge, and everything they hit takes half (`AREA_SHARE` in
+   * core/skills.ts). Otherwise it is an ordinary attack at its target alone, at full.
    */
-  shockwave?: (self: Enemy) => boolean;
+  area?: (self: Enemy) => boolean;
   /** On the map, it comes back to life when you rest by a keeper (the others stay dead, their remains lying where they fell). */
   respawns?: boolean;
   /** Where it falls, it stays: faded, for the rest of the fight (it can still burn as a candle). */

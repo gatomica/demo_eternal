@@ -11,7 +11,7 @@
 type ToneModule = typeof import("tone");
 import type { CombatEvent } from "../core/types";
 
-export type Sfx = "hit" | "clang" | "dodge" | "rest" | "stagger" | "fall" | "flame" | "tic" | "tac" | "string" | "stringBoss" | "stringBossNote" | "eternity" | "eternityDeath";
+export type Sfx = "hit" | "clang" | "dodge" | "rest" | "stagger" | "fall" | "flame" | "tic" | "tac" | "string" | "stringBoss" | "stringBossNote" | "eternity" | "eternityDeath" | "click";
 
 const MUTE_KEY = "sfx-muted";
 
@@ -465,6 +465,11 @@ function trigger(name: Sfx, delay: number, v: number) {
         b.tacKnock.triggerAttackRelease(190, 0.08, when(b.tacKnock, t), v);
         b.tacClick.triggerAttackRelease(0.025, when(b.tacClick, t), v);
         break;
+      case "click":
+        // A joint snapping into place (Reap straightening the axe into a scythe): a sharp click, and a short, higher knock of iron on iron just after it.
+        b.tacClick.triggerAttackRelease(0.03, when(b.tacClick, t), 1.2 * v);
+        b.tacKnock.triggerAttackRelease(620, 0.05, when(b.tacKnock, t + 0.035), 0.9 * v);
+        break;
     }
   } catch (err) {
     // A sound that can't be scheduled doesn't play; say so in the console instead of vanishing without a trace. (It is not retried: part of it
@@ -473,7 +478,7 @@ function trigger(name: Sfx, delay: number, v: number) {
   }
 }
 
-const ALL: Sfx[] = ["hit", "clang", "dodge", "rest", "stagger", "fall", "flame", "tic", "tac", "string", "stringBoss", "stringBossNote", "eternity", "eternityDeath"];
+const ALL: Sfx[] = ["hit", "clang", "dodge", "rest", "stagger", "fall", "flame", "tic", "tac", "string", "stringBoss", "stringBossNote", "eternity", "eternityDeath", "click"];
 
 let warmed = false;
 

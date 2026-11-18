@@ -5,8 +5,8 @@
  */
 import { bodyOf } from "../body";
 import { kickFor, mirrorStance, swingFor } from "../stance";
-import { SKILLS, skillSwing } from "../skills";
-import { dualWielding } from "../rules";
+import { type SkillId, SKILLS, skillSwing } from "../skills";
+import { dualWielding, STAGGERED_FATIGUE } from "../rules";
 import type { CombatEvent, CombatState, Enemy, Fighter, FighterView, Hand, Line, Player, PlayerAction, Step, Swing, WeaponTier } from "../types";
 
 /** The action the player is locked into this turn, if any. */
@@ -14,6 +14,17 @@ export function forcedAction(state: CombatState): "rest" | "revive" | null {
   if (state.player.reviving) return "revive";
   if (state.player.staggered) return "rest";
   return null;
+}
+
+/**
+ * Your action while Reap holds the axe up in both hands (`Player.reaping`): only an Attack or a Block made with the hands is held to both of them (the
+ * Attack is Reap's, led by the axe's hand; the Block the axe's alone). Anything else is as chosen: a Kick, a skill, a Dodge, a Rest.
+ */
+function reapingAction(p: Player, action: PlayerAction): PlayerAction {
+  if (!p.reaping) return action;
+  if (action.type === "attack" && !action.kick && !action.skill) return { type: "attack", target: action.target, both: true, hand: p.reaping, skill: "reap" };
+  if (action.type === "block") return { type: "block", target: action.target, both: true, hand: p.reaping };
+  return action;
 }
 
 /** Bars and positions of these fighters right now, so the screen can show the fight mid-turn. */
@@ -54,11 +65,18 @@ export interface Turn {
   fallen: Set<string>;
   /** Pulled to the front line by a melee attack: enemy id -> who pulled it. */
   pulls: Map<string, string>;
+  /** Knocked back onto the back line (Knockback): enemy id -> who knocked it. */
+  pushes: Map<string, string>;
+  /**
+   * Your skill's payment this turn, once your attack is made (its Eternity spent, the Death on you, and the effect it is worth): an Area attack pays it
+   * once, at its first target, and every other target it hits takes its share of the same.
+   */
+  skillPaid?: { skill: SkillId; spent: number; death: number; worth: number };
   /** Enemies trying to step onto an ally's line, to strike it (Usurp Flame): enemy id -> that line. Settled like a Maneuver of theirs. */
   shifts: Map<string, Line>;
   /** Actions cancelled before they happened. */
   cancelled: Set<string>;
-  /** Weapon blows this turn, however they went: attacker id -> whom it attacked (for the Jagged Chisel, next turn). */
+  /** Weapon blows this turn, however they went: attacker id -> whom it attacked (for the Broken Shortsword, next turn). */
   attacked: Map<string, string>;
   /** Who blocked at least one attack this turn. */
   blocked: Set<string>;
@@ -80,8 +98,11 @@ export interface Turn {
   /** Closes the step under way (if anything happened in it), with everyone's bars after it. */
   endStep: () => void;
 
-  /** Adds Fatigue, unless the fighter is staggered: then it's already pinned at full. */
-  tire: (f: Fighter, amount: number) => void;
+  /**
+   * Adds Fatigue. On one already staggered (its bar pinned at full), half of it is dealt as damage instead (`STAGGERED_FATIGUE` in rules.ts): what
+   * it gives back is that damage, the Health lost, for the blow's event to show.
+   */
+  tire: (f: Fighter, amount: number) => number;
   /** A staggered fighter's bar stays solid white, even as its health drops. */
   pinStaggered: () => void;
   isReviving: (f: Fighter) => boolean;
@@ -89,7 +110,7 @@ export interface Turn {
   weightOf: (f: Fighter) => WeaponTier;
   /**
    * The hand a fighter acts with this turn, as the rules see it (`Hand`): yours is the left one for a left-hand Attack or Block, the right
-   * one otherwise; an enemy's is its own weapon.
+   * one otherwise; an enemy's is its own weapon (Flaming while its `flaming` flag is on: the Warden's flail, a Waxed Torch by the rules).
    */
   handOf: (f: Fighter) => Hand;
   isRanged: (f: Fighter) => boolean;
@@ -107,7 +128,7 @@ export function beginTurn(prev: CombatState, action: PlayerAction, rng: () => nu
   const fighters: Fighter[] = [p, ...alive];
   const reviving = p.reviving;
   const forced = forcedAction(s);
-  const act: PlayerAction | null = forced === "revive" ? null : forced === "rest" ? { type: "rest" } : action;
+  const act: PlayerAction | null = forced === "revive" ? null : forced === "rest" ? { type: "rest" } : reapingAction(p, action);
   const foeReviving = new Set(alive.filter(e => e.reviving).map(e => e.id));
   const resting = new Map<string, boolean>();
   if (act?.type === "rest") resting.set(p.id, p.staggered);
@@ -119,10 +140,10 @@ export function beginTurn(prev: CombatState, action: PlayerAction, rng: () => nu
     act, reviving, foeReviving, resting,
     wasFlags: new Map(alive.map(e => [e.id, { ...e.flags }])),
     wasStaggered: new Set(fighters.filter(f => f.staggered).map(f => f.id)),
-    hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(), shifts: new Map(),
+    hurt: new Set(), out: new Set(), fallen: new Set(), pulls: new Map(), pushes: new Map(), shifts: new Map(),
     cancelled: new Set(), blocked: new Set(), attacked: new Map(), interrupted: new Set(), fellReviving: new Set(),
     swing: act?.type === "attack" && act.kick ? kickFor(p.stance, act.kick, rng) : act?.type === "attack" && act.skill && SKILLS[act.skill].swing ? skillSwing(act.skill, act.hand === "left" ? mirrorStance(p.stance) : p.stance) : act?.type === "attack" ? swingFor(act.hand === "left" ? mirrorStance(p.stance) : p.stance, alive.find(e => e.id === act.target)) : undefined,
-    offSwing: act?.type === "attack" && act.both && dualWielding({ tier: p.weapon, item: p.weaponItem }, { tier: p.offhand.weapon, item: p.offhand.weaponItem })
+    offSwing: act?.type === "attack" && act.both && !p.reaping && dualWielding({ tier: p.weapon, item: p.weaponItem }, { tier: p.offhand.weapon, item: p.offhand.weaponItem })
       ? swingFor(mirrorStance(p.stance), alive.find(e => e.id === act.target)) : undefined,
     steps: [],
     events: [],
@@ -135,17 +156,26 @@ export function beginTurn(prev: CombatState, action: PlayerAction, rng: () => nu
       t.events = [];
     },
     tire: (f, amount) => {
-      if (amount <= 0) return;
-      if (cfg.dummy) return;
+      if (amount <= 0 || cfg.dummy) return 0;
       // (The parts of a multi-target enemy share one bar: the Fatigue is the whole body's.)
-      for (const m of bodyOf(s.enemies, f)) if (!m.staggered) m.fatigue += amount;
+      const body = bodyOf(s.enemies, f);
+      if (f.staggered) {
+        // Nothing left to tire: half of it is damage (as a blow's, it takes the whole body's Health; the guide's training spares enemies, and your last point).
+        const damage = amount * STAGGERED_FATIGUE;
+        if (cfg.sparring && f !== p) return 0;
+        const lost = cfg.sparring ? Math.max(0, Math.min(damage, f.hp - 1)) : damage;
+        for (const m of body) m.hp -= lost;
+        return lost;
+      }
+      for (const m of body) if (!m.staggered) m.fatigue += amount;
+      return 0;
     },
     pinStaggered: () => { for (const f of fighters) if (f.staggered) f.fatigue = Math.max(0, f.hp); },
     isReviving: f => (f === p ? reviving : foeReviving.has(f.id)),
     weightOf: f => (f === p ? (act?.type === "attack" && act.weight ? act.weight : t.handOf(p).weapon) : (f as Enemy).intent.weight ?? f.weapon),
     handOf: f => (f === p && act?.hand === "left" ? p.offhand
-      : f === p ? { weapon: p.weapon, weaponItem: p.weaponItem, eternal: p.eternal, mortal: p.mortalWeapon, lastTarget: p.lastTarget }
-      : { weapon: f.weapon, eternal: f.eternal, lastTarget: f.lastTarget }),
+      : f === p ? { weapon: p.weapon, weaponItem: p.weaponItem, eternal: p.eternal, mortal: p.mortalWeapon, lastTarget: p.lastTarget, flaming: p.flaming }
+      : { weapon: f.weapon, eternal: f.eternal, lastTarget: f.lastTarget, flaming: !!(f as Enemy).flags.flaming || undefined }),
     // (yours: a ranged skill, the Hookshot)
     isRanged: f => (f === p ? act?.type === "attack" && !!act.skill && !!SKILLS[act.skill].ranged : !!(f as Enemy).intent.ranged),
     isBlocking: (f, attacker) => {

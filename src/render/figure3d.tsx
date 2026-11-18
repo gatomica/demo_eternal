@@ -10,6 +10,12 @@ import { type ArcCircle, type Joint, type P3, type placeRig, ribcageOf, type Rig
 import { drawGear, type GearModel, type V3 } from "./gear3d";
 import { GearShape } from "./GearShape";
 import { HeldWeapon } from "./StickFigure";
+import { LittleFlame } from "./LittleFlame";
+
+/** Where a weapon that can burn is set alight, in its own space: the Waxed Torch's bulb of wax (its middle, `torchParts` in gear3d.ts). */
+const FIRE_AT: Record<string, V3 | undefined> = { torch: [30.4, 0, 0] };
+/** The flame's height, in figure units: the Warden's burning flail's (`FIRE_FLAME` in Warden3D.tsx), round a ball as big as the bulb. */
+const FIRE_FLAME = 28;
 
 /**
  * Whether two sets of props of a 3D figure draw the same picture, so it need not be worked out again (`memo`): every prop equal, or an object (a camera, a spot, a
@@ -206,6 +212,7 @@ export function arcPart(c: Canvas3D, arc: { circle: ArcCircle }): Part {
  * back to where it starts, a point. It fades as it is drawn (`fig-trail`), in front of the figure.
  */
 export function trailPart(c: Canvas3D, key: string, arc: ArcCircle, className = "fig-trail"): Part {
+  if (arc.offset) return aimedTrailPart(c, key, arc, className);
   const { see, X, Y } = c, { centre: C, e1, e2, radius: r, a0, a1, thick } = arc;
   const along = (v: P3, k: number): P3 => [C[0] + v[0] * k, C[1] + v[1] * k, C[2] + v[2] * k];
   const c0 = see(C), pe = see(along(e1, r)), qe = see(along(e2, r));
@@ -220,6 +227,37 @@ export function trailPart(c: Canvas3D, key: string, arc: ArcCircle, className = 
   const from = onCircle(a0), to = onCircle(a1), innerEnd = onCircle(a1, 1 - k), f = (v: number) => Math.round(v * 100) / 100;
   const d = `M${f(from[0])} ${f(from[1])} A${f(rx)} ${f(ry)} ${f(tilt)} ${big} ${sweep} ${f(to[0])} ${f(to[1])} L${f(innerEnd[0])} ${f(innerEnd[1])} A${f(rx * (1 - k / 2))} ${f(ry * (1 - k / 2))} ${f(tilt)} ${big} ${1 - sweep} ${f(from[0])} ${f(from[1])} Z`;
   return { key, depth: Math.min(c0.depth, pe.depth, qe.depth) - 0.05, node: <path key={key} d={d} className={className} /> };
+}
+
+/**
+ * An aimed arch's trail (`aimedArc`: a circle with an `offset`), drawn as the axe's curved faces are: its outer edge smooth curves (cubic Béziers), each an
+ * eighth of a turn at most, their control points found on the circle in 3D and each put on the page through the view as any point is (no ellipse guessed
+ * on the page, nothing to jitter); a straight line across its blunt end, the striking part; and back along its inner edge, the same curves shifted
+ * steadily by the offset (a shift that grows evenly along a curve is itself one of these curves), to the point it starts at.
+ */
+function aimedTrailPart(c: Canvas3D, key: string, arc: ArcCircle, className: string): Part {
+  const { see, X, Y } = c, { centre: C, e1, e2, radius: r, a0, a1 } = arc, off = arc.offset!;
+  const span = a1 - a0, n = Math.max(1, Math.ceil(Math.abs(span) / (Math.PI / 4))), step = span / n, k = (4 / 3) * Math.tan(step / 4);
+  const point = (a: number): P3 => [0, 1, 2].map(i => C[i] + (e1[i] * Math.cos(a) + e2[i] * Math.sin(a)) * r) as unknown as P3;
+  const tangent = (a: number): P3 => [0, 1, 2].map(i => (-e1[i] * Math.sin(a) + e2[i] * Math.cos(a)) * r * k) as unknown as P3;
+  /** A point of the outer edge's curves (`p`, plus `dir` times `s`), shifted by the offset as far as `t` of the way along. */
+  const at = (p: P3, t: number, dir: P3 = [0, 0, 0], s = 0): string => {
+    const q = see([0, 1, 2].map(i => p[i] + dir[i] * s + off[i] * t) as unknown as P3);
+    return `${Math.round(X(q) * 100) / 100} ${Math.round(Y(q) * 100) / 100}`;
+  };
+  const z: P3 = [0, 0, 0];
+  let d = `M${at(point(a0), 0)}`;
+  for (let j = 0; j < n; j++) {
+    const a = a0 + step * j, b = a + step;
+    d += ` C${at(point(a), 0, tangent(a), 1)} ${at(point(b), 0, tangent(b), -1)} ${at(point(b), 0)}`;
+  }
+  d += ` L${at(point(a1), 1)}`;
+  for (let j = n - 1; j >= 0; j--) {
+    const a = a0 + step * j, b = a + step, ta = j / n, tb = (j + 1) / n, third = (tb - ta) / 3;
+    d += ` C${at(point(b), tb - third, tangent(b), -1)} ${at(point(a), ta + third, tangent(a), 1)} ${at(point(a), ta, z)}`;
+  }
+  const depth = Math.min(see(C).depth, see(point(a0)).depth, see(point(a1)).depth) - 0.05;
+  return { key, depth, node: <path key={key} d={`${d} Z`} className={className} /> };
 }
 
 /**
@@ -238,6 +276,13 @@ export function weaponParts(c: Canvas3D, o: {
   at: Vec; yaw: number; cam: Cam; w: number; h: number; scale: number; box: Box; eternalFlash?: string;
   /** What its parts are keyed by (default "weapon"): a second weapon on the same figure (the player's left hand's) needs keys of its own. */
   key?: string;
+  /** On fire (a Flaming Waxed Torch): the Warden's burning flail's flame, a big red little flame with no knot, round its bulb of wax (`FIRE_AT`). */
+  fire?: boolean;
+  /**
+   * A marker at that same spot (the torch's bulb), named so (`data-fire-anchor`), drawn whether it burns or not: what is drawn over the scene to reach
+   * it finds where it really is on the screen every frame (Usurp Flame's wisps flying into the torch).
+   */
+  anchor?: string;
 }): Part[] {
   const { see, X, Y, ux, uy, origin, scaleAt } = c;
   const { model, held, slide = 0, at, yaw, cam, w, h, scale, box, eternalFlash, key: k = "weapon" } = o;
@@ -266,6 +311,15 @@ export function weaponParts(c: Canvas3D, o: {
     const shapes = drawn.map((d, i) => <GearShape key={`${k}-${i}`} d={d} />);
     const nearest = (drawn.length ? Math.min(...drawn.map(d => d.depth)) * U : origin.depth);
     drawn.forEach((d, i) => out.push({ key: `${k}-${i}`, depth: d.depth * U - 0.005, node: shapes[i] }));
+    if (o.anchor && FIRE_AT[model.id]) {
+      const v = view(FIRE_AT[model.id]!), [ax0, ay0] = project(v);
+      out.push({ key: `${k}-anchor`, depth: v[2] * U, node: <circle key={`${k}-anchor`} cx={ax0} cy={ay0} r={0.01} fill="none" data-fire-anchor={o.anchor} /> });
+    }
+    if (o.fire && FIRE_AT[model.id]) {
+      // (as the flail's: its round part's middle on the bulb's, drawn over the bulb, which shows through it)
+      const v = view(FIRE_AT[model.id]!), [fx, fy] = project(v), size = FIRE_FLAME * (origin.depth / Math.max(v[2] * U, 0.05)) * scale;
+      out.push({ key: `${k}-fire`, depth: v[2] * U - 0.05, node: <LittleFlame key={`${k}-fire`} x={fx} y={fy + 0.34 * size} height={size} red knot={false} /> });
+    }
     if (eternalFlash) {
       out.push({ key: `${k}-flash`, depth: nearest - 0.02, node: <g key={eternalFlash} className={`fig-eternal-flash ${eternalFlash.startsWith("death|") ? "is-death" : ""}`} aria-hidden="true">{shapes}</g> });
     }

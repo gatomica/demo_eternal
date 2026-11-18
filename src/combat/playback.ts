@@ -43,6 +43,8 @@ export const DODGE_DELAY_MS = 140;
 
 /** How long a clean hit takes to knock its target back. */
 export const KNOCK_MS = 260;
+/** Knockback (the Brick Hammer's skill): how long its target takes to be driven back onto the back line, as the blow lands. */
+export const KNOCKBACK_SKILL_MS = 520;
 
 /** How long everyone takes to settle into the planning view at the end of a turn. */
 export const SETTLE_MS = 700;

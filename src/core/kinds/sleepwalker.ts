@@ -9,7 +9,7 @@ import { parsePattern } from "../patterns";
 export const SLEEPWALKER: EnemyKind = {
   name: "Depraved Sleepwalker",
   maxHP: 8,
-  weapon: "light", // the Jagged Chisel (its effect and all)
+  weapon: "light", // the Broken Shortsword (its effect and all)
   armor: "none", // none for now; some may wear armor later
   // In a fight it is drawn in 3D (its variants too); on the map, still the flat figure.
   figure3d: "sleepwalker",

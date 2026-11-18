@@ -356,10 +356,9 @@ kbd {
 .wheel-picture-box { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
 .wheel-picture-box .gear-icon .flat { fill: #fff; stroke: rgb(0 0 0 / 0.55); stroke-width: 2.5px; stroke-linejoin: round; paint-order: stroke; }
 .wheel-piece.is-highlighted .wheel-picture-box .gear-icon .flat { fill: #14131a; stroke: none; }
-/* Both hands' picture (ActionWheel.tsx `Picture`): two weapons crossed, the left hand's mirrored; or the one held in both over its own shadow, below and to the side. */
+/* Both hands' picture (ActionWheel.tsx `Picture`): two weapons crossed, the left hand's seen from its other side (`turned`); or the one held in both over its own shadow, below and to the side. */
 .wheel-picture-box.is-both { position: relative; }
 .wheel-both-piece { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
-.wheel-both-piece.is-cross-left { transform: scaleX(-1); }
 .wheel-both-piece.is-held { transform: translate(-7%, -6%) scale(0.92); }
 .wheel-both-piece.is-shadow { transform: translate(9%, 8%) scale(0.92); filter: brightness(0); opacity: 0.4; }
 /* An opened part's cost and damage bar, along its inner edge, as the item card's (`.item-card-measure`). */
@@ -369,6 +368,10 @@ kbd {
 .wheel-measure .wheel-measure-edge { fill: none; stroke: var(--line); stroke-width: 0.6; stroke-linejoin: round; }
 .wheel-measure .wheel-measure-cost { stroke: var(--sleep); }
 .wheel-measure .wheel-measure-damage { stroke: var(--flesh-missing); }
+/* At a staggered enemy: the Fatigue its blow would put on it, turned to half as much damage, fading between Fatigue's white and missing health's red. */
+.wheel-measure .wheel-measure-burst { stroke: var(--sleep); animation: wheel-burst 0.9s ease-in-out infinite alternate; }
+@keyframes wheel-burst { from { stroke: var(--sleep); } to { stroke: var(--flesh-missing); } }
+@media (prefers-reduced-motion: reduce) { .wheel-measure .wheel-measure-burst { animation: none; stroke: var(--flesh-missing); } }
 .wheel-measure .wheel-measure-death { stroke: var(--void); }
 /* (Death on the wheel, as on the health bars: the black arc, and over it its crimson ring and glow (ActionWheel.tsx `GlowArc`, `InsetGlow`), breathing.) */
 .wheel-measure .wheel-measure-glow { stroke: #000; animation: death-glow 1.25s ease-in-out infinite alternate; }

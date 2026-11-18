@@ -7,13 +7,14 @@
  * Positions lock at the start: what the player saw during planning is what they fight.
  * 1. Attacks, yours first, then the enemy you aimed at, then the rest at random (attacks.ts).
  * 2. Revives land and Rests settle (rests.ts).
- * 3. Movement (movement.ts).
+ * 3. Movement (movement.ts). Then Death decays (statuses.ts `decayDeath`), its own beat, before the next turn is planned.
  * 4. End of turn: decay, falls and staggers, each kind's own rules (endTurn.ts). Then every
  *    enemy picks its next intent.
  */
 import { chooseIntents } from "../intents";
 import type { CombatState, PlayerAction, Rng } from "../types";
-import { resolveAttacks } from "./attacks";
+import { resolveAttacks, settleFalls } from "./attacks";
+import { decayDeath } from "./statuses";
 import { endTurn } from "./endTurn";
 import { resolveMovement } from "./movement";
 import { settleRests } from "./rests";
@@ -46,6 +47,8 @@ export function resolveTurn(prev: CombatState, action: PlayerAction, rng: Rng = 
   resolveAttacks(t, rng);
   settleRests(t);
   resolveMovement(t);
+  // (Death decays last, its own beat, so the next turn is planned with it done: see `decayDeath`. What it kills or staggers, the turn's end settles.)
+  decayDeath(t, () => settleFalls(t));
   endTurn(t);
   return finishTurn(t, rng);
 }

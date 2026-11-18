@@ -244,7 +244,7 @@ export type PoseName =
   | "strike" | "fallen" | "kneel" | "punch"
   | "t-pose" | "t-pose-b" | "w-t" | "w-t-b"
   | "sw-windup" | "sw-brace" | "sw-flinch" | "sw-down" | "sw-idle" | "sw-charging" | "sw-struggling" | "sw-shoulder-in"
-  | "sw-overhead" | "sw-overhead-leap" | "sw-dead" | "p3-idle" | "p3-low" | "sw-chop" | "sw-overhead-strike" | "p3-overhead-leap" | "p3-overhead-strike" | "p3-flinch" | "p3-right-lead" | "p3-kick-up" | "p3-kick" | "p3-stab-up" | "p3-stab" | "p3-hook-up" | "p3-hook-throw" | "sw-swing-l-windup" | "sw-swing-l" | "sw-swing-r-windup" | "sw-swing-r" | "sw-parry" | "sw-charge" | "sw-backstep" | "p3-backstep" | "sw-despair"
+  | "sw-overhead" | "sw-overhead-leap" | "sw-dead" | "p3-idle" | "p3-low" | "sw-chop" | "sw-overhead-strike" | "p3-overhead-leap" | "p3-overhead-strike" | "p3-flinch" | "p3-right-lead" | "p3-kick-up" | "p3-kick" | "p3-stab-up" | "p3-stab" | "p3-hook-up" | "p3-hook-throw" | "p3-chisel-up" | "p3-chisel" | "sw-swing-l-windup" | "sw-swing-l" | "sw-swing-r-windup" | "sw-swing-r" | "sw-parry" | "sw-charge" | "sw-backstep" | "p3-backstep" | "sw-despair"
   | "w-idle" | "w-hands" | "w-scratch" | "w-wax-hand" | "w-hurl"
   | "w-staggered" | "w-dead" | "w-cower" | "w-reared" | "w-hurl-windup" | "w-clutch-eat" | "w-brace" | "w-brace-block" | "w-overhead-windup" | "w-overhead-strike" | "w-crawl" | "w-low-windup" | "w-low-strike" | "w-drag" | "w-slither" | "w-cradle" | "w-clutch" | "w-fallen" | "w-flinch" | "flinch"
   | WardenPoseName
@@ -758,6 +758,29 @@ const POSES: Record<Exclude<PoseName, WardenPoseName | GuidePoseName>, Skeleton>
     weapon: { at: [72, 68], angle: 60 }, leadSide: "right", grip: true,
     // (in 3D the arms brought down low, the weapon pointing down ahead, a little higher than the arms point: about 45 degrees down to their 57)
     for3d: { arms3: { right: { aim: { dir: [0.15, -1, 0.65] } }, left: { aim: { dir: [0, -1, 0.65], reach: 0.9 } } }, weapon3: [0.07, -0.7, 0.7] },
+  },
+  // Chisel (the Broken Shortsword's skill), winding up: the one-handed Overhead's wind-up (`p3-overhead-leap`), the weapon in a reverse grip, as the
+  // Waxbound holds its chisel through its Overhead Attack: the arm angled up, so the blade points up out of the raised fist (as it points down out of
+  // it once the arm comes down), a little back. (The left hand's: mirrored.)
+  "p3-chisel-up": {
+    head: [38, 36], neck: [39, 47], hip: [44, 74],
+    weaponArm: { elbow: [50, 31], hand: [36, 20] },
+    freeArm: { elbow: [50, 51], hand: [64, 52] },
+    leadLeg: { knee: [62, 82], foot: [52, 100] },
+    rearLeg: { knee: [36, 94], foot: [28, 114] },
+    weapon: { at: [36, 20], angle: -100 }, torso34: "front", leadSide: "right",
+    for3d: { pitch3: 18, spin3: 45, hip: [44, 66], leadLeg: { knee: [62, 72], foot: [54, 90] }, rearLeg: { knee: [38, 84], foot: [28, 101] }, weapon3: [0.05, 0.95, -0.3] },
+  },
+  // Chisel, landing: the Overhead's landing, the fist brought down ahead of him with the blade still reversed, driven point first down at the floor a
+  // little past the target, as the Waxbound's chisel strikes.
+  "p3-chisel": {
+    head: [64, 42], neck: [58, 52], hip: [44, 76],
+    weaponArm: { elbow: [62, 60], hand: [72, 68] },
+    freeArm: { elbow: [52, 66], hand: [44, 76] },
+    leadLeg: { knee: [64, 96], foot: [74, 114] },
+    rearLeg: { knee: [34, 96], foot: [24, 114] },
+    weapon: { at: [72, 68], angle: 95 }, leadSide: "right",
+    for3d: { spin3: 45, arms3: { right: { aim: { dir: [0.15, -1, 0.65] } }, left: { aim: { dir: [-0.5, -0.3, -0.55], reach: 0.95 } } }, weapon3: [0.05, -1, 0.2] },
   },
   // The player's Overhead Strike in 3D, held in one hand (the right): the Sleepwalker's (`sw-overhead-leap`, `sw-overhead-strike`) with the left hand
   // off the weapon, and the chest turned 45 degrees to his right (`spin3`), the striking shoulder drawn back. Winding up, the left arm reaches out

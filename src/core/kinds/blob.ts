@@ -28,8 +28,8 @@ const without = <T,>(poses: Record<string, T> | undefined, names: string[]) =>
 /** What every part is, besides the Waxed it is: sealed in the heap, sharing its Health, never splashing the others. */
 const PART = {
   maxHP: BLOB_HP,
-  // The blob's parts never splash each other, whatever they burn with.
-  shockwave: () => false,
+  // The blob's parts never splash each other, whatever they burn with: its Flame Immolation is no Area attack (it hits you alone, at full).
+  area: () => false,
 } satisfies Partial<EnemyKind>;
 
 /** The middle one: a whole Waxed (its full pattern, Cradle Flame and all), drawn in 3D, sealed in the wax. It stands nearest you, at the heap's edge. */

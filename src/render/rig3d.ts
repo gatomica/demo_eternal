@@ -498,7 +498,38 @@ const ARCH_SWEEP = 140, ARCH_THICK = 0.13;
  * A stretch of a circle a trail runs along: its centre, the two ways in its plane (`e1`, `e2`), its radius, the angles it runs between (`a0` to `a1`, the
  * way `e1` turns toward `e2`), and how thick it is where it ends (meters). Drawn as the sprites draw their trails, from two true arcs (`trailPart`).
  */
-export interface ArcCircle { centre: P3; e1: P3; e2: P3; radius: number; a0: number; a1: number; thick: number }
+export interface ArcCircle {
+  centre: P3; e1: P3; e2: P3; radius: number; a0: number; a1: number; thick: number;
+  /**
+   * An aimed arch's (`aimedArc`): its inner edge is the outer one shifted steadily by this (none of it at the start, all of it at the end), so its blunt
+   * end runs from the striking part's far end back along the weapon to its near end. Drawn as smooth curves found in 3D (`trailPart`).
+   */
+  offset?: P3;
+}
+
+/**
+ * How far round its circle a bare-handed aimed arch may run (radians): a fist that stops short of the enemy's middle would otherwise loop all the way
+ * round to pass it. A weapon's arch has no limit: three points make one circle, and of its two ways from one end to the other only one passes the third.
+ */
+const AIMED_BARE_SWEEP = (240 * Math.PI) / 180;
+
+/**
+ * A player's swing's arch, aimed (`Sleepwalker3D`'s `aim`): the stretch of the circle through where the striking part's far end was in the wind-up
+ * (`from`), the middle of the enemy blown at (`via`) and where it lands (`to`), round the way that passes `via`. It starts at a point and ends as wide as
+ * the striking part (`offset`: from its far end back to its near end, as it lands; undefined, bare-handed: a share of the line between the ends, toward
+ * the circle's centre). However far round that is (a spin, Reap's, nearly all the way). Undefined if the three are in a line, or (bare-handed) the way
+ * round through the enemy's middle is too long (`AIMED_BARE_SWEEP`).
+ */
+export function aimedArc(from: P3, to: P3, via: P3, offset?: P3): ReturnType<typeof swingArc> | undefined {
+  const length = Math.hypot(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+  const round = arcThrough(from, via, to, offset ? Math.hypot(...offset) : ARCH_THICK * length);
+  if (!round || (!offset && Math.abs(round.circle.a1 - round.circle.a0) > AIMED_BARE_SWEEP)) return undefined;
+  const { centre, radius } = round.circle;
+  const k = ARCH_THICK * length / (radius || 1);
+  const off: P3 = offset ?? [(centre[0] - to[0]) * k, (centre[1] - to[1]) * k, (centre[2] - to[2]) * k];
+  const inner = (t: number): P3 => { const p = round.outer(t); return [p[0] + off[0] * t, p[1] + off[1] * t, p[2] + off[2] * t]; };
+  return { ...round, inner, circle: { ...round.circle, offset: off } };
+}
 
 /**
  * The trail on the circle through three points (`from`, on through `mid`, to `to`), as `swingArc` gives it; undefined if the three are in a line.

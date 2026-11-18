@@ -20,7 +20,7 @@ export type SubSlot = Dir;
  * the side). Its cost and damage bar runs along the part's inner edge (`tier`'s; the Kick's, bare hands'; both hands', `bothHands` from the two-handed
  * base).
  */
-export type WheelLook = { kind: "weapon"; tier: WeaponTier; item?: WeaponItem; side: Side } | { kind: "kick" } | { kind: "both"; right: HeldWeapon; left: HeldWeapon };
+export type WheelLook = { kind: "weapon"; tier: WeaponTier; item?: WeaponItem; side: Side; flaming?: boolean } | { kind: "kick" } | { kind: "both"; right: HeldWeapon; left: HeldWeapon };
 
 /** An option on the action wheel. */
 export interface WheelOption {
@@ -38,6 +38,11 @@ export interface WheelOption {
    * (`eternity`, a share of your max Eternity), the part of it your Eternity can't pay (`death`, the same share) in black.
    */
   skill?: { blow: { cost: number; damage: number; poise: number; deadly: number }; eternity: number; death: number };
+  /**
+   * An Attack at a staggered enemy, and what it wears weighs (its Resistance): the Fatigue the blow would put on it (its Poise, and the share of its
+   * damage the armor turns into Fatigue) is half as much damage instead, drawn on the bar fading between white and missing health.
+   */
+  staggered?: { resistance: number };
 }
 
 export type Wheel = Record<Dir, WheelOption | null>;

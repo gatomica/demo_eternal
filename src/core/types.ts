@@ -104,7 +104,7 @@ export interface Intent {
    * (Usurp Flame) strikes them, and its attacker tries to step onto their line.
    */
   target?: string;
-  /** Tags from the pattern, e.g. "waxing": a direct hit leaves the target Waxed. */
+  /** Tags from the pattern, e.g. "area": an Area attack; "fire": flames lick what it hits. */
   tags?: string[];
 }
 
@@ -148,7 +148,7 @@ export interface Fighter {
   encased?: boolean;
   /** Its weapon is eternal: its blows carry the weapon's eternal effect (see `ETERNAL_EFFECT` in rules.ts). */
   eternal?: boolean;
-  /** Whom it attacked with its weapon last turn, whether the blow landed or not (for the Jagged Chisel). */
+  /** Whom it attacked with its weapon last turn, whether the blow landed or not (for the Broken Shortsword). */
   lastTarget?: string;
   /** Waxed by a Waxed Torch: looks only, no rules attached. Clears like Waxed, when Fatigue drops to 0. */
   coated?: boolean;
@@ -168,12 +168,12 @@ export type HeadItem = "helm" | "hood" | "mask" | "wardenhood";
 
 /** What you hold between turns (see `stance.ts`), and how an attack of yours swings. */
 export type Stance = "idle" | "low" | "lead-left" | "lead-right";
-export type Swing = "overhead" | "left" | "right" | "kick-right" | "kick-left" | "stab" | "hook-left" | "hook-right";
+export type Swing = "overhead" | "left" | "right" | "kick-right" | "kick-left" | "stab" | "hook-left" | "hook-right" | "usurp" | "chisel";
 
 /**
  * What a hand holds, as the rules see it: its weapon's weight ("baseline": empty), which class's own weapon it is, whether its blows carry the
  * weapon's effect (`eternal`, every weapon's) and whether that effect is paid all in Death (`mortal`: an ordinary weapon), and whom it attacked
- * last turn (the Jagged Chisel). Your right hand is your own fields (`weapon`, `weaponItem`, `eternal`, `mortalWeapon`, `lastTarget`); your left
+ * last turn (the Broken Shortsword). Your right hand is your own fields (`weapon`, `weaponItem`, `eternal`, `mortalWeapon`, `lastTarget`); your left
  * hand is `Player.offhand`.
  */
 export interface Hand {
@@ -182,6 +182,8 @@ export interface Hand {
   eternal?: boolean;
   mortal?: boolean;
   lastTarget?: string;
+  /** A Waxed Torch lit by Usurp Flame: Flaming until the fight ends or its Flame Blast spends it (its Poise and Deadly swap: `flamed` in rules.ts). */
+  flaming?: boolean;
 }
 
 export interface Player extends Fighter {
@@ -197,6 +199,11 @@ export interface Player extends Fighter {
   headItem?: HeadItem;
   /** What you did last turn, if it happened (a Rest broken by a blow does not count): the Shortsword and the Axe look back at it. */
   lastAction?: ActionType;
+  /**
+   * What you did last turn was an Attack or Block made with both hands (one weapon, or none, held in both): the hand that led it. Only a look: you
+   * hold your stance with the weapon still in both hands until you do something else.
+   */
+  lastBoth?: Side;
   /** Healing item charges, spent automatically to revive. */
   charges: number;
   /** True during the protected turn after falling with a charge left. Health stays at 0 until the
@@ -210,6 +217,14 @@ export interface Player extends Fighter {
   maxEternity: number;
   /** Your right hand's weapon is not eternal: its effect still works, but it can't draw on Eternity, and every bit of it is paid in Death. */
   mortalWeapon?: boolean;
+  /** Your right hand's Waxed Torch is Flaming (see `Hand.flaming`; the left hand's is `offhand.flaming`). */
+  flaming?: boolean;
+  /**
+   * Reap (the Barbarian's Axe's skill) holds the axe up in both hands: the hand that holds it. Until your next attack (or a stagger, or a fall) only
+   * the one-handed Attack and Block are gone: each is made with both hands, the other hand's weapon set aside, and that Attack (Reap's) only at Close
+   * enemies. Everything else is as ever: a Kick, a skill (an attack, so it ends Reap), a Dodge or a Rest (which keep it).
+   */
+  reaping?: Side;
 }
 
 export interface Enemy extends Fighter {
@@ -297,6 +312,8 @@ export type CombatEvent =
   | { kind: "burned"; who: string; damage: number }
   /** A lit ally is staggered at the end of the turn and dies: its flame streams into the hand of `by`, who is not staggered himself. */
   | { kind: "drained"; who: string; by: string }
+  /** Before the next turn is planned (a turn's last beat), `who`'s Death decays: `death` of it lost, and `damage` Health lost with it (no armor stops it). */
+  | { kind: "decay"; who: string; death: number; damage: number }
   /** A shockwave from `attacker` hits its ally `target`: `damage` health lost, `fatigue` taken. */
   | { kind: "splash"; attacker: string; target: string; damage: number; fatigue: number }
   /** A direct waxing hit: `who` is now Waxed (`bonus`: extra Fatigue, if it already was). */

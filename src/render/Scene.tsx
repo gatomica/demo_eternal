@@ -5,7 +5,7 @@ import { StringAura } from "./StringCounter";
 import { Fragment, memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Variant } from "../core/bestiary";
 import type { ArmorItem, ArmorTier, HeadItem, Side, WeaponItem, WeaponTier } from "../core/types";
-import { BODY_FORWARD, BODY_RADIUS, EYE_HEIGHT, orbitBox, orbitCamera, BODY_SIDE_SLOT, type Cam, darkAt, floorDisc, SHADE_RADIUS, ease, easeOut, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, facingVec, focusOf, NEAR, planningCamera, project, projectPoint, right, type MoveStage, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec, yawOf } from "./camera";
+import { BODY_FORWARD, BODY_RADIUS, EYE_HEIGHT, FIGURE_HEIGHT, orbitBox, orbitCamera, BODY_SIDE_SLOT, type Cam, darkAt, floorDisc, SHADE_RADIUS, ease, easeOut, figureBox, HORIZON, LIGHT, lerpAngle, lerpCam, lerpVec, facingVec, focusOf, NEAR, planningCamera, project, projectPoint, right, type MoveStage, type SceneShot, screenOf, shotCamera, type ShotCamera, toCamera, trackingCamera, type Vec, yawOf } from "./camera";
 import { ClangBurst, EternityHalo, FlameHit, HaloBurst, ImpactRing, type Projectile, ProjectileShape, Shockwave } from "./effects";
 import type { Pt } from "./geom";
 import { Blood, Shards } from "./HealthBar";
@@ -99,8 +99,20 @@ export interface SceneFigure {
   offWeapon?: WeaponTier;
   /** The player's two-handed Attack or Block: one weapon (or none) held in both hands (Sleepwalker3D's `both`), or a weapon in each, the left arm swinging `offPose` (its `offPose`). */
   both?: boolean;
+  /** With `both`, the hand leading the grip when no hand is at work (a stance held in both hands: Sleepwalker3D's `bothLead`). */
+  bothLead?: Side;
   offPose?: PoseName;
   offItem?: WeaponItem;
+  /** The player's Waxed Torch in the right (`fire`) or left (`offFire`) hand is Flaming (Sleepwalker3D's `gear.fire`, `gear.offFire`). */
+  fire?: boolean;
+  offFire?: boolean;
+  /** The hand whose Barbarian's Axe is a scythe (Reap; Sleepwalker3D's `gear.scythe`). */
+  scythe?: Side;
+  /** The player turned further round as it swings, and its wind-up's turn (Reap's spin; Sleepwalker3D's `spin`, `spinFrom`). */
+  spin?: number;
+  spinFrom?: number;
+  /** The pose the player's swing was made from, when not its own wind-up (Reap's Rest: Sleepwalker3D's `swungFrom`). */
+  swungFrom?: PoseName;
   /** The player's pose drawn mirrored, the gear not (the Left leg leading stance: Right leg leading's mirror; Sleepwalker3D's `mirror`). */
   mirror?: boolean;
   /** The player's Hookshot as it plays: the sickle out on its braid (Sleepwalker3D's `hook`). */
@@ -174,7 +186,10 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   /** The light dying (0 to 1, over `ms`), all but one figure's flame, which keeps burning (or the glow of one figure's own light, the guide's orb). */
   dark?: { level: number; ms: number; flame?: string; glow?: string };
   /** Flames streaming from figures, each arching over another, into its candle hand. */
-  usurpTrails?: { from: string; to: string; key: string; /** Red wisps (`UsurpWisps`) taking this many ms to reach the hand, instead of the fire arch. */ wisps?: number }[];
+  usurpTrails?: {
+    from: string; to: string; key: string; /** Red wisps (`UsurpWisps`) taking this many ms to reach the hand, instead of the fire arch. */ wisps?: number;
+    /** Into this marker instead of the hand (`data-fire-anchor`: your Waxed Torch's bulb, for your Usurp Flame). */ toAnchor?: string;
+  }[];
   /** The Warden's arena: sleepwalkers sealed into its floor and walls. */
   arena?: boolean;
   /** The sealed sleepwalkers' candles (and the waxed remains') burn. */
@@ -253,6 +268,15 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
   const posNow = (id: string, at?: number) => {
     const m = pos.current.get(id);
     return m ? lerpVec(m.from, m.to, movedOf(m, at)) : undefined;
+  };
+  /**
+   * Where the player's blow is aimed (Sleepwalker3D's `aim`): the middle of the enemy it is made at, where it stands now and half its height up. Only
+   * the player's swings are aimed so far (an enemy's are tuned by hand).
+   */
+  const aimOf = (f: SceneFigure) => {
+    if (!f.player3d || !f.faceToward) return undefined;
+    const foe = figures.find(g => g.id === f.faceToward!.id), p = posNow(f.faceToward.id);
+    return foe && p ? { x: p.x, z: p.z, y: (FIGURE_HEIGHT / 2) * (foe.scale ?? 1) } : undefined;
   };
   const camNow = (k = eased()): Cam => {
     const { from, to, fromYaw, tracking } = cam.current;
@@ -725,7 +749,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         >
           {f.holdsString && !f.dead && <StringAura layer="back" spread={f.body ? 2.4 : 1} />}
           <div key={wrapKey(f)} className={`fig-wrap ${f.classes.join(" ")}`}>
-            {f.dead === "pieces" && !((f.sleepwalker3d || f.player3d) && w > 0) ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.warden3d && w > 0 ? <Warden3D pose={f.pose} lingerFrom={f.lingerFrom} arm={f.arm} phase2Look={f.phase2Look} flailFire={f.flailFire} dead={!!f.dead} charred={f.charred} {...drawOf(f, at, box)} scale={f.scale} rise={riseOf(f)} w={w} h={h} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : (f.sleepwalker3d || f.player3d) && w > 0 ? <Sleepwalker3D pose={f.pose} hand={f.hand} punch={f.punch} both={f.both} offPose={f.offPose} mirror={f.mirror} hook={f.hook} weapon={f.weapon} offWeapon={f.offWeapon} gear={f.player3d ? { weaponItem: f.weaponItem, offItem: f.offItem, armor: f.armor, armorItem: f.armorItem, headItem: f.headItem } : undefined} hooded={f.hooded} encased={f.encased} waxCaked={f.waxCaked && !f.dead} dead={!!f.dead} eternalFlash={f.eternalFlash} swayId={f.id} {...drawOf(f, at, box)} scale={f.scale} w={w} h={h} /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} {...drawOf(f, at, box)} scale={f.scale} w={w} h={h} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
+            {f.dead === "pieces" && !((f.sleepwalker3d || f.player3d) && w > 0) ? <Remains weapon={f.weapon} armor={f.armor} hooded={f.hooded} /> : f.warden3d && w > 0 ? <Warden3D pose={f.pose} lingerFrom={f.lingerFrom} arm={f.arm} phase2Look={f.phase2Look} flailFire={f.flailFire} dead={!!f.dead} charred={f.charred} {...drawOf(f, at, box)} scale={f.scale} rise={riseOf(f)} w={w} h={h} /> : f.dead === "cloak" ? <CloakRemains charred={f.charred} /> : f.dead === "guide" ? <GuideRemains /> : (f.sleepwalker3d || f.player3d) && w > 0 ? <Sleepwalker3D pose={f.pose} hand={f.hand} punch={f.punch} both={f.both} bothLead={f.bothLead} offPose={f.offPose} mirror={f.mirror} hook={f.hook} weapon={f.weapon} offWeapon={f.offWeapon} gear={f.player3d ? { weaponItem: f.weaponItem, offItem: f.offItem, armor: f.armor, armorItem: f.armorItem, headItem: f.headItem, fire: f.fire, offFire: f.offFire, scythe: f.scythe } : undefined} spin={f.spin} spinFrom={f.spinFrom} swungFrom={f.swungFrom} aim={aimOf(f)} hooded={f.hooded} encased={f.encased} waxCaked={f.waxCaked && !f.dead} dead={!!f.dead} eternalFlash={f.eternalFlash} swayId={f.id} {...drawOf(f, at, box)} scale={f.scale} w={w} h={h} /> : f.variant === "waxed" && w > 0 ? <Waxed3D meldLegs={!!f.body} pose={f.pose} hand={f.hand} weapon={f.weapon} encased={f.encased} hideFlame={f.headFlame === "blaze"} eternalFlash={f.eternalFlash} {...drawOf(f, at, box)} scale={f.scale} w={w} h={h} /> : <StickFigure noShade view={f.view} straight={f.straight} foe={f.foe} hand={f.hand} sides={f.sides} pose={f.pose} weapon={f.weapon} armor={f.armor} weaponItem={f.weaponItem} armorItem={f.armorItem} headItem={f.headItem} trail={f.trail} variant={f.variant} arm={f.arm} lingerFrom={f.lingerFrom} smokeAgo={f.smokeSince !== undefined ? performance.now() - f.smokeSince : undefined} phase2Look={f.phase2Look} flailFire={f.flailFire} waxCaked={f.waxCaked} eternalFlash={f.eternalFlash} hooded={f.hooded} encased={f.encased} />}
             {headFlames.has(f.id) && <FlameAnchor id={f.id} x={headFlames.get(f.id)![0] - box.x} y={headFlames.get(f.id)![1] - box.y} />}
             {f.classes.includes("fx-break") && <Shards />}
             {f.classes.includes("fx-hit") && <Blood />}
@@ -807,7 +831,7 @@ export function Scene({ figures, shot, projectiles = [], dark, usurpTrails = [],
         const from = flameSpot(a.f, a.box, a.at);
         const hand = handSpot(b.f, b.box, b.at);
         // (the wisps fly up first, over his head, then come down into his hand: as the old trail of fire arched over him)
-        if (usurpTrail.wisps) return <UsurpWisps key={usurpTrail.key} from={from} to={hand} ms={usurpTrail.wisps} peak={b.box.y - b.box.h * 0.1} />;
+        if (usurpTrail.wisps) return <UsurpWisps key={usurpTrail.key} from={from} to={hand} ms={usurpTrail.wisps} peak={b.box.y - b.box.h * 0.1} toAnchor={usurpTrail.toAnchor} />;
         // Arching up over him: the control point well above both.
         const ctl: Pt = [(from[0] + hand[0]) / 2, Math.min(from[1], hand[1]) - b.box.h * 0.22];
         const N = 28, w = b.box.h * 0.05;

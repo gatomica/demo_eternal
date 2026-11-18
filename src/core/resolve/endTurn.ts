@@ -4,6 +4,7 @@
  */
 import { kindOf } from "../bestiary";
 import { reviveHealth } from "../rules";
+import { handHasSkill } from "../skills";
 import { stanceAfter } from "../stance";
 import { backOnFeet, fatigueGone } from "./statuses";
 import type { Turn } from "./turn";
@@ -55,15 +56,23 @@ export function endTurn(t: Turn) {
   }
   // Your stance for the next turn: what you did decides it, unless it did not happen (you were put down first), and a stagger or a fall
   // leaves you in idle (to kneel, and to stand up again).
-  if (p.hp <= 0 || p.staggered || revivedNow) { p.stance = "idle"; p.lastAction = undefined; }
+  if (p.hp <= 0 || p.staggered || revivedNow) { p.stance = "idle"; p.lastAction = undefined; p.lastBoth = undefined; p.reaping = undefined; }
   else if (t.act && !t.out.has(p.id) && !t.cancelled.has(p.id)) {
     // (A Rest broken by a blow leaves you lowered, as you flinched: it was no rest.)
     p.stance = t.act.type === "rest" && t.interrupted.has(p.id) ? "low" : stanceAfter(t.act, t.swing);
     p.lastAction = t.act.type === "rest" && t.interrupted.has(p.id) ? undefined : t.act.type;
-  } else p.lastAction = undefined;
+    // (a two-handed blow or Block leaves the weapon in both hands; a Kick is no blow of the hands)
+    p.lastBoth = (t.act.type === "attack" || t.act.type === "block") && t.act.both && !t.act.kick ? t.act.hand ?? "right" : undefined;
+    // Reap: its Rest, if it goes through (not broken by a blow, nor you put down first, above), takes the axe up in both hands, straightened into a
+    // scythe; the attack that follows is its own, and ends it.
+    if (t.act.type === "rest" && t.act.skill === "reap" && !t.interrupted.has(p.id) && handHasSkill(p, t.act.hand ?? "right", "reap")) p.reaping = t.act.hand ?? "right";
+    else if (t.act.type === "attack") p.reaping = undefined;
+  } else { p.lastAction = undefined; p.lastBoth = undefined; }
+  // (held up in both hands, it is drawn so between turns too)
+  if (p.reaping) p.lastBoth = p.reaping;
   // Wax only lasts while there's Fatigue to hold it (a staggered fighter keeps it until it recovers).
   for (const f of fighters) if ((f.waxed || f.coated) && f.fatigue <= 0 && !f.staggered) fatigueGone(f);
-  // Whom each one attacked this turn (the Jagged Chisel bites deeper into them if it attacks them again next turn).
+  // Whom each one attacked this turn (the Broken Shortsword bites deeper into them if it attacks them again next turn).
   // (Yours by the hand that struck: the other hand attacked no one.)
   for (const f of fighters) f.lastTarget = f === p && t.act?.hand === "left" ? undefined : t.attacked.get(f.id);
   p.offhand = { ...p.offhand, lastTarget: t.act?.hand === "left" ? t.attacked.get(p.id) : undefined };

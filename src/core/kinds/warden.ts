@@ -7,8 +7,6 @@ import { kindOf, type EnemyKind } from "../bestiary";
 import { parsePattern } from "../patterns";
 import type { CombatState, Enemy, TurnReport } from "../types";
 
-/** A flaming flail's direct hit deals this much of its damage again, as extra damage. */
-const FLAMING_BONUS = 1 / 4;
 
 /** A waxed ally's flame the Warden could take this turn: one that is staggered or about to clutch its flame. */
 function alliesToUsurp(state: CombatState): string[] {
@@ -91,18 +89,19 @@ export const WARDEN: EnemyKind = {
   armor: "normal",
   revives: 1,
   flags: { sealed: false, phase2: false, flaming: false, phase2Pending: false },
-  // (Her flail is her weapon, the Waxed Torch's stats, but the Jagged Chisel's while it is flaming: `blowLike`. Her other attacks are each like a
-  // weapon of their own: Wax Punch plain (no modifiers), Fan Flames the Chisel, Flame Blast the Axe; Usurp Flame deals nothing and costs nothing,
-  // but puts 0.25 Death on what it takes the flame of (0.25 Light, 0.25 Deadly). Her wax arm parries with 0.2 Defense (Wax Guard).)
+  // (Her flail is her weapon, a Waxed Torch by the rules: its stats, Flaming while her `flaming` flag is on (its Poise turned to Deadly, as a Flaming
+  // torch's), and it waxes what it hits, blocked or not, unless it is Flaming (core/resolve/attacks.ts `waxingOf`). Her other attacks are each like a
+  // weapon of their own: Wax Punch plain (no modifiers), Fan Flames the Chisel, Flame Blast the Axe; Usurp Flame is the Waxed Torch's skill's (0.25 Light and 0.25 Deadly, in place of any weapon's):
+  // no damage, no cost, no Poise, and 0.25 Death on what it takes the flame of. Her wax arm parries with 0.2 Defense (Wax Guard).)
   pattern: parsePattern("Penitent Warden", `
     actions:
       Usurp Flame:   attack, light 0.25, deadly 0.25, *Sealed, *Usurpable   // its hit takes the flame: he is unsealed, a waxed sealed whole (dead)
-      Flail Swing:   attack, #waxing, *Far or *Flaming
-      Rising Flail:  attack, #waxing, *Close or *Flaming
-      Flail Slam:    attack, #waxing, #shockwave
+      Flail Swing:   attack, *Far or *Flaming
+      Rising Flail:  attack, *Close or *Flaming
+      Flail Slam:    attack, #area
       Wax Punch:     attack, plain, *Sealed
       Fan Flames:    attack, chisel, ranged, *Unsealed, #fire
-      Flame Blast:   attack, axe, ranged, *Unsealed, #shockwave, #fire
+      Flame Blast:   attack, axe, ranged, *Unsealed, #area, #fire
       Spin Guard:    block
       Wax Guard:     block, defense 0.2, *Sealed
       Turn Away:     maneuver, retreat, *Close
@@ -181,10 +180,8 @@ export const WARDEN: EnemyKind = {
       event({ kind: "fall", who: ally.id });
     }
   },
-  // His flaming slam and his flame blast send a shockwave through the whole fight: his waxed are hit too.
-  shockwave: self => self.intent.action !== "Flail Slam" || !!self.flags.flaming,
-  // The flail (its #waxing attacks): the Waxed Torch's, her weapon's, but while it is flaming the Jagged Chisel's (Death on what it hits).
-  blowLike: self => (self.flags.flaming && self.intent.tags?.includes("waxing") ? "chisel" : undefined),
+  // His flaming slam and his flame blast are Area attacks: his waxed are hit too, and everyone hit takes half.
+  area: self => self.intent.action !== "Flail Slam" || !!self.flags.flaming,
   // He picks after the waxed, to see which of them is about to Clutch Flame.
   decidesLast: true,
   // (Usurp Flame is a fixed rule: the Model viewer plays it with you resting.)
@@ -222,9 +219,7 @@ export const WARDEN: EnemyKind = {
     const flames = alliesToUsurp(state);
     return flames.length ? flames[Math.floor(rng() * flames.length)] : undefined;
   },
-  // Usurp Flame's hit takes the flame: he is Unsealed, and a waxed is sealed whole (dead), you until you get up.
-  // A direct hit from his flail (`#waxing`) leaves wax behind; once his flame is free (phase
-  // two) it leaves none, but set on fire it burns for extra damage.
+  // Usurp Flame's hit takes the flame: he is Unsealed, and a waxed is sealed whole (dead), you until you get up. (His flail's wax is the Waxed Torch's rule.)
   onDirectHit: hit => {
     if (hit.self.intent.action === "Usurp Flame") {
       hit.event({ kind: "usurp", who: hit.self.id, target: hit.target.id });
@@ -235,13 +230,6 @@ export const WARDEN: EnemyKind = {
       }
       return;
     }
-    if (!hit.tags.includes("waxing")) return;
-    if (hit.self.flags.flaming) hit.burn(hit.damage * FLAMING_BONUS);
-    if (!hit.self.flags.phase2) hit.wax();
-  },
-  // The wax does not need a clean hit: his flail leaves it on a target that blocks it too, as long as it is not covered already.
-  onBlocked: hit => {
-    if (hit.tags.includes("waxing") && !hit.self.flags.phase2 && !hit.target.waxed) hit.wax();
   },
   afterTurn: r => {
     const { self, action, outcome } = r;

@@ -83,14 +83,17 @@ function Crop({ region: [x, y, w, h], className, children }: { region: [number, 
 /** Where a weapon's model is seen from: a little round and above, as in the Gear viewer's 3/4 view (degrees). */
 const GEAR_YAW = -30, GEAR_PITCH = -18;
 
-/** A weapon's 3D model (render/gear3d.ts) as a picture, drawn as the Gear viewer draws it: `tilted` is slanted to fill a square place. */
-function Weapon3D({ model, tilted }: { model: GearModel; tilted: boolean }) {
+/**
+ * A weapon's 3D model (render/gear3d.ts) as a picture, drawn as the Gear viewer draws it: `tilted` is slanted to fill a square place. `turned`: seen
+ * from its other side (the view turned half round it), so it points the other way across the picture, as the same solid, never a mirror image.
+ */
+function Weapon3D({ model, tilted, turned = false }: { model: GearModel; tilted: boolean; turned?: boolean }) {
   const drawn = useMemo(() => {
     const [pw, ph] = tilted ? [150, 150] : [240, 100];
     const { lo, hi } = boundsOf(model.prims);
     const mid: V3 = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
     const size = Math.max(hi[0] - lo[0], (hi[1] - lo[1]) * 1.6, 12);
-    const a = (GEAR_YAW * Math.PI) / 180, b = (GEAR_PITCH * Math.PI) / 180;
+    const a = ((GEAR_YAW + (turned ? 180 : 0)) * Math.PI) / 180, b = (GEAR_PITCH * Math.PI) / 180;
     const ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b);
     const pxPerUnit = (pw * (tilted ? 0.8 : 0.9)) / size, dist = size * 4;
     const view = (p: V3): V3 => {
@@ -101,10 +104,10 @@ function Weapon3D({ model, tilted }: { model: GearModel; tilted: boolean }) {
     const scale = (v: V3) => (dist / (dist + v[2])) * pxPerUnit;
     const project = (v: V3): readonly [number, number] => { const k = scale(v); return [+(pw / 2 + v[0] * k).toFixed(2), +(ph / 2 + v[1] * k).toFixed(2)]; };
     return { shapes: drawGear(model.prims, { view, project, scale }), pw, ph };
-  }, [model, tilted]);
+  }, [model, tilted, turned]);
   return (
     <svg viewBox={`0 0 ${drawn.pw} ${drawn.ph}`} className={`gear-sprite is-weapon ${tilted ? "is-tilted" : ""}`} aria-hidden="true">
-      <g transform={tilted ? `rotate(-40 ${drawn.pw / 2} ${drawn.ph / 2})` : undefined}>
+      <g transform={tilted ? `rotate(${turned ? 40 : -40} ${drawn.pw / 2} ${drawn.ph / 2})` : undefined}>
         {drawn.shapes.map((d, i) => <GearShape key={i} d={d} />)}
       </g>
     </svg>
@@ -114,14 +117,15 @@ function Weapon3D({ model, tilted }: { model: GearModel; tilted: boolean }) {
 /**
  * The picture of a piece of gear, from its 3D model: a weapon as modelled (`tilted` slants it to fill a square place), armor and head gear
  * by themselves, shaped as they are worn on the 3D body the fights draw you with (the body itself not drawn), cut down to the chest or the head.
+ * `turned`: a weapon seen from its other side, pointing the other way (the left hand's, crossed over the right's on the wheel).
  */
-export function GearSprite({ slot, tier, tilted, item }: { slot: Slot; tier: WeaponTier | ArmorTier; tilted?: boolean; /** One of the starting classes' own pieces: its look. */ item?: string }) {
+export function GearSprite({ slot, tier, tilted, item, turned }: { slot: Slot; tier: WeaponTier | ArmorTier; tilted?: boolean; /** One of the starting classes' own pieces: its look. */ item?: string; turned?: boolean }) {
   if (slot === "weapon") {
     const model = modelOfWeapon(tier as WeaponTier, item as WeaponItem | undefined);
-    if (model) return <Weapon3D model={model} tilted={!!tilted} />;
+    if (model) return <Weapon3D model={model} tilted={!!tilted} turned={turned} />;
     return (
-      <svg viewBox={tilted ? "-12.5 -37.5 52 52" : "-9 -9 52 18"} className={`gear-sprite is-weapon ${tilted ? "is-tilted" : ""}`} aria-hidden="true">
-        <g transform={tilted ? "rotate(-40)" : undefined}><Weapon tier={tier as WeaponTier} item={item as WeaponItem | undefined} /></g>
+      <svg viewBox={tilted ? (turned ? "-39.5 -37.5 52 52" : "-12.5 -37.5 52 52") : "-9 -9 52 18"} className={`gear-sprite is-weapon ${tilted ? "is-tilted" : ""}`} aria-hidden="true">
+        <g transform={tilted ? (turned ? "rotate(-140)" : "rotate(-40)") : undefined}><Weapon tier={tier as WeaponTier} item={item as WeaponItem | undefined} /></g>
       </svg>
     );
   }

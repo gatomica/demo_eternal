@@ -5,7 +5,7 @@ import { type ReactNode, useEffect, useEffectEvent, useLayoutEffect, useMemo, us
 import { PHASE_TWO, playMusic } from "../audio/music";
 import { eternalSfx, play as playSfx, prepare as prepareSfx, sfxFor } from "../audio/sfx";
 import { ActionWheel, type Anchor, type WheelHints } from "./ActionWheel";
-import { APPROACH_MS, BLOCK_PUSH, HOOK_FLY_MS, HOOK_HOLD_MS, HOOK_PULL_MS, HOOK_WIND_MS, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_LATERAL, DODGE_PAST, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, PREP_MS, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, USURP_TURN_MS, USURP_WISP_MS, USURP_AFTER_MS, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
+import { APPROACH_MS, BLOCK_PUSH, HOOK_FLY_MS, HOOK_HOLD_MS, HOOK_PULL_MS, HOOK_WIND_MS, CAMERA_FOLLOW, DODGE_BACK, DODGE_DELAY_MS, DODGE_LATERAL, DODGE_PAST, effectsOf, ENGAGE_GAP, FALL_BACK, FORCED_TURN_MS, IGNITE_DARK, IGNITE_MARKS, indexTurn, involvedEnemy, isAttackStep, KNOCK_MS, KNOCKBACK, KNOCKBACK_SKILL_MS, MIN_ATTACK_PHASE_MS, NUDGE_MS, OPENING_LEAD_IN, PREP_MS, phaseAt, phaseFor, phaseTwoOf, type Playback, RAISE_CAMERA_MS, REST_ANIM_MS, REST_POSE_MS, SETTLE_MS, STEP_MS, STRIKE_GAP, USURP_STAGES, USURP_TURN_MS, USURP_WISP_MS, USURP_AFTER_MS, usurpOf, type UsurpStage, viewAt, WAKE } from "./playback";
 import { LessonBox } from "./LessonBox";
 import { prepareWalk, speak } from "../audio/walk";
 import { useDev } from "../ui/dev";
@@ -14,9 +14,9 @@ import { alternativeOf, preferredAlternative, rememberAlternative } from "./pref
 import { defaultSelection, moveSelection, rowsOf, sameSel, type Selection, type SubSlot, type Wheel, type WheelOption } from "./selection";
 import { kindOf } from "../core/bestiary";
 import { forcedAction, resolveSkip, resolveTurn, snapshotOf } from "../core/resolve";
-import { attackCost, blowShares, bothHands, bothHandsLead, dualWielding, restRecovery, WEAPONS, weaponOf } from "../core/rules";
-import { type SkillId, SKILLS, skillPayment, skillShares, skillsOf, targetsOf } from "../core/skills";
-import type { CombatEvent, CombatState, Enemy, Opening, Player, PlayerAction, Side, Stance, Swing, WeaponItem, WeaponTier } from "../core/types";
+import { attackCost, blowShares, bothHands, bothHandsLead, dualWielding, heldStats, resistance, restRecovery, WEAPONS } from "../core/rules";
+import { bothHeld, heldOn, type SkillId, SKILLS, skillPayment, skillShares, skillsOf, skillWeapon, targetsOf } from "../core/skills";
+import type { CombatEvent, CombatState, Enemy, Opening, Player, PlayerAction, Side, Stance, Step, Swing, WeaponItem, WeaponTier } from "../core/types";
 import { ITEMS } from "../explore/items";
 import { behind, right as rightOf, bodiesOfEnemies, type Cam, closeIn, facingToward, figureBox, formation, lerpAngle, planningCamera, pushedAway, SCENE_TILT, type SceneShot, shotCamera, type ShotCamera, sub, type Vec, yawOf } from "../render/camera";
 import type { Projectile } from "../render/effects";
@@ -49,9 +49,21 @@ const lookOfFoe = (e: Enemy) => lookOf(kindOf(e).variant);
 /** The player is drawn in 3D in a fight, on the Sleepwalker's body (`player3dPose`, Sleepwalker3D's `gear`). */
 const PLAYER_3D = true;
 /** The poses the left hand's Attack or Block is drawn mirrored in: its wind-ups, strikes and the Block itself (the stances around them are held as they are). */
-const PUNCH_POSES = new Set<PoseName>(["attack", "punch", "strike", "swing-left-up", "swing-left", "swing-right-up", "swing-right", "block", "p3-stab-up", "p3-stab", "p3-hook-up", "p3-hook-throw"]);
+/** Your stances (as the flat poses name them): held in both hands after a two-handed blow (`holdBoth`). */
+const STANCE_POSES = new Set<PoseName>(["idle", "low", "low-left", "low-right"]);
+const PUNCH_POSES = new Set<PoseName>(["attack", "punch", "strike", "swing-left-up", "swing-left", "swing-right-up", "swing-right", "block", "p3-stab-up", "p3-stab", "p3-hook-up", "p3-hook-throw", "p3-chisel-up", "p3-chisel"]);
 
 /** What the wheel calls a hand's Attack or Block: the weapon it holds ("Brick Hammer", "Bronze Shortsword"), or the hand itself when it is empty. */
+/** The enemy your Usurp Flame (the Waxed Torch's skill) landed on in this step, if it did (hit or blocked, not dodged): whose flame streams into your torch. */
+const yourUsurpOf = (step: { events: CombatEvent[] } | undefined): string | undefined => {
+  const events = step?.events ?? [];
+  if (!events.some(ev => ev.kind === "eternal" && ev.attacker === "player" && ev.effect === "usurp")) return undefined;
+  return events.find((ev): ev is Extract<CombatEvent, { kind: "attack" }> => ev.kind === "attack" && ev.attacker === "player" && ev.result !== "dodged")?.target;
+};
+
+/** Reap's spin: how much further round (radians) the figure turns as its attack winds up (to the axe's side) and as it lands (to the other side). */
+const REAP_SPIN = Math.PI / 4;
+
 const handName = (weapon: WeaponTier, item: WeaponItem | undefined, side: Side): string =>
   weapon === "baseline" ? (side === "left" ? "Left hand" : "Right hand") : item ? ITEMS[item].name : WEAPONS[weapon].name;
 /** Whether the game itself (fights, not the Model viewer) draws the Warden from the 3D rig. Off while it is built. */
@@ -346,7 +358,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    * one with no enemy to aim at is faded. Not in the lesson, and not without a weapon that has a skill.
    */
   const skillOption = (): WheelOption | null => {
-    const p = fight.player, list = skillsOf(p);
+    // (Reap itself, while it already holds the axe up, is not offered: its attack is the Attack)
+    const p = fight.player, list = skillsOf(p).filter(x => !(p.reaping && x.skill === "reap"));
     if (current || !list.length) return null;
     const alternatives: NonNullable<WheelOption["alternatives"]> = { up: null, left: null, down: null, right: null };
     /** Where each hand's skills go, in turn: its own side first. */
@@ -359,18 +372,51 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       const pay = skillPayment(p, skill, left ? !!p.offhand.mortal : !!p.mortalWeapon);
       alternatives[slot] = {
         label: sk.name,
-        action: { type: sk.type, skill, hand },
-        look: { kind: "weapon", tier: weapon, item, side: hand },
-        disabled: !targetsOf(fight, skill).length,
-        skill: { blow: skillShares(p, skill, weaponOf(weapon, item)), eternity: pay.price / p.maxEternity, death: pay.death / p.maxEternity },
+        // (a Rest skill, Reap, is made on yourself: nothing to aim)
+        action: sk.type === "rest" ? { type: "rest", skill, hand, target: "self" } : { type: sk.type, skill, hand },
+        look: { kind: "weapon", tier: weapon, item, side: hand, flaming: left ? p.offhand.flaming : p.flaming },
+        disabled: sk.type === "attack" && !targetsOf(fight, skill).length,
+        // (Reap's bar: the attack it readies, the axe in both hands)
+        skill: { blow: skillShares(p, skill, skillWeapon(p, hand)), eternity: pay.price / p.maxEternity, death: pay.death / p.maxEternity },
       };
     }
     // Closed, it is the skill you used last (else the first there is).
     const preferred = alternatives[preferredAlternative("skill")] ?? (["right", "left", "up", "down"] as SubSlot[]).map(x => alternatives[x]).find(Boolean)!;
     return { ...preferred, label: "Skill", alternatives };
   };
+  /**
+   * The wheel for a selection: its actions (`wheelFor`), and on a staggered enemy every Attack marked so (`WheelOption.staggered`), its bar showing the
+   * Fatigue it would put on it as half as much damage.
+   */
   const wheelOf = (sel: Selection): Wheel => {
+    const w = wheelFor(sel), foe = sel.kind === "enemy" ? fight.enemies.find(e => e.id === sel.id) : undefined;
+    if (!foe?.staggered) return w;
+    const staggered = { resistance: resistance(foe) };
+    const mark = (o: WheelOption | null): WheelOption | null => (o && o.action.type === "attack" ? { ...o, staggered, alternatives: o.alternatives && markAll(o.alternatives) } : o);
+    const markAll = (a: Record<SubSlot, WheelOption | null>) => ({ up: mark(a.up), left: mark(a.left), down: mark(a.down), right: mark(a.right) });
+    return markAll(w);
+  };
+  const wheelFor = (sel: Selection): Wheel => {
     const opt = (label: string, action: PlayerAction, look?: WheelOption["look"]): WheelOption => ({ label, action, ...(look ? { look } : {}) });
+    // While Reap holds the axe up in both hands, only the one-handed Attack and Block are gone: each is made with both hands (the Attack is Reap's, at a
+    // Close enemy). Everything else is as ever: the Kick, the skills, a Dodge, a Rest.
+    const reap = fight.player.reaping;
+    if (reap && sel.kind === "enemy") {
+      const p = fight.player, [r, l] = bothHeld(p), look = { kind: "both", right: r, left: l } as const;
+      const close = fight.enemies.find(e => e.id === sel.id)?.line === "front";
+      const reapOpt: WheelOption = {
+        label: SKILLS.reap.name, action: { type: "attack", target: sel.id, both: true, hand: reap }, look, disabled: !close,
+        skill: { blow: skillShares(p, "reap", skillWeapon(p, reap)), eternity: SKILLS.reap.scaling, death: skillPayment(p, "reap", reap === "left" ? !!p.offhand.mortal : !!p.mortalWeapon).death / p.maxEternity },
+      };
+      const blockOpt = opt("Both hands", { type: "block", target: sel.id, both: true, hand: reap }, look);
+      const kickOpt = opt("Kick", { type: "attack", target: sel.id, weight: "baseline", kick: true }, { kind: "kick" });
+      return {
+        up: { ...reapOpt, label: "Attack", alternatives: { up: reapOpt, left: null, down: kickOpt, right: null } },
+        left: opt("Dodge", { type: "maneuver", target: sel.id }),
+        down: null,
+        right: { ...blockOpt, label: "Block", alternatives: { up: blockOpt, left: null, down: null, right: null } },
+      };
+    }
     if (sel.kind === "player") {
       return {
         up: skillOption(),
@@ -382,11 +428,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // Each hand's Attack and Block is named for what it holds (the hand itself, empty).
     const p = fight.player, rightName = handName(p.weapon, p.weaponItem, "right"), leftName = handName(p.offhand.weapon, p.offhand.weaponItem, "left");
     // (and drawn as what it holds: its sprite, or the empty hand's mitten)
-    const rightLook = { kind: "weapon", tier: p.weapon, item: p.weaponItem, side: "right" } as const;
-    const leftLook = { kind: "weapon", tier: p.offhand.weapon, item: p.offhand.weaponItem, side: "left" } as const;
+    const rightLook = { kind: "weapon", tier: p.weapon, item: p.weaponItem, side: "right", flaming: p.flaming } as const;
+    const leftLook = { kind: "weapon", tier: p.offhand.weapon, item: p.offhand.weaponItem, side: "left", flaming: p.offhand.flaming } as const;
     // Both hands (the top part of each): the two weapons crossed, or the one held in both over its shadow; led by the right hand, unless only the left
     // holds a weapon.
-    const rightHeld = { tier: p.weapon, item: p.weaponItem }, leftHeld = { tier: p.offhand.weapon, item: p.offhand.weaponItem };
+    const rightHeld = heldOn(p, "right"), leftHeld = heldOn(p, "left");
     const bothLook = { kind: "both", right: rightHeld, left: leftHeld } as const, bothLead = bothHandsLead(rightHeld, leftHeld);
     return {
       up: (() => {
@@ -479,15 +525,20 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const previewCost = previewAction?.type === "attack"
     ? (() => {
       // (a Kick's own weight, else the weapon in the hand it uses, and which class's own it is)
-      const a = previewAction, left = a.hand === "left", weapon = left ? p.offhand.weapon : p.weapon, item = left ? p.offhand.weaponItem : p.weaponItem;
+      const a = previewAction, left = a.hand === "left", weapon = left ? p.offhand.weapon : p.weapon;
       // (a skill's, from its own numbers: Stab's cost cut by what it pays, the Hookshot's none)
       // (both hands': the two hands' stats together, from the two-handed base)
-      if (a.both) return blowShares(bothHands({ tier: p.weapon, item: p.weaponItem }, { tier: p.offhand.weapon, item: p.offhand.weaponItem }), true).cost * p.maxHP;
-      return a.skill ? skillShares(p, a.skill, weaponOf(weapon, item)).cost * p.maxHP : attackCost(p, a.weight ?? weapon, (a.weight ?? weapon) === weapon ? item : undefined);
+      // (while Reap holds the axe up, the attack is Reap's)
+      if (a.both && p.reaping) return skillShares(p, "reap", skillWeapon(p, p.reaping)).cost * p.maxHP;
+      if (a.both) return blowShares(bothHands(...bothHeld(p)), true).cost * p.maxHP;
+      if (a.skill) return skillShares(p, a.skill, skillWeapon(p, a.hand ?? "right")).cost * p.maxHP;
+      // (the hand's own weapon, Flaming or not; a Kick's own weight)
+      return a.weight && a.weight !== weapon ? attackCost(p, a.weight) : blowShares(heldStats(heldOn(p, left ? "left" : "right"))).cost * p.maxHP;
     })()
     : 0;
   // A skill: the Eternity it would spend flickers on your Eternity bar, and the Death on you for what Eternity can't pay on your health bar.
-  const previewPay = previewAction?.skill ? skillPayment(p, previewAction.skill, previewAction.hand === "left" ? !!p.offhand.mortal : !!p.mortalWeapon) : undefined;
+  // (Reap's Rest pays nothing: its attack does, below)
+  const previewPay = previewAction?.skill && previewAction.type === "attack" ? skillPayment(p, previewAction.skill, previewAction.hand === "left" ? !!p.offhand.mortal : !!p.mortalWeapon) : undefined;
   const previewSpend = previewPay?.spent ?? 0, previewDeath = previewPay?.death ?? 0;
   // Hovering a Rest: the Fatigue it would clear and the Health it would return flicker on your bar.
   const previewRecover = previewAction?.type === "rest" ? restRecovery(p) : undefined;
@@ -567,6 +618,15 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     front: st.enemies.filter(e => e.alive && e.line === "front").map(e => e.id),
     back: st.enemies.filter(e => e.alive && e.line === "back").map(e => e.id),
   });
+  /**
+   * Your Knockback (the Brick Hammer's skill), landed in this step (hit or blocked: its effect is on the step): where its target ends up, its spot on the
+   * back line as the turn leaves it. Undefined if it is not that, or the target is not on the back line once the turn is over.
+   */
+  const knockbackSpot = (attack: Extract<CombatEvent, { kind: "attack" }>, st: Step | undefined): Vec | undefined => {
+    if (attack.attacker !== "player" || attack.result === "dodged" || !st?.events.some(ev => ev.kind === "eternal" && ev.attacker === "player" && ev.effect === "knockback" && ev.target === attack.target)) return undefined;
+    const { front, back } = linesOf(fightRaw);
+    return back.includes(attack.target) ? formation(world.current.anchor, world.current.yaw, front, back, bodies).get(attack.target) : undefined;
+  };
 
   /** The planning camera: riding behind your shoulder, turned a little toward the selected enemy. */
   const planningShot = (anchor: Vec, yaw: number, pos: Record<string, Vec>, st: CombatState): ShotCamera => {
@@ -869,6 +929,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       }
     } else if (hookBlow) {
       // (The Hookshot: no knockback, no push; its pull is timed on its own, below.)
+    } else if (knockbackSpot(attack, step)) {
+      const knockedTo = knockbackSpot(attack, step)!;
+      // Knockback (the Brick Hammer's skill), landed, hit or blocked: the blow's knockback, all the way. Its target is driven back as the blow lands, onto its
+      // spot on the back line, where the turn leaves it (so it has nowhere left to walk when the others go to their lines); it slides as it is drawn.
+      shoot(dragBody(w.pos, attack.target, knockedTo), shot.camera, KNOCKBACK_SKILL_MS, undefined, "out", undefined, [attack.target]);
     } else if (attack.result === "hit") {
       // A clean hit knocks the target back, and it stays there.
       // (by a leap: away from where it passed, the leaper flying on)
@@ -1040,7 +1105,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     }
     if (showHints) { const key = triedKeyOf(option); if (key) triedAction(key); }
     // A skill is aimed next, unless it already has its target.
-    if (option.action.skill && !option.action.target) { startAim(option); return; }
+    if (option.action.skill && !option.action.target && SKILLS[option.action.skill].type === "attack") { startAim(option); return; }
     play(option.action);
   };
 
@@ -1339,7 +1404,7 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       // MIN_ATTACK_PHASE_MS. The last step stays long enough for a Rest's animation, if one goes through.
       playback.phase === "approach"
         ? risesNow ? 250 : hookBlow ? HOOK_WIND_MS + HOOK_FLY_MS : isAttackStep(step) ? (leapPlan.current?.key === stepKey ? leapPlan.current.approach : APPROACH_MS) + (usurpTurning() ? USURP_TURN_MS : 0) :Math.max(prepsIn(playback, step) ? PREP_MS : 0, MIN_ATTACK_PHASE_MS - (performance.now() - turnStart.current))
-        : Math.max(STEP_MS, hookBlow ? HOOK_HOLD_MS + HOOK_PULL_MS + 150 : 0, usurpAsAttack && usurpOf(step) ? USURP_WISP_MS + USURP_AFTER_MS : 0, raising?.at === playback.index ? raiseMs + USURP_AFTER_MS : 0,playback.index === playback.steps.length - 1 && resting ? REST_ANIM_MS : 0, slideMs(playback), leapPlan.current?.key === `${playback.from.turn}-${playback.index}-approach` ? leapPlan.current.after + 100 : 0),
+        : Math.max(STEP_MS, hookBlow ? HOOK_HOLD_MS + HOOK_PULL_MS + 150 : 0, usurpAsAttack && usurpOf(step) ? USURP_WISP_MS + USURP_AFTER_MS : 0, yourUsurpOf(step) ? USURP_WISP_MS + USURP_AFTER_MS : 0, raising?.at === playback.index ? raiseMs + USURP_AFTER_MS : 0,playback.index === playback.steps.length - 1 && resting ? REST_ANIM_MS : 0, slideMs(playback), leapPlan.current?.key === `${playback.from.turn}-${playback.index}-approach` ? leapPlan.current.after + 100 : 0),
     );
     return () => window.clearTimeout(timer);
   }, [playback, paused, waitingForString]);
@@ -1389,6 +1454,31 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepKey]);
+  // Your Usurp Flame: its wisps reach your torch this long after the blow lands; then the torch is Flaming.
+  // Reap's Rest going through: the axe's joint snaps straight into a scythe, with a click, as it lands.
+  useEffect(() => {
+    if (playback?.phase !== "impact" || playback.action?.type !== "rest" || playback.action.skill !== "reap") return;
+    if (playback.index === restStep("player") && fightRaw.player.reaping) playSfx("click");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepKey, playback?.phase]);
+  const [yourWispsArrived, setYourWispsArrived] = useState<string | null>(null);
+  useEffect(() => {
+    if (playback?.phase !== "impact" || !yourUsurpOf(playback.steps[playback.index])) return;
+    const t = window.setTimeout(() => setYourWispsArrived(stepKey), USURP_WISP_MS);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepKey]);
+  /**
+   * Your Waxed Torch in that hand is on fire (Flaming): as the fight stands, or in a turn, as it stood until your blow (its Usurp Flame lights it only once
+   * its wisps have gone into it; its Flame Blast puts it out as it strikes).
+   */
+  const torchFire = (hand: Side): boolean => {
+    const of = (q: Player) => (hand === "left" ? !!q.offhand.flaming : !!q.flaming);
+    if (!playback) return of(fight.player);
+    const at = strikeStep("player"), lit = playback.steps[at] && yourUsurpOf(playback.steps[at]);
+    const done = lit ? playback.index > at || (playback.index === at && yourWispsArrived === stepKey) : reached(at);
+    return done ? of(fightRaw.player) : of(playback.from.player);
+  };
   // The waxed he raises: it rises as its wisps have gone into its head.
   useEffect(() => {
     if (!raising || playback?.index !== raising.at || !reached(raising.at)) return;
@@ -1537,9 +1627,20 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     }
     return poses.telegraph;
   };
+  /**
+   * Reap's Rest this turn (the hand that holds the axe): played as that hand's Openhand held in both hands, backwards, whatever your stance: it winds up
+   * as the Openhand lands (Right Lead, for the right hand) and, as the Rest goes through, lands as the Openhand winds up (Left Lead), the joint snapping
+   * straight into a scythe (`reapNow`) with a click. The left hand's, mirrored.
+   */
+  const reapRest: Side | undefined = playback?.action?.type === "rest" && playback.action.skill === "reap" ? playback.action.hand ?? "right" : undefined;
+  /**
+   * Reap's attack this turn (the axe's hand): its Openhand, both hands, whatever your stance, made a spin: the whole figure turned further round to the
+   * weapon hand's side as it winds up, and to the free hand's as it lands (`REAP_SPIN`); its arch, aimed as every swing of yours, sweeps nearly all the way round.
+   */
+  const reapAttack: Side | undefined = playback?.action?.type === "attack" && !playback.action.kick && !playback.action.skill ? playback.from.player.reaping : undefined;
   // The left hand at work (its Attack or Block, mirrored): drawn mirrored through its wind-up and its strike (or its Block), not in the stances before
-  // and after it.
-  const leftPunch = (playback?.action?.type === "attack" || playback?.action?.type === "block") && playback.action.hand === "left";
+  // and after it. (Reap's Rest and attack made with the left hand's axe too.)
+  const leftPunch = ((playback?.action?.type === "attack" || playback?.action?.type === "block") && playback.action.hand === "left") || reapRest === "left" || reapAttack === "left";
   /** The blow is a bare-handed one in both hands (an overhead lands as a punch); a bare left hand's blow beside a weapon in the right mirrors the weapon's. */
   const punching = (leftPunch ? p.offhand.weapon : p.weapon) === "baseline" && p.weapon === "baseline";
   /** Your forced Rest (or revive) has landed this turn: you're back on your feet. */
@@ -1567,6 +1668,11 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
     // landing once the sickle has hooked: from Right Lead a backhand (Swing Right's), from any other stance an openhand (Swing Left's).
     "hook-left": { windUp: hook?.out ? "p3-hook-throw" : "p3-hook-up", strike: hook?.back ? "swing-left" : "p3-hook-throw" },
     "hook-right": { windUp: hook?.out ? "p3-hook-throw" : "p3-hook-up", strike: hook?.back ? "swing-right" : "p3-hook-throw" },
+    // Usurp Flame (the Waxed Torch's) winds up as a Stab, the torch drawn back by the hip, and lands with it raised high overhead (the Hookshot's wind-up),
+    // as the Warden holds up the flame he takes.
+    usurp: { windUp: "p3-stab-up", strike: "p3-hook-up" },
+    // Chisel (the Broken Shortsword's): the Overhead with the blade in a reverse grip, driven point down, as the Waxbound's overhead.
+    chisel: { windUp: "p3-chisel-up", strike: "p3-chisel" },
   };
   // In 3D (the player always is, in a fight) a sideways swing has its own wind-up and landing, from the one stance into the other.
   if (PLAYER_3D) {
@@ -1577,12 +1683,12 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
   const playerPoseActing: PoseName = !playback && walkOff?.player ? walkOff.player : playback
     ? playbackPose("player", p.staggered, {
         // A forced turn kneels until the Rest (or revive) brings you back; then you're up. A Rest breathes in from the start of the turn.
-        telegraph: forcedTurn ? (playerBackUp ? "idle" : "kneel") : playback.action?.type === "rest" ? "rest-in" : stancePose(startStance),
+        telegraph: forcedTurn ? (playerBackUp ? "idle" : "kneel") : reapRest ? "swing-left" : playback.action?.type === "rest" ? "rest-in" : stancePose(startStance),
         down: "kneel", windUp: swingPoses[swingOf].windUp, strike: swingPoses[swingOf].strike,
         // (the stance the turn leaves you in: from the fight as resolved, which the Model viewer's `override` would otherwise put back to the stance it started in)
         idle: stancePose(fightRaw.player.stance),
         // A Rest's pose, as it goes through: the breath out.
-        rested: playback.action?.type === "rest" ? "rest" : undefined,
+        rested: reapRest ? "swing-left-up" : playback.action?.type === "rest" ? "rest" : undefined,
         // A Block or a Maneuver holds your stance, and only takes its pose as the blow lands: blocking, or dodging forward (a Maneuver at an enemy) or back.
         guard: playback.action?.type === "block" || playback.action?.type === "maneuver"
           ? { hold: stancePose(startStance), react: playback.action.type === "block" ? "block" : playback.action.target === "self" ? "dodge-back" : "dodge-fwd", keepAfterDodge: playback.action.type === "maneuver" }
@@ -1606,9 +1712,44 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
    * one at work. A weapon in each: the left arm takes the pose the left hand's own blow would be in at this moment (its swing as it would be alone from
    * your stance, `offSwing` on your attack event; a Block's own pose), so both swing at once.
    */
-  const bothAction = (playback?.action?.type === "attack" || playback?.action?.type === "block") && !!playback.action.both;
+  const bothAction = ((playback?.action?.type === "attack" || playback?.action?.type === "block") && !!playback.action.both) || !!reapRest || !!reapAttack;
   const bothNow = PLAYER_3D && bothAction && PUNCH_POSES.has(playerPose);
-  const dualNow = bothNow && dualWielding({ tier: p.weapon, item: p.weaponItem }, { tier: p.offhand.weapon, item: p.offhand.weaponItem });
+  /**
+   * Reap holds the axe up in both hands (`Player.reaping`): the hand that holds it, the other hand's weapon set aside (not drawn). In a turn, from the
+   * moment its Rest goes through until its attack has struck.
+   */
+  const reapNow: Side | undefined = (() => {
+    if (!playback) return fight.player.reaping;
+    const act = playback.action;
+    const acted = act?.type === "rest" ? reached(restStep("player")) : act?.type === "attack" ? reached(strikeStep("player")) && !PUNCH_POSES.has(playerPose) : false;
+    return acted ? fightRaw.player.reaping : playback.from.player.reaping;
+  })();
+  /** What each hand is drawn holding: what it holds, but for a weapon Reap has set aside (from the start of its Rest's turn, the axe taken up in both). */
+  const aside = reapNow ?? reapRest;
+  const rightShown = aside === "left" ? { tier: "baseline" as WeaponTier, item: undefined } : { tier: p.weapon, item: p.weaponItem };
+  const leftShown = aside === "right" ? { tier: "baseline" as WeaponTier, item: undefined } : { tier: p.offhand.weapon, item: p.offhand.weaponItem };
+  /** Reap's spin, as this pose turns the figure: its wind-up on to the axe's side, its landing to the other (a turn to its right positive). */
+  const reapSign = reapAttack === "left" ? -1 : 1;
+  const reapSpin = reapAttack && playerPose === "swing-left-up" ? REAP_SPIN * reapSign : reapAttack && playerPose === "swing-left" ? -REAP_SPIN * reapSign : undefined;
+  const dualNow = bothNow && dualWielding(rightShown, leftShown);
+  /**
+   * After a two-handed Attack or Block (one weapon, or none, held in both: `Player.lastBoth`), your stance keeps the weapon in both hands, led by the
+   * hand that led it, until you do something else. In a turn, the stance before you act is held as the last turn left it, and the one after as this
+   * one does (a Block is held for the whole turn as it is made).
+   */
+  const holdBoth: Side | undefined = (() => {
+    if (!PLAYER_3D || bothNow || p.staggered || !STANCE_POSES.has(playerPose)) return undefined;
+    if (reapNow) return reapNow;
+    if (dualWielding(rightShown, leftShown)) return undefined;
+    if (!playback) return fight.player.lastBoth;
+    const act = playback.action;
+    const acted = act?.type === "block" ? true
+      : act?.type === "attack" ? reached(strikeStep("player"))
+      : act?.type === "rest" ? reached(restStep("player"))
+      : act?.type === "maneuver" ? reached(stepOf("maneuver", "player")) || reached(stepOf("dodge", "player"))
+      : false;
+    return acted ? fightRaw.player.lastBoth : playback.from.player.lastBoth;
+  })();
   const offSwingOf: Swing = playback
     ? (playback.steps.flatMap(st => st.events).find(ev => ev.kind === "attack" && ev.attacker === "player") as { offSwing?: Swing } | undefined)?.offSwing ?? swingOf
     : swingOf;
@@ -1788,11 +1929,14 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         flame: usurpStage === "focus" || usurpStage === "dash" ? usurpNow.target : usurpStage === "reveal" ? usurpNow.who : undefined,
       }
     : undefined;
-  const usurpTrails: { from: string; to: string; key: string; wisps?: number }[] = [];
+  const usurpTrails: { from: string; to: string; key: string; wisps?: number; toAnchor?: string }[] = [];
   if (usurpNow && usurpStage === "reveal") usurpTrails.push({ from: usurpNow.target, to: usurpNow.who, key: `${stepKey}-usurp` });
   // Played as an attack: the flame streams into his hand as the blow lands.
   const usurpHit = usurpAsAttack && playback?.phase === "impact" ? usurpOf(step) : undefined;
   if (usurpHit) usurpTrails.push({ from: usurpHit.target, to: usurpHit.who, key: `${stepKey}-usurp`, wisps: USURP_WISP_MS });
+  // Your Usurp Flame (the Waxed Torch's skill), landed: its target's flame streams into your raised torch, as the Warden's does into his hand.
+  const yourUsurp = playback?.phase === "impact" ? yourUsurpOf(step) : undefined;
+  if (yourUsurp) usurpTrails.push({ from: yourUsurp, to: "player", key: `${stepKey}-your-usurp`, wisps: USURP_WISP_MS, toAnchor: `player-${playback?.action?.hand ?? "right"}` });
   // A lit waxed dying as the turn ends: its flame streams into the Warden's hand.
   if (impact && step) {
     for (const ev of step.events) {
@@ -1821,6 +1965,12 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
         projectiles.push({ from: self ? ev.attacker : ev.target, to: self ? ev.attacker : ev.attacker, kind: ev.death > 0 ? "eternityDeath" : "eternity", where: self ? "self" : blocked ? "block" : "hit", key: `${stepKey}-${ev.attacker}-eternal${flames++}` });
       }
       if (ev.kind !== "attack") continue;
+      // Your Flame Blast (a Flaming torch's skill) lands as the Warden's flaming Flail Slam does: a dome of flame from where it strikes the floor, out
+      // past everyone in the fight (once, from the blow at the one it is aimed at).
+      if (ev.attacker === "player" && step.events.some(x => x.kind === "eternal" && x.attacker === "player" && x.effect === "flameblast")
+        && step.events.find(x => x.kind === "attack" && x.attacker === "player") === ev) {
+        projectiles.push({ from: "player", to: ev.target, kind: "impact", fiery: true, key: `${stepKey}-player-flameblast` });
+      }
       // A melee blow that was blocked clangs back at its attacker (a ranged one sends nothing back).
       if (ev.result === "blocked" && !ev.ranged) {
         projectiles.push({ from: ev.target, to: ev.attacker, kind: "clang", key: `${stepKey}-${ev.attacker}-clang` });
@@ -1969,7 +2119,8 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       mirror: leftLeading || kickMirrored,
       hook: hookNow,
       punch: PLAYER_3D && leftPunch && PUNCH_POSES.has(playerPose),
-      both: bothNow,
+      both: bothNow || !!holdBoth,
+      bothLead: holdBoth,
       offPose: offPoseNow,
       dead: youDead ? "pieces" : undefined,
       encased: playerSealed,
@@ -1977,11 +2128,21 @@ export function CombatScreen({ initial, opening, onRetry, onChangeLoadout, onExi
       waxCaked: (p.waxed || !!p.coated) && !p.staggered,
       // Your weapon flashes as its eternal effect takes hold (dark red, if it was paid in Death).
       eternalFlash: auraOf("player"),
-      weapon: p.weapon,
-      offWeapon: p.offhand.weapon,
-      offItem: p.offhand.weaponItem,
+      // (a weapon Reap has set aside is not drawn)
+      weapon: rightShown.tier,
+      offWeapon: leftShown.tier,
+      offItem: leftShown.item,
+      // (a Flaming Waxed Torch burns round its bulb, as the Warden's flail does)
+      fire: torchFire("right"),
+      offFire: torchFire("left"),
+      // (Reap: the axe a scythe from the moment its Rest goes through until its attack has struck; its attack a spin)
+      scythe: reapNow,
+      spin: reapSpin,
+      spinFrom: reapAttack && playerPose === "swing-left" ? REAP_SPIN * reapSign : undefined,
+      // (Reap's Rest, as it lands: its arch, the Openhand's backwards, from where it wound up)
+      swungFrom: reapRest && playerPose === "swing-left-up" && reached(restStep("player")) ? "sw-swing-l" : undefined,
       armor: p.armor,
-      weaponItem: p.weaponItem,
+      weaponItem: rightShown.item,
       armorItem: p.armorItem,
       headItem: p.headItem,
       // A sideways swing's level arc, as the blow lands (the poses are the two stances, which have no trail of their own).

@@ -26,7 +26,7 @@ export const waxedPatternText = (armed: boolean, flame = true) => [
   "      Slither Back: maneuver, retreat, *Close // backs off only when close",
   ...(flame ? [
     "      Clutch Flame: rest",
-    "      Flame Immolation: attack, deadly 0.25, ranged, *Lit, #fire, #shockwave   // a lit waxed bursts: it dies, and its fire hits everyone",
+    "      Flame Immolation: attack, deadly 0.25, ranged, *Lit, #fire, #area   // a lit waxed bursts: it dies, and its fire hits everyone",
   ] : []),
   "    stances:",
   `      Recover${flame ? ", Clutch Flame" : ""}                > Idle        > Drag Forward, Slither Back`,
@@ -44,7 +44,7 @@ export const waxedPatternText = (armed: boolean, flame = true) => [
 export const waxedPattern = (name: string, armed: boolean, flame = true) => parsePattern(name, waxedPatternText(armed, flame));
 
 export const WAXED: EnemyKind = {
-  name: "Waxed",
+  name: "Waxbound",
   maxHP: 5,
   weapon: "baseline",
   armor: "none",
@@ -55,7 +55,7 @@ export const WAXED: EnemyKind = {
   flags: { lit: false },
   statuses: [{ key: "lit", off: "Unlit", on: "Lit" }],
   // Its blows hurt and tire as much as a light one, barehanded.
-  pattern: waxedPattern("Waxed", false),
+  pattern: waxedPattern("Waxbound", false),
   modelPoses: { front: "w-t", back: "w-t-b" },
   stancePoses: {
     Idle: "w-idle",
@@ -107,8 +107,8 @@ const armedWaxed = (name: string, weapon: "light" | "heavy"): EnemyKind => ({
   pattern: waxedPattern(name, true),
 });
 
-export const WAXED_CHISEL = armedWaxed("Chisel Waxed", "light");
-export const WAXED_HAMMER = armedWaxed("Hammer Waxed", "heavy");
+export const WAXED_CHISEL = armedWaxed("Chisel Waxbound", "light");
+export const WAXED_HAMMER = armedWaxed("Hammer Waxbound", "heavy");
 
 /**
  * A Lit waxed (the dungeon's own): the same wretch with its flame already burning on its head, sealed whole in wax (a lit waxed always is). Unlike the

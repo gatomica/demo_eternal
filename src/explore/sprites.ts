@@ -233,12 +233,15 @@ function blobSvg(look: Look, weapons: Record<"left" | "mid" | "right", WeaponTie
 /** The Warden's picture: she is a good deal taller than the others (her kind's `scale`), and her wax arm is raised over her head. */
 const WARDEN_BOX = { x: -45, y: -45, size: 190 };
 
-/** The Penitent Warden as the map shows her, facing `facing`: still, in her stance as the fight opens (Wax Arm Raised), her candle out. */
-function wardenSvg(facing: Dir, px: number): string | undefined {
+/**
+ * The Penitent Warden as the map shows her, facing `facing`: still, in her stance as the fight opens (Wax Arm Raised), her candle out; or (`dead`)
+ * beaten, as the fight leaves her: kneeling in `wd-dead`, encased in wax.
+ */
+function wardenSvg(facing: Dir, px: number, dead = false): string | undefined {
   const kind = ENEMY_KINDS.warden;
   const pose = (kind.stancePoses["Wax Arm Raised"] ?? "wd-shoulder") as PoseName;
   const box = orbitBox(CAM, SPOT, W, H, kind.scale);
-  const html = renderToStaticMarkup(createElement(Warden3D, { pose, arm: "out", cam: CAM, at: SPOT, yaw: yawFor(facing, true), scale: kind.scale, w: W, h: H, box }));
+  const html = renderToStaticMarkup(createElement(Warden3D, { pose, arm: "out", dead, cam: CAM, at: SPOT, yaw: yawFor(facing, true), scale: kind.scale, w: W, h: H, box }));
   const open = /^<svg[^>]*?class="([^"]*)"[^>]*>/.exec(html);
   const end = html.lastIndexOf("</svg>");
   if (!open || end < 0) return undefined;
@@ -350,4 +353,9 @@ export function drawBlobSprite(
 /** The Penitent Warden standing on the map, the way her fight draws her (see `wardenSvg`). False until her picture is ready. */
 export function drawWardenSprite(g: CanvasRenderingContext2D, x: number, y: number, T: number, facing: Dir): boolean {
   return show(g, x, y, T, facing, "stand", "warden", WARDEN_BOX, (_f, px) => wardenSvg(facing, px));
+}
+
+/** The Warden's remains on the map: her 3D figure as a fight leaves her (`wardenSvg`'s `dead`), facing the camera. False until its picture is ready. */
+export function drawDeadWardenSprite(g: CanvasRenderingContext2D, x: number, y: number, T: number): boolean {
+  return show(g, x, y, T, "down", "stand", "warden-dead", WARDEN_BOX, (_f, px) => wardenSvg("down", px, true));
 }

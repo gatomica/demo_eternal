@@ -45,7 +45,7 @@ export function stanceAfter(act: PlayerAction, swing: Swing | undefined): Stance
   if (swing === "kick-right") return "lead-right";
   if (swing === "kick-left") return "lead-left";
   const st = stanceAfterRight(act, swing);
-  return act.type === "attack" && act.hand === "left" ? mirrorStance(st) : st;
+  return (act.type === "attack" || (act.type === "rest" && act.skill === "reap")) && act.hand === "left" ? mirrorStance(st) : st;
 }
 
 function stanceAfterRight(act: PlayerAction, swing: Swing | undefined): Stance {
@@ -57,6 +57,9 @@ function stanceAfterRight(act: PlayerAction, swing: Swing | undefined): Stance {
       return "low";
     case "maneuver":
       return act.target === "self" ? "lead-right" : "lead-left";
+    case "rest":
+      // (Reap's Rest is the right hand's Openhand played backwards: it lands as the Openhand winds up, in Left Lead; the left hand's, mirrored)
+      return act.skill === "reap" ? "lead-left" : "idle";
     default:
       return "idle";
   }

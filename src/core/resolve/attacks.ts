@@ -8,15 +8,15 @@
  * they hadn't done yet: their attack, a Block for later attacks, a Rest, a move.
  */
 import { kindOf } from "../bestiary";
-import { addDeath, BLOCK_SENDS_BACK, blowShares, bothHands, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, ITEM_SHARE, resistance, spendEternity, WEAPON_EFFECTS, WEAPON_LIKE, weaponOf } from "../rules";
-import type { CombatEvent, Enemy, Fighter, Player, Rng, WeaponTier } from "../types";
+import { addDeath, BLOCK_SENDS_BACK, blowShares, bothHands, dodgeFatigue, ETERNAL_EFFECT, ETERNAL_SHARE, ETERNITY_PRICE, flamed, ITEM_SHARE, resistance, spendEternity, WEAPON_EFFECTS, WEAPON_LIKE, weaponOf } from "../rules";
+import type { CombatEvent, Enemy, Fighter, Player, Rng, Side, WeaponTier } from "../types";
 import { bodyOf } from "../body";
-import { canTarget, handHasSkill, SKILL_RATE, SKILLS, skillPrice, skillStats } from "../skills";
+import { AREA_SHARE, bothHeld, canTarget, handHasSkill, type Skill, type SkillId, SKILL_RATE, SKILLS, skillPrice, skillStats } from "../skills";
 import { waxOn } from "./statuses";
 import type { Turn } from "./turn";
 
 export function resolveAttacks(t: Turn, rng: Rng) {
-  const { p, fighters } = t;
+  const { p } = t;
   const shuffled = <T,>(list: T[]): T[] => {
     const a = [...list];
     for (let i = a.length - 1; i > 0; i--) {
@@ -40,7 +40,10 @@ export function resolveAttacks(t: Turn, rng: Rng) {
 
   queue.forEach(({ attacker, target }) => {
     strike(t, attacker, target);
-    shockwave(t, attacker);
+    // An Area attack of yours (Reap, Flame Blast) goes on to hit everything else in its range, in the same beat: each its share, its own Block or dodge
+    // answering it (a body of several parts is hit once).
+    if (attacker === p) for (const other of areaTargets(t, target)) { if (t.out.has(p.id)) break; strike(t, p, other, true); }
+    areaSplash(t, attacker);
     // An attack it dies of (a lit waxed's Flame Immolation): it dies the moment its blast goes out, sealed in wax (no candle left to burn); it falls
     // with this very blow, below.
     if (attacker !== p && !t.cancelled.has(attacker.id)) {
@@ -53,22 +56,27 @@ export function resolveAttacks(t: Turn, rng: Rng) {
       }
     }
     // After each blow, falls and staggers take effect before the next one.
-    for (const f of fighters) {
-      if (t.out.has(f.id)) continue;
-      if (t.isReviving(f)) continue; // untouchable, and still at 0 until the revive lands
-      if (f.hp <= 0) {
-        t.out.add(f.id);
-        t.fallen.add(f.id);
-        t.emit({ kind: "fall", who: f.id });
-      } else if (!f.staggered && f.fatigue >= f.hp) {
-        t.out.add(f.id);
-        f.staggered = true;
-        t.emit({ kind: "stagger", who: f.id });
-      }
-    }
-    t.pinStaggered();
+    settleFalls(t);
     t.endStep(); // each attack is its own beat
   });
+}
+
+/** Falls and staggers take effect: anyone at 0 Health falls, anyone whose Fatigue has filled their Health staggers, and is out of the rest of the turn. */
+export function settleFalls(t: Turn) {
+  for (const f of t.fighters) {
+    if (t.out.has(f.id)) continue;
+    if (t.isReviving(f)) continue; // untouchable, and still at 0 until the revive lands
+    if (f.hp <= 0) {
+      t.out.add(f.id);
+      t.fallen.add(f.id);
+      t.emit({ kind: "fall", who: f.id });
+    } else if (!f.staggered && f.fatigue >= f.hp) {
+      t.out.add(f.id);
+      f.staggered = true;
+      t.emit({ kind: "stagger", who: f.id });
+    }
+  }
+  t.pinStaggered();
 }
 
 /**
@@ -83,12 +91,12 @@ function weaponNow(t: Turn, f: Fighter) {
     if (like || mods) return { ...WEAPON_LIKE[like ?? "plain"], ...mods };
   }
   // (both hands: the two weapons averaged, or the one held in both, or bare hands clasped)
-  if (f === t.p && (t.act?.type === "attack" || t.act?.type === "block") && t.act.both) {
-    const p = t.p;
-    return bothHands({ tier: p.weapon, item: p.weaponItem }, { tier: p.offhand.weapon, item: p.offhand.weaponItem });
-  }
+  // (while Reap holds the axe up in both hands, the axe alone: the other hand's weapon is set aside)
+  if (f === t.p && (t.act?.type === "attack" || t.act?.type === "block") && t.act.both) return bothHands(...bothHeld(t.p));
   const weight = t.weightOf(f), hand = t.handOf(f);
-  const w = weaponOf(weight, weight === hand.weapon ? hand.weaponItem : undefined);
+  const own = weaponOf(weight, weight === hand.weapon ? hand.weaponItem : undefined);
+  // (a Flaming Waxed Torch: its Poise and Deadly swapped)
+  const w = weight === hand.weapon && hand.flaming ? flamed(own) : own;
   // (a skill of yours may have modifiers of its own, over the weapon's: the Hookshot's)
   return f === t.p && t.act?.type === "attack" && t.act.skill ? skillStats(w, t.act.skill) : w;
 }
@@ -105,7 +113,6 @@ function blowOf(t: Turn, f: Fighter): { cost: number; damage: number; poise: num
   const w = blowShares(weaponNow(t, f), f === t.p && t.act?.type === "attack" && !!t.act.both);
   return { cost: w.cost * f.maxHP, damage: w.damage * f.maxHP, poise: w.poise * f.maxHP, deadly: w.deadly * f.maxHP };
 }
-const damageOf = (t: Turn, f: Fighter) => blowOf(t, f).damage;
 
 /** Took health damage this turn, which breaks a Rest (a multi-target enemy's whole body shares the damage). */
 function hurt(t: Turn, f: Fighter) {
@@ -130,28 +137,68 @@ function deathOn(t: Turn, target: Fighter, amount: number) {
   for (const mate of bodyOf(t.s.enemies, target)) addDeath(mate, amount);
 }
 
+/** An enemy's Area attack (`#area`: a lit waxed's Flame Immolation, the Warden's flaming Flail Slam and Flame Blast), while its kind lets it be one. */
+const enemyArea = (t: Turn, f: Fighter) => {
+  if (f === t.p) return false;
+  const self = f as Enemy;
+  return !!self.intent.tags?.includes("area") && kindOf(self).area?.(self) !== false;
+};
+
 /**
- * A shockwave (`#shockwave`: the Warden's flaming slam, his flame blast) sweeping through the fight
- * after the blow: the attacker's allies take it as a direct hit, with no Block or dodge to answer it.
+ * An enemy's Area attack sweeping through the fight after its blow: its allies take their share of it (`AREA_SHARE`: half its damage, Poise and
+ * Deadly, as the one it was aimed at did) as a direct hit, with no Block or dodge to answer it.
  */
-function shockwave(t: Turn, attacker: Fighter) {
-  if (attacker === t.p || t.cancelled.has(attacker.id)) return;
-  const self = attacker as Enemy;
-  if (!self.intent.tags?.includes("shockwave") || kindOf(self).shockwave?.(self) === false) return;
-  const dmg = damageOf(t, self);
+function areaSplash(t: Turn, attacker: Fighter) {
+  if (attacker === t.p || t.cancelled.has(attacker.id) || !enemyArea(t, attacker)) return;
+  const self = attacker as Enemy, blow = blowOf(t, self);
+  const dmg = blow.damage * AREA_SHARE, poise = blow.poise * AREA_SHARE, deadly = blow.deadly * AREA_SHARE;
   for (const ally of t.alive) {
     if (ally === self || !ally.alive || t.out.has(ally.id) || t.isReviving(ally)) continue;
     const resisted = dmg * resistance(ally);
-    t.tire(ally, resisted);
+    // (on one already staggered, that Fatigue is half as much damage: `tire`)
+    const burst = t.tire(ally, resisted + poise);
     const through = dmg - resisted;
-    if (through > 0) hurt(t, ally);
+    if (through + burst > 0) hurt(t, ally);
     loseHealth(t, ally, through);
-    t.emit({ kind: "splash", attacker: self.id, target: ally.id, damage: through, fatigue: resisted });
+    deathOn(t, ally, deadly);
+    t.emit({ kind: "splash", attacker: self.id, target: ally.id, damage: through + burst, fatigue: burst > 0 ? 0 : resisted + poise });
   }
 }
 
-/** One attack landing: passing through someone reviving, dodged, blocked, or hitting. */
-function strike(t: Turn, attacker: Fighter, target: Fighter) {
+/** Your skill this turn, if your Attack is one and can be made at this target (its hand holds the weapon that gives it; Reap's: the axe held up). */
+function skillAt(t: Turn, target: Fighter): SkillId | undefined {
+  const { p, act } = t;
+  if (act?.type !== "attack" || !act.skill || target === p) return undefined;
+  // (once it has been made, it is that skill for the rest of the turn: a Flame Blast puts out the flame that gave it, but still hits all it reaches)
+  if (t.skillPaid) return canTarget(t.skillPaid.skill, target as Enemy) ? t.skillPaid.skill : undefined;
+  const hand = act.hand ?? "right";
+  const has = act.skill === "reap" ? p.reaping === hand && !!act.both && handHasSkill(p, hand, "reap") : handHasSkill(p, hand, act.skill);
+  return has && canTarget(act.skill, target as Enemy) ? act.skill : undefined;
+}
+
+/**
+ * Everything else your Area attack hits, after the one it is aimed at (`Skill.area`): every other enemy on the front line (`close`), or every other
+ * enemy (`all`), as the turn started; one part of each body.
+ */
+function areaTargets(t: Turn, aimed: Fighter): Enemy[] {
+  const skill = t.cancelled.has(t.p.id) ? undefined : skillAt(t, aimed);
+  const area = skill ? SKILLS[skill].area : undefined;
+  if (!area) return [];
+  const seen = new Set(bodyOf(t.s.enemies, aimed).map(m => m.id));
+  const out: Enemy[] = [];
+  for (const e of t.alive) {
+    if (seen.has(e.id) || t.fallen.has(e.id) || !e.alive || (area === "close" && e.line !== "front")) continue;
+    for (const m of bodyOf(t.s.enemies, e)) seen.add(m.id);
+    out.push(e);
+  }
+  return out;
+}
+
+/**
+ * One attack landing: passing through someone reviving, dodged, blocked, or hitting. `more`: a further target of your Area attack (its cost and its
+ * skill's price already paid at the first; you do not close in on it).
+ */
+function strike(t: Turn, attacker: Fighter, target: Fighter, more = false) {
   const { p } = t;
   if (t.out.has(attacker.id)) {
     t.cancelled.add(attacker.id);
@@ -167,9 +214,14 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   const swing = attacker === p ? t.swing : undefined, offSwing = attacker === p ? t.offSwing : undefined;
   const weight = t.weightOf(attacker);
   const ranged = t.isRanged(attacker);
-  const blow = blowOf(t, attacker);
-  const dmg = blow.damage;
-  let cost = blow.cost;
+  // (An Area attack, yours or an enemy's: each target takes its share.)
+  const act = attacker === p ? t.act : undefined;
+  const skill = attacker === p ? skillAt(t, target) : undefined, sk = skill ? SKILLS[skill] : undefined;
+  const area = sk?.area || enemyArea(t, attacker) ? AREA_SHARE : 1;
+  const full = blowOf(t, attacker);
+  const blow = { ...full, damage: full.damage * area, poise: full.poise * area, deadly: full.deadly * area };
+  let dmg = blow.damage;
+  let cost = more ? 0 : blow.cost;
   // The Bronze Shortsword: attacking again right after an attack costs you less Fatigue, for Eternity.
   const hand = t.handOf(attacker);
   if (WEAPON_EFFECTS && attacker === p && hand.weaponItem === "shortsword" && hand.eternal && !t.s.config.dummy && p.lastAction === "attack" && isWeaponBlow(t, attacker, weight)) {
@@ -183,38 +235,49 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
       t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: "shortsword", damage: 0, fatigue: spared, ...paid });
     }
   }
-  // A skill: paid in full as the attack is made, whatever its effect turns out to do. Stab's cuts the attack's Fatigue cost by what was paid, one
-  // for one; the Hookshot's is put on its target as Fatigue, as its blow lands (below), unless it is dodged.
-  const act = attacker === p ? t.act : undefined;
-  const skill = act?.type === "attack" && act.skill && handHasSkill(p, act.hand ?? "right", act.skill) && (target === p || canTarget(act.skill, target as Enemy)) ? act.skill : undefined;
-  /** The skill's payment, and the Fatigue it is to put on the target (the Hookshot's), for when the blow lands. */
+  // A skill: paid in full as the attack is made (an Area attack's once, at its first target), whatever its effect turns out to do. Stab's cuts the
+  // attack's Fatigue cost by what was paid, one for one; the Hookshot's and Knockback's is put on the target as Fatigue as the blow lands (below),
+  // unless it is dodged; Usurp Flame's, Reap's and Flame Blast's goes into the blow's Death, Chisel's (half) into its damage. A Flame Blast puts the
+  // torch's flame out as it is made.
+  /** The skill's payment, and the Fatigue it is to put on the target (the Hookshot's, Knockback's), for when the blow lands. */
   let skillPaid: { spent: number; death: number; tire: number } | undefined;
-  if (skill) {
-    const price = skillPrice(p, skill);
-    // (The Model viewer's dummy fight spends nothing, as it takes nothing.)
-    const paid = t.s.config.dummy ? { spent: price, death: 0 } : spendEternity(p, price, !!hand.mortal);
-    const worth = (paid.spent + paid.death) * SKILL_RATE.fatigue;
-    if (SKILLS[skill].effect === "cheaper") {
-      cost = Math.max(0, cost - worth);
+  if (skill && sk) {
+    if (!more || !t.skillPaid) {
+      const price = skillPrice(p, skill);
+      // (The Model viewer's dummy fight spends nothing, as it takes nothing.)
+      const paid = t.s.config.dummy ? { spent: price, death: 0 } : spendEternity(p, price, !!hand.mortal);
+      t.skillPaid = { skill, ...paid, worth: paid.spent + paid.death };
+      if (sk.flame === "spend") setFlaming(t, act?.hand ?? "right", false);
+    }
+    const { worth } = t.skillPaid, paid = { spent: more ? 0 : t.skillPaid.spent, death: more ? 0 : t.skillPaid.death };
+    if (sk.effect === "cheaper") {
+      cost = Math.max(0, cost - worth * SKILL_RATE.fatigue);
       t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: skill, damage: 0, fatigue: worth, ...paid });
-    } else skillPaid = { ...paid, tire: worth };
+    } else if (sk.effect === "tire") skillPaid = { ...paid, tire: worth * SKILL_RATE.fatigue * area };
+    else {
+      if (sk.effect === "death") blow.deadly += worth * SKILL_RATE.death * area;
+      else dmg += worth * SKILL_RATE.damage * area;
+      t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: skill, damage: 0, fatigue: 0, ...paid });
+    }
   }
   /** The Hookshot's effect, as its blow lands (`tire`: the Fatigue it puts on the target; none when it is dodged). */
   const skillLands = (tire: number) => {
     if (!skill || !skillPaid) return;
-    t.tire(target, tire);
-    t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: skill, damage: 0, fatigue: tire, spent: skillPaid.spent, death: skillPaid.death });
+    const burst = t.tire(target, tire);
+    if (burst > 0) hurt(t, target);
+    t.emit({ kind: "eternal", attacker: p.id, target: target.id, effect: skill, damage: burst, fatigue: burst > 0 ? 0 : tire, spent: skillPaid.spent, death: skillPaid.death });
   };
-  /** A skill that pulls its target to you (the Hookshot) only does so if it lands. */
-  const pulling = !!skill && !!SKILLS[skill].pull;
+  /** A skill that pulls its target to you (the Hookshot), or knocks it away (Knockback), only does so if it lands. */
+  const pulling = !!sk?.pull, pushing = !!sk?.push;
   t.tire(attacker, cost);
-  // Melee closes in on the target; a ranged attacker stays where it is. An enemy striking an ally tries to step onto the ally's line
-  // instead (forward from the back line, back from the front; not at all when they share one), which your Maneuver can undo.
-  if (attacker === p) { if (!pulling) t.pulls.set(target.id, p.id); }
+  // Melee closes in on the target (yours: on the one it is aimed at, not the rest of an Area attack's; not a Knockback's, which drives it away); a
+  // ranged attacker stays where it is. An enemy striking an ally tries to step onto the ally's line instead (forward from the back line, back from
+  // the front; not at all when they share one), which your Maneuver can undo.
+  if (attacker === p) { if (!pulling && !pushing && !more && !ranged) t.pulls.set(target.id, p.id); }
   else if (target !== p) { if (!ranged && (target as Enemy).line !== (attacker as Enemy).line) t.shifts.set(attacker.id, (target as Enemy).line); }
   else if (!ranged) t.pulls.set(attacker.id, attacker.id);
-  // Whom it attacked with its weapon this turn, however the blow goes (for the Jagged Chisel, next turn; not a Hurl Wax).
-  if (isWeaponBlow(t, attacker, weight)) t.attacked.set(attacker.id, target.id);
+  // Whom it attacked with its weapon this turn, however the blow goes (for the Broken Shortsword, next turn; not a Hurl Wax).
+  if (isWeaponBlow(t, attacker, weight) && !more) t.attacked.set(attacker.id, target.id);
 
   if (t.isReviving(target)) {
     // The blow passes through someone reviving.
@@ -236,22 +299,30 @@ function strike(t: Turn, attacker: Fighter, target: Fighter) {
   // ranged one, made from afar, by nothing.
   const comes = blocking ? dmg * (1 - blockDefense(t, target)) : dmg;
   const resisted = comes * resistance(target);
-  t.tire(target, resisted);
+  // (On a target already staggered, the Fatigue a blow puts on it, the share its armor turns into Fatigue and its weapon's Poise below, is half as much
+  // damage instead: `tire`. It shows as the blow's damage.)
+  let burst = t.tire(target, resisted);
   const sentBack = blocking && !ranged ? comes * BLOCK_SENDS_BACK : 0;
   t.tire(attacker, sentBack);
   const through = comes - resisted;
-  if (through > 0) hurt(t, target);
   loseHealth(t, target, through);
   // Its weapon's Poise and Deadly land whether the blow is blocked or not (only a dodge escapes them): that much Fatigue, and that much Death.
-  t.tire(target, blow.poise);
+  burst += t.tire(target, blow.poise);
+  if (through + burst > 0) hurt(t, target);
   deathOn(t, target, blow.deadly);
   const self = attacker !== p ? (attacker as Enemy) : undefined;
-  t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through, fatigue: blocking ? sentBack : resisted + blow.poise, ranged, fire: !!self?.intent.tags?.includes("fire"), swing, offSwing });
+  t.emit({ kind: "attack", attacker: attacker.id, target: target.id, result: blocking ? "blocked" : "hit", damage: through + burst, fatigue: blocking ? sentBack : burst > 0 ? 0 : resisted + blow.poise, ranged, fire: !!self?.intent.tags?.includes("fire") || (isWeaponBlow(t, attacker, weight) && !!t.handOf(attacker).flaming), swing, offSwing });
   // (the Hookshot, landed, blocked or not: its Fatigue, and it pulls its target to you. It is an attack: a direct hit breaks a Rest, though it deals
   // no damage.)
   skillLands(skillPaid?.tire ?? 0);
   if (skill && !blocking) hurt(t, target);
   if (pulling) t.pulls.set(target.id, p.id);
+  if (pushing) t.pushes.set(target.id, p.id);
+  if (sk) skillLanded(t, sk, target, act?.hand ?? "right");
+  // The Waxed Torch waxes whatever it hits, blocked or not, and the Broken Shortsword what it hits directly, yours or an enemy's (as the Warden's flail
+  // does: on wax already there, a direct hit adds a little more Fatigue); not a Chisel, which chips the wax off, nor one already dead.
+  const waxes = waxingOf(t, attacker, weight);
+  if (waxes && (waxes === "any" || !blocking) && !sk?.unwax && target.hp > 0) waxOn(t, target, blocking ? 0 : through, !blocking);
   eternalEffect(t, attacker, target, blocking ? "blocked" : "hit", ranged, weight, dmg);
   // A blocked melee blow can still leave something (the Warden's flail leaves its wax).
   const onBlocked = self && blocking && !ranged ? kindOf(self).onBlocked : undefined;
@@ -293,6 +364,40 @@ function sealWhole(t: Turn, target: Fighter) {
   t.emit({ kind: "encased", who: e.id });
 }
 
+/** Your hand's Waxed Torch lit (Usurp Flame) or put out (Flame Blast). */
+function setFlaming(t: Turn, hand: Side, on: boolean) {
+  if (hand === "left") t.p.offhand = { ...t.p.offhand, flaming: on || undefined };
+  else t.p.flaming = on || undefined;
+}
+
+/**
+ * What your skill does once its blow has landed (hit or blocked; not dodged): Usurp Flame lights the torch, and seals whole in wax one that is always
+ * Waxed (dead on the spot); Chisel takes the Waxed status off, where it can come off.
+ */
+function skillLanded(t: Turn, sk: Skill, target: Fighter, hand: Side) {
+  if (sk.flame === "light") setFlaming(t, hand, true);
+  if (target === t.p) return;
+  const always = !!kindOf(target as Enemy).alwaysWaxed;
+  if (sk.seals && always && !t.s.config.dummy && !t.fallen.has(target.id)) sealWhole(t, target);
+  if (sk.unwax && !always) {
+    target.waxed = false;
+    target.coated = false;
+  }
+}
+
+/**
+ * Whether a blow's weapon waxes what it hits: the Waxed Torch any hit (`any`: blocked too), the Broken Shortsword a direct hit (`direct`). Only a blow
+ * of the weapon itself (not a class's own weapon, bare hands or a Kick, nor an action of an enemy's that is like another weapon), whoever holds it, and
+ * not while it is Flaming (the Warden's flail is a Waxed Torch by the rules: it waxes so too).
+ */
+function waxingOf(t: Turn, attacker: Fighter, weight: WeaponTier): "any" | "direct" | undefined {
+  if (weight !== "normal" && weight !== "light") return undefined;
+  if (t.handOf(attacker).weaponItem || !isWeaponBlow(t, attacker, weight)) return undefined;
+  // (a Flaming torch burns what it hits, and leaves no wax)
+  if (t.handOf(attacker).flaming) return undefined;
+  return weight === "normal" ? "any" : "direct";
+}
+
 /** How much more Fatigue a fighter's bar can take before it staggers: none once staggered, and what goes past a full bar is lost. */
 const fatigueRoom = (f: Fighter) => (f.staggered ? 0 : Math.max(0, f.hp - f.fatigue));
 
@@ -315,7 +420,7 @@ function isWeaponBlow(t: Turn, attacker: Fighter, weight: WeaponTier) {
 
 /**
  * An eternal weapon's effect, as its blow lands (only a blow of the weapon itself, see `isWeaponBlow`).
- * Each is a quarter of the blow's damage: the Jagged Chisel
+ * Each is a quarter of the blow's damage: the Broken Shortsword
  * bites that much deeper on a direct hit into whoever it also attacked last turn (hit or not); the Waxed Torch's direct hit tires
  * that much more and leaves the target looking waxed; the Brick Hammer tires a target that Blocks
  * it by that much. You pay for it with Eternity (twice over for damage), and what Eternity can't
@@ -334,7 +439,7 @@ function eternalEffect(t: Turn, attacker: Fighter, target: Fighter, result: "hit
   // The effects that bite deeper (damage): which one applies here, if any.
   const bites = (effect === "axe" && result === "hit" && t.p.lastAction === "rest") // the Barbarian's Axe: a direct hit after a turn of rest
     || (effect === "sickle" && result === "hit" && t.wasStaggered.has(target.id)) // the Nomadic Sickle: a direct hit on a staggered enemy
-    || (effect === "chisel" && result === "hit" && hand.lastTarget === target.id); // the Jagged Chisel: into whoever this hand also attacked last turn
+    || (effect === "chisel" && result === "hit" && hand.lastTarget === target.id); // the Broken Shortsword: into whoever this hand also attacked last turn
   if (bites) {
     // (Only the Health that is really left to take counts: what goes past it, or what the fight takes no Health for, is no effect, and costs nothing.)
     damage = Math.min(amount, damageRoom(t, target));

@@ -51,7 +51,7 @@ function SealingMark({ x, r, side, mid }: { x: number; r: number; side: number; 
 /**
  * Weapons are drawn along +x from the grip at (0, 0), +y across the blade. Each is the demo's one
  * weapon of its weight:
- *  - light, the **Jagged Chisel**: an imperial short sword snapped in half and ground into a chisel.
+ *  - light, the **Broken Shortsword**: an imperial short sword snapped in half and ground into a chisel.
  *    A ball pommel and a ridged grip, the bulky oval guard seen edge-on, a broad blade with its fuller,
  *    ending square, a ground bevel across its end; small nicks and chips along its edges, and wax
  *    from carving smeared on the blade in streaks, like paint.
@@ -102,7 +102,7 @@ export function Weapon({ tier, item }: { tier: WeaponTier; item?: WeaponItem }) 
   switch (tier) {
     case "baseline": // bare hands
       return null;
-    case "light": // the Jagged Chisel
+    case "light": // the Broken Shortsword
       return (
         <g>
           <circle cx={-5.4} cy={0} r={2.1} fill="#3d6b53" />
